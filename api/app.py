@@ -1,18 +1,44 @@
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqladmin import Admin, ModelView
+from sqlalchemy import text
 
-from pipeline.db import Brand, BrandRaw, Contact, SessionLocal, engine
+from pipeline.db import Base, Brand, BrandRaw, Contact, SessionLocal, engine
 from pipeline.seed import run_seed
+
+
+def _run_migrations() -> None:
+    """Create tables and apply column migrations before accepting requests."""
+    Base.metadata.create_all(bind=engine)
+    stmts = [
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS enrichment_failed BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS country TEXT",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS headquarters TEXT",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS location TEXT",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS operating_area TEXT",
+    ]
+    with engine.connect() as conn:
+        for sql in stmts:
+            conn.execute(text(sql))
+        conn.commit()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _run_migrations()
+    yield
+
 
 app = FastAPI(
     title="Sponsorship Pipeline",
     description="Brand database enrichment pipeline API",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # ---------------------------------------------------------------------------
@@ -24,11 +50,35 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
     name_plural = "Brands Raw"
     icon = "fa-solid fa-seedling"
     column_list = [
-        BrandRaw.id, BrandRaw.name, BrandRaw.niche, BrandRaw.source,
-        BrandRaw.enriched, BrandRaw.enrichment_failed, BrandRaw.created_at,
+        BrandRaw.id,
+        BrandRaw.name,
+        BrandRaw.niche,
+        BrandRaw.source,
+        BrandRaw.country,
+        BrandRaw.headquarters,
+        BrandRaw.location,
+        BrandRaw.operating_area,
+        BrandRaw.enriched,
+        BrandRaw.enrichment_failed,
+        BrandRaw.created_at,
     ]
-    column_searchable_list = [BrandRaw.name, BrandRaw.niche, BrandRaw.source]
-    column_sortable_list = [BrandRaw.id, BrandRaw.niche, BrandRaw.enriched, BrandRaw.created_at]
+    column_searchable_list = [
+        BrandRaw.name,
+        BrandRaw.niche,
+        BrandRaw.source,
+        BrandRaw.country,
+        BrandRaw.headquarters,
+        BrandRaw.location,
+        BrandRaw.operating_area,
+    ]
+    column_sortable_list = [
+        BrandRaw.id,
+        BrandRaw.niche,
+        BrandRaw.country,
+        BrandRaw.operating_area,
+        BrandRaw.enriched,
+        BrandRaw.created_at,
+    ]
     column_default_sort = [(BrandRaw.id, True)]
     page_size = 50
 
@@ -69,16 +119,38 @@ admin.add_view(BrandAdmin)
 admin.add_view(ContactAdmin)
 
 # ---------------------------------------------------------------------------
+# API models
+# ---------------------------------------------------------------------------
+
+class SeedRequest(BaseModel):
+    niche: str
+    use_google: bool = False
+    limit: int | None = None
+    country: str | None = None
+    headquarters: str | None = None
+    location: str | None = None
+    operating_area: str | None = None
+
+# ---------------------------------------------------------------------------
 # Background job store (in-memory; single-process)
 # ---------------------------------------------------------------------------
 
 _jobs: dict[str, dict] = {}
 
 
-def _run_seed_job(job_id: str, niche: str, use_google: bool, limit: int | None) -> None:
+def _run_seed_job(job_id: str, body: SeedRequest) -> None:
     db = SessionLocal()
     try:
-        inserted = run_seed(niche=niche, db=db, use_google=use_google, limit=limit)
+        inserted = run_seed(
+            niche=body.niche,
+            db=db,
+            use_google=body.use_google,
+            limit=body.limit,
+            country=body.country,
+            headquarters=body.headquarters,
+            location=body.location,
+            operating_area=body.operating_area,
+        )
         _jobs[job_id].update({"status": "done", "inserted": inserted})
     except Exception as exc:
         _jobs[job_id].update({"status": "error", "error": str(exc)})
@@ -95,15 +167,6 @@ app.mount("/static", StaticFiles(directory="frontend"), name="static")
 @app.get("/", include_in_schema=False)
 def frontend():
     return FileResponse("frontend/index.html")
-
-# ---------------------------------------------------------------------------
-# API models
-# ---------------------------------------------------------------------------
-
-class SeedRequest(BaseModel):
-    niche: str
-    use_google: bool = False
-    limit: int | None = None
 
 
 class SeedJobResponse(BaseModel):
@@ -136,7 +199,7 @@ def seed_niche(body: SeedRequest, background_tasks: BackgroundTasks):
     """
     job_id = str(uuid.uuid4())[:8]
     _jobs[job_id] = {"status": "running", "niche": body.niche, "inserted": 0}
-    background_tasks.add_task(_run_seed_job, job_id, body.niche, body.use_google, body.limit)
+    background_tasks.add_task(_run_seed_job, job_id, body)
     return SeedJobResponse(
         job_id=job_id,
         status="running",

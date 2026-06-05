@@ -29,10 +29,15 @@ logger = logging.getLogger(__name__)
 def ensure_tables():
     Base.metadata.create_all(bind=engine)
     with engine.connect() as conn:
-        conn.execute(text(
-            "ALTER TABLE brands_raw "
-            "ADD COLUMN IF NOT EXISTS enrichment_failed BOOLEAN NOT NULL DEFAULT false"
-        ))
+        migrations = [
+            "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS enrichment_failed BOOLEAN NOT NULL DEFAULT false",
+            "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS country TEXT",
+            "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS headquarters TEXT",
+            "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS location TEXT",
+            "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS operating_area TEXT",
+        ]
+        for sql in migrations:
+            conn.execute(text(sql))
         conn.commit()
 
 

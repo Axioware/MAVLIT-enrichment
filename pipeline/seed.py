@@ -49,33 +49,43 @@ def run_seed(
     db: Session,
     use_google: bool = False,
     limit: Optional[int] = None,
+    country: str | None = None,
+    headquarters: str | None = None,
+    location: str | None = None,
+    operating_area: str | None = None,
 ) -> int:
     """
     Seed brands_raw for any niche keyword.
-
-    Steps:
-      1. Fetch brand names from Wikidata SPARQL.
-      2. Optionally augment with Google SERP results.
-      3. Normalize each name (lowercase, strip legal suffixes).
-      4. Fuzzy-deduplicate within the batch (threshold=88).
-      5. Bulk-insert with ON CONFLICT DO NOTHING (idempotent).
-
-    Returns:
-        Count of newly inserted rows.
+    Optional geo filters narrow both the Wikidata SPARQL query and the
+    Wikipedia category search to a specific geography.
     """
+    geo = dict(
+        country=country,
+        headquarters=headquarters,
+        location=location,
+        operating_area=operating_area,
+    )
+    geo_active = {k: v for k, v in geo.items() if v}
+
     collected: list[dict] = []
+
+    def _row(name: str, source: str, source_url: str) -> dict:
+        return {"name": name, "niche": niche, "source": source, "source_url": source_url, **geo_active}
 
     # Source 1: Wikipedia
     logger.info("Scraping Wikipedia for niche '%s'", niche)
     try:
-        wiki_names = search_wikipedia_brands(niche)
+        wiki_names = search_wikipedia_brands(
+            niche,
+            country=country,
+            location=location,
+            operating_area=operating_area,
+        )
         for name in wiki_names:
-            collected.append({
-                "name": name,
-                "niche": niche,
-                "source": "wikipedia",
-                "source_url": f"https://en.wikipedia.org/wiki/Category:{niche.replace(' ', '_')}_brands",
-            })
+            collected.append(_row(
+                name, "wikipedia",
+                f"https://en.wikipedia.org/wiki/Category:{niche.replace(' ', '_')}_brands",
+            ))
         logger.info("Wikipedia yielded %d names", len(wiki_names))
     except Exception:
         logger.exception("Wikipedia scrape failed for niche '%s'", niche)
@@ -83,14 +93,15 @@ def run_seed(
     # Source 2: Wikidata
     logger.info("Querying Wikidata for niche '%s'", niche)
     try:
-        wikidata_names = search_wikidata_brands(niche)
+        wikidata_names = search_wikidata_brands(
+            niche,
+            country=country,
+            headquarters=headquarters,
+            location=location,
+            operating_area=operating_area,
+        )
         for name in wikidata_names:
-            collected.append({
-                "name": name,
-                "niche": niche,
-                "source": "wikidata",
-                "source_url": "https://query.wikidata.org/sparql",
-            })
+            collected.append(_row(name, "wikidata", "https://query.wikidata.org/sparql"))
         logger.info("Wikidata yielded %d names", len(wikidata_names))
     except Exception:
         logger.exception("Wikidata query failed for niche '%s'", niche)
@@ -102,12 +113,7 @@ def run_seed(
         try:
             serp_names = google_brand_search(query)
             for name in serp_names:
-                collected.append({
-                    "name": name,
-                    "niche": niche,
-                    "source": "google",
-                    "source_url": f"https://www.google.com/search?q={query}",
-                })
+                collected.append(_row(name, "google", f"https://www.google.com/search?q={query}"))
             logger.info("Google SERP yielded %d names", len(serp_names))
         except Exception:
             logger.exception("Google SERP failed for query '%s'", query)

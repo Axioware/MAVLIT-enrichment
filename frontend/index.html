@@ -231,6 +231,50 @@
       word-break: break-word;
     }
 
+    /* ── Geo filters ── */
+    .geo-section {
+      margin-top: 1.5rem;
+      border-top: 1px solid #1e293b;
+      padding-top: 1.25rem;
+    }
+    .geo-toggle {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      cursor: pointer;
+      user-select: none;
+      font-size: .85rem;
+      color: #64748b;
+      margin-bottom: .75rem;
+    }
+    .geo-toggle:hover { color: #94a3b8; }
+    .geo-toggle svg { transition: transform .2s; }
+    .geo-toggle.open svg { transform: rotate(90deg); }
+    .geo-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .85rem;
+      display: none;
+    }
+    .geo-grid.visible { display: grid; }
+    select {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: .75rem 1rem;
+      color: #f1f5f9;
+      font-size: .9rem;
+      outline: none;
+      transition: border-color .15s;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2364748b' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right .85rem center;
+    }
+    select:focus { border-color: #38bdf8; }
+    select option { background: #1e293b; }
+
     /* ── Job history ── */
     .history-list { list-style: none; }
     .history-item {
@@ -292,6 +336,119 @@
       </div>
     </div>
 
+    <!-- Geographic filters -->
+    <div class="geo-section">
+      <div class="geo-toggle" id="geoToggle" onclick="toggleGeo()">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+        Geographic filters
+        <span style="color:#334155;font-size:.75rem;margin-left:.25rem">(optional)</span>
+      </div>
+      <!-- Coverage hint -->
+      <p style="font-size:.75rem;color:#475569;margin-bottom:.85rem;line-height:1.5;">
+        <span style="color:#38bdf8;">P17 Country</span> has the highest Wikidata coverage.
+        P159 &amp; P276 use a two-hop join (HQ city → country) so enter a <em>country</em>, not a city.
+        P2541 Operating Area has lower coverage — combine with P17 for best results.
+      </p>
+
+      <div class="geo-grid" id="geoGrid">
+
+        <div class="form-group">
+          <label for="country">
+            Country
+            <span style="color:#38bdf8;text-transform:none;font-size:.7rem;margin-left:.25rem">P17 · best coverage</span>
+          </label>
+          <input list="country-list" id="country" type="text" placeholder="e.g. Pakistan" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label for="headquarters">
+            HQ Country
+            <span style="color:#475569;text-transform:none;font-size:.7rem;margin-left:.25rem">P159 → P17</span>
+          </label>
+          <input list="country-list" id="headquarters" type="text" placeholder="e.g. China" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label for="location">
+            Location Country
+            <span style="color:#475569;text-transform:none;font-size:.7rem;margin-left:.25rem">P276 → P17</span>
+          </label>
+          <input list="country-list" id="location" type="text" placeholder="e.g. United States" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label for="operatingArea">
+            Operating Area
+            <span style="color:#475569;text-transform:none;font-size:.7rem;margin-left:.25rem">P2541 · lower coverage</span>
+          </label>
+          <select id="operatingArea">
+            <option value="">Any region</option>
+            <optgroup label="Asia">
+              <option value="Asia">Asia (all)</option>
+              <option value="South Asia">South Asia</option>
+              <option value="East Asia">East Asia</option>
+              <option value="Southeast Asia">Southeast Asia</option>
+              <option value="Central Asia">Central Asia</option>
+              <option value="Middle East">Middle East</option>
+            </optgroup>
+            <optgroup label="Europe">
+              <option value="Europe">Europe (all)</option>
+              <option value="Western Europe">Western Europe</option>
+              <option value="Eastern Europe">Eastern Europe</option>
+              <option value="Northern Europe">Northern Europe</option>
+              <option value="Southern Europe">Southern Europe</option>
+            </optgroup>
+            <optgroup label="Americas">
+              <option value="North America">North America</option>
+              <option value="South America">South America</option>
+              <option value="Latin America">Latin America</option>
+              <option value="Caribbean">Caribbean</option>
+            </optgroup>
+            <optgroup label="Africa &amp; Oceania">
+              <option value="Africa">Africa (all)</option>
+              <option value="Sub-Saharan Africa">Sub-Saharan Africa</option>
+              <option value="North Africa">North Africa</option>
+              <option value="Oceania">Oceania</option>
+            </optgroup>
+            <option value="worldwide">Worldwide</option>
+          </select>
+        </div>
+
+      </div>
+    </div>
+
+    <datalist id="country-list">
+      <!-- South Asia -->
+      <option value="Pakistan"><option value="India"><option value="Bangladesh">
+      <option value="Sri Lanka"><option value="Nepal"><option value="Afghanistan">
+      <!-- East / Southeast Asia -->
+      <option value="China"><option value="Japan"><option value="South Korea">
+      <option value="Indonesia"><option value="Vietnam"><option value="Thailand">
+      <option value="Malaysia"><option value="Singapore"><option value="Philippines">
+      <option value="Myanmar"><option value="Cambodia"><option value="Taiwan">
+      <!-- Central Asia / Middle East -->
+      <option value="Saudi Arabia"><option value="United Arab Emirates"><option value="Turkey">
+      <option value="Iran"><option value="Iraq"><option value="Israel">
+      <option value="Kazakhstan"><option value="Uzbekistan">
+      <!-- Europe -->
+      <option value="United Kingdom"><option value="Germany"><option value="France">
+      <option value="Italy"><option value="Spain"><option value="Netherlands">
+      <option value="Sweden"><option value="Norway"><option value="Denmark">
+      <option value="Poland"><option value="Switzerland"><option value="Belgium">
+      <option value="Austria"><option value="Portugal"><option value="Greece">
+      <option value="Russia"><option value="Ukraine">
+      <!-- Americas -->
+      <option value="United States"><option value="Canada"><option value="Mexico">
+      <option value="Brazil"><option value="Argentina"><option value="Colombia">
+      <option value="Chile"><option value="Peru">
+      <!-- Africa -->
+      <option value="Nigeria"><option value="South Africa"><option value="Egypt">
+      <option value="Kenya"><option value="Ethiopia"><option value="Ghana">
+      <option value="Tanzania"><option value="Morocco">
+      <!-- Oceania -->
+      <option value="Australia"><option value="New Zealand">
+    </datalist>
+
     <button class="btn" id="seedBtn" onclick="startSeed()">
       <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
       Start Seeding
@@ -346,22 +503,41 @@
   // Render history on load
   renderHistory();
 
+  function toggleGeo() {
+    const toggle = document.getElementById('geoToggle');
+    const grid   = document.getElementById('geoGrid');
+    toggle.classList.toggle('open');
+    grid.classList.toggle('visible');
+  }
+
   function startSeed() {
     const niche = document.getElementById('niche').value.trim();
     if (!niche) {
       document.getElementById('niche').focus();
       return;
     }
-    const useGoogle = document.getElementById('useGoogle').checked;
-    const limitVal  = document.getElementById('limit').value;
-    const limit     = limitVal ? parseInt(limitVal) : null;
+    const useGoogle     = document.getElementById('useGoogle').checked;
+    const limitVal      = document.getElementById('limit').value;
+    const limit         = limitVal ? parseInt(limitVal) : null;
+    const country       = document.getElementById('country').value.trim() || null;
+    const headquarters  = document.getElementById('headquarters').value.trim() || null;
+    const location      = document.getElementById('location').value.trim() || null;
+    const operatingArea = document.getElementById('operatingArea').value || null;
 
     document.getElementById('seedBtn').disabled = true;
 
     fetch('/seed', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ niche, use_google: useGoogle, limit }),
+      body: JSON.stringify({
+        niche,
+        use_google: useGoogle,
+        limit,
+        country,
+        headquarters,
+        location,
+        operating_area: operatingArea,
+      }),
     })
       .then(r => r.json())
       .then(data => {

@@ -24,34 +24,58 @@ _HEADERS = {
     "User-Agent": "MAVLIT-enrichment/1.0 (https://github.com/axioware/MAVLIT-enrichment)",
 }
 
-# Category title substrings that indicate an article is about a person
+# ── Person markers ────────────────────────────────────────────────────────────
 _PERSON_CATEGORY_MARKERS = frozenset([
-    "living people",
-    " births",
-    " deaths",
-    "people from",
-    "people by",
-    "sportspeople",
-    "athletes",
-    "musicians",
-    "singers",
-    "actors",
-    "actresses",
-    "politicians",
-    "businesspeople",
-    "male ",
-    "female ",
+    # Biographical
+    "living people", " births", " deaths",
+    "people from", "people by", "people of",
+    # Occupations
+    "sportspeople", "athletes", "footballers", "cricketers", "basketballers",
+    "swimmers", "runners", "gymnasts",
+    "musicians", "singers", "rappers", "composers", "conductors",
+    "actors", "actresses", "film directors", "screenwriters",
+    "politicians", "businesspeople", "entrepreneurs",
+    "models (people)", "fashion models",
+    # Gender / biographical categories
+    "male ", "female ", " women", " men",
+    "fictional characters",
 ])
 
-# Category title substrings that indicate an article is about a product,
-# not a brand/company
+# ── Non-company / noise markers ───────────────────────────────────────────────
+# Mirrors Wikidata's _NOISE_DESC_TERMS: books, films, songs, awards, events …
+_NOISE_CATEGORY_MARKERS = frozenset([
+    # Publications
+    "books by", "novels by", "magazines", "newspapers", "journals",
+    "academic journals", "periodicals", "publications",
+    # Films / TV
+    "films by", "films set", "television series", "television films",
+    "animated series", "documentary films",
+    # Music (individual works, not labels)
+    " albums", " soundtracks", " singles", " songs by", " discographies",
+    # Awards / competitions
+    "award", "prize", "competition winners", "film festival",
+    # Events
+    "conferences", "summits", "festivals", "ceremonies", "fairs",
+    # Legislation / policy
+    "legislation", " laws", "regulations", "treaties",
+    # Other non-company
+    "fictional companies", "fictional organizations",
+    "video games", "video game franchises",
+])
+
+# ── Individual product markers ────────────────────────────────────────────────
 _PRODUCT_CATEGORY_MARKERS = frozenset([
     "products introduced",
     "product lines",
     "clothing items",
     "shoe models",
     "sneaker models",
-    "drink brands",   # individual drinks, not companies
+    "drink brands",
+    "food products",
+    "automobile models",
+    "mobile phones",
+    "tablet computers",
+    "software",        # individual software titles, not software companies
 ])
 
 
@@ -59,6 +83,14 @@ def _is_person(categories: list[str]) -> bool:
     for cat in categories:
         c = cat.lower()
         if any(marker in c for marker in _PERSON_CATEGORY_MARKERS):
+            return True
+    return False
+
+
+def _is_noise(categories: list[str]) -> bool:
+    for cat in categories:
+        c = cat.lower()
+        if any(marker in c for marker in _NOISE_CATEGORY_MARKERS):
             return True
     return False
 
@@ -109,6 +141,9 @@ def _filter_humans_and_products(titles: list[str]) -> list[str]:
                 if _is_person(cats):
                     logger.debug("Filtered (human): %s", title)
                     continue
+                if _is_noise(cats):
+                    logger.debug("Filtered (noise): %s", title)
+                    continue
                 if _is_product(cats):
                     logger.debug("Filtered (product): %s", title)
                     continue
@@ -125,8 +160,10 @@ def _filter_humans_and_products(titles: list[str]) -> list[str]:
 
 def _find_category_urls(niche: str, limit: int = 3) -> list[str]:
     """
-    Search Wikipedia namespace 14 (Category) for pages matching
-    '<niche> brands OR <niche> companies'. Returns up to `limit` URLs.
+    Search Wikipedia namespace 14 (Category) for brand/company category pages.
+    Geographic filtering is intentionally omitted here — Wikipedia's text
+    search produces completely wrong results when geo terms are appended.
+    Wikidata (structured data) handles geographic filtering instead.
     """
     resp = httpx.get(
         WIKI_API,
@@ -147,11 +184,7 @@ def _find_category_urls(niche: str, limit: int = 3) -> list[str]:
         f"{WIKI_BASE}/wiki/{r['title'].replace(' ', '_')}"
         for r in results
     ]
-    logger.info(
-        "Wikipedia category search for '%s' → %s",
-        niche,
-        [r["title"] for r in results],
-    )
+    logger.info("Wikipedia category search → %s", [r["title"] for r in results])
     return urls
 
 
@@ -200,11 +233,12 @@ def _scrape_category(
     return titles
 
 
-def search_wikipedia_brands(niche: str) -> list[str]:
+def search_wikipedia_brands(niche: str, **_kwargs) -> list[str]:
     """
     Find Wikipedia categories for `niche`, scrape all article titles,
     then filter out humans and individual products.
-    Returns clean brand/company names only.
+    Any extra kwargs (geo filters) are accepted but ignored —
+    geographic filtering is delegated to Wikidata's SPARQL query.
     """
     category_urls = _find_category_urls(niche)
     if not category_urls:

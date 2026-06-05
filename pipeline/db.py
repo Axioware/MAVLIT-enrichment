@@ -24,6 +24,10 @@ class BrandRaw(Base):
     source_url = Column(Text)
     enriched = Column(Boolean, nullable=False, server_default="false", default=False)
     enrichment_failed = Column(Boolean, nullable=False, server_default="false", default=False)
+    country = Column(Text)
+    headquarters = Column(Text)
+    location = Column(Text)
+    operating_area = Column(Text)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
@@ -73,6 +77,15 @@ def get_db():
         db.close()
 
 
+def _geo_fields(b: dict) -> dict:
+    return {
+        "country":        b.get("country"),
+        "headquarters":   b.get("headquarters"),
+        "location":       b.get("location"),
+        "operating_area": b.get("operating_area"),
+    }
+
+
 def insert_brand(db: Session, brand: dict) -> bool:
     stmt = (
         insert(BrandRaw)
@@ -82,6 +95,7 @@ def insert_brand(db: Session, brand: dict) -> bool:
             niche=brand["niche"],
             source=brand["source"],
             source_url=brand.get("source_url"),
+            **_geo_fields(brand),
         )
         .on_conflict_do_nothing(index_elements=["name_normalized"])
     )
@@ -104,6 +118,7 @@ def insert_brands_batch(db: Session, brands: list[dict]) -> int:
                     "niche": b["niche"],
                     "source": b["source"],
                     "source_url": b.get("source_url"),
+                    **_geo_fields(b),
                 }
                 for b in brands
             ]
