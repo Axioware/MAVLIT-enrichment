@@ -1,14 +1,22 @@
 """
 pipeline/sources/wikipedia.py
 
-Scrapes brand/company names from Wikipedia category pages.
+Scrapes brand/company names (and official websites) from Wikipedia category pages.
+
 Dynamically finds categories for any niche via the Wikipedia search API,
-scrapes them with BeautifulSoup, then filters out human/person articles
-and individual products by checking each article's Wikipedia categories
-in batches (50 titles per API call).
+scrapes them with BeautifulSoup, filters out human/person articles and
+individual products, then resolves each article's Wikidata item via
+wbgetentities to fetch P856 (official website).
+
+Return value:
+  list[dict] with keys:
+    name    – Wikipedia article title used as the brand/company name (str)
+    website – official website URL from Wikidata P856, or "" if not found (str)
+    domain  – bare domain extracted from website, or "" if not found (str)
 """
 
 import logging
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -18,7 +26,8 @@ from pipeline.http import fetch
 logger = logging.getLogger(__name__)
 
 WIKI_BASE = "https://en.wikipedia.org"
-WIKI_API = "https://en.wikipedia.org/w/api.php"
+WIKI_API  = "https://en.wikipedia.org/w/api.php"
+WD_API    = "https://www.wikidata.org/w/api.php"
 
 _HEADERS = {
     "User-Agent": "MAVLIT-enrichment/1.0 (https://github.com/axioware/MAVLIT-enrichment)",
@@ -42,7 +51,6 @@ _PERSON_CATEGORY_MARKERS = frozenset([
 ])
 
 # ── Non-company / noise markers ───────────────────────────────────────────────
-# Mirrors Wikidata's _NOISE_DESC_TERMS: books, films, songs, awards, events …
 _NOISE_CATEGORY_MARKERS = frozenset([
     # Publications
     "books by", "novels by", "magazines", "newspapers", "journals",
@@ -78,6 +86,30 @@ _PRODUCT_CATEGORY_MARKERS = frozenset([
     "software",        # individual software titles, not software companies
 ])
 
+
+# ── URL / domain helpers ──────────────────────────────────────────────────────
+
+def _extract_domain(url: str) -> str:
+    """
+    Extract a bare domain from a URL string.
+
+    Examples:
+      "https://www.nike.com/us/"  → "nike.com"
+      "http://example.co.uk"      → "example.co.uk"
+      ""                          → ""
+    """
+    if not url:
+        return ""
+    try:
+        netloc = urlparse(url).netloc
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        return netloc.lower()
+    except Exception:
+        return ""
+
+
+# ── Category / noise filters ──────────────────────────────────────────────────
 
 def _is_person(categories: list[str]) -> bool:
     for cat in categories:
@@ -158,6 +190,83 @@ def _filter_humans_and_products(titles: list[str]) -> list[str]:
     return valid
 
 
+# ── Wikidata P856 website lookup ──────────────────────────────────────────────
+
+def _fetch_websites_for_titles(titles: list[str]) -> dict[str, str]:
+    """
+    Given a list of Wikipedia article titles, return a mapping
+    { title → official_website_url } using Wikidata's wbgetentities API
+    with P856 (official website).
+
+    Works in batches of 50 (Wikidata API limit).
+    Titles with no P856 claim are absent from the returned dict.
+    On API failure for a batch, that batch is skipped (fail-safe).
+    """
+    website_map: dict[str, str] = {}
+
+    for i in range(0, len(titles), 50):
+        batch = titles[i : i + 50]
+        try:
+            resp = httpx.get(
+                WD_API,
+                params={
+                    "action":  "wbgetentities",
+                    "sites":   "enwiki",
+                    "titles":  "|".join(batch),
+                    "props":   "claims|sitelinks",
+                    "format":  "json",
+                },
+                headers=_HEADERS,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            entities = resp.json().get("entities", {})
+
+            for entity in entities.values():
+                # Skip "missing" placeholder entities (id starts with "-")
+                if entity.get("id", "").startswith("-"):
+                    continue
+
+                # Recover the canonical Wikipedia title for this entity
+                enwiki_title = (
+                    entity.get("sitelinks", {})
+                          .get("enwiki", {})
+                          .get("title", "")
+                )
+                if not enwiki_title:
+                    continue
+
+                # Extract the first P856 value (official website)
+                p856_claims = entity.get("claims", {}).get("P856", [])
+                if not p856_claims:
+                    continue
+
+                url = (
+                    p856_claims[0]
+                    .get("mainsnak", {})
+                    .get("datavalue", {})
+                    .get("value", "")
+                )
+                if url:
+                    website_map[enwiki_title] = url
+                    logger.debug("P856 resolved: %s → %s", enwiki_title, url)
+
+        except Exception:
+            logger.exception(
+                "Website (P856) fetch failed for Wikipedia titles batch %d–%d",
+                i, i + 50,
+            )
+            # Skip the batch — callers will get "" for these titles
+
+    logger.info(
+        "P856 website lookup: %d titles → %d with website",
+        len(titles), len(website_map),
+    )
+    return website_map
+
+
+# ── Wikipedia scraping helpers ────────────────────────────────────────────────
+
 def _find_category_urls(niche: str, limit: int = 3) -> list[str]:
     """
     Search Wikipedia namespace 14 (Category) for brand/company category pages.
@@ -168,12 +277,12 @@ def _find_category_urls(niche: str, limit: int = 3) -> list[str]:
     resp = httpx.get(
         WIKI_API,
         params={
-            "action": "query",
-            "list": "search",
-            "srsearch": f"{niche} brands OR {niche} companies",
+            "action":      "query",
+            "list":        "search",
+            "srsearch":    f"{niche} brands OR {niche} companies",
             "srnamespace": 14,
-            "srlimit": limit,
-            "format": "json",
+            "srlimit":     limit,
+            "format":      "json",
         },
         headers=_HEADERS,
         timeout=10,
@@ -233,10 +342,21 @@ def _scrape_category(
     return titles
 
 
-def search_wikipedia_brands(niche: str, **_kwargs) -> list[str]:
+# ── Main public function ──────────────────────────────────────────────────────
+
+def search_wikipedia_brands(niche: str, **_kwargs) -> list[dict]:
     """
     Find Wikipedia categories for `niche`, scrape all article titles,
-    then filter out humans and individual products.
+    filter out humans and individual products, then resolve official
+    websites from Wikidata P856.
+
+    Returns a list of dicts:
+      {
+        "name":    str,   # Wikipedia article title
+        "website": str,   # official website URL (P856), or ""
+        "domain":  str,   # bare domain extracted from website, or ""
+      }
+
     Any extra kwargs (geo filters) are accepted but ignored —
     geographic filtering is delegated to Wikidata's SPARQL query.
     """
@@ -257,4 +377,31 @@ def search_wikipedia_brands(niche: str, **_kwargs) -> list[str]:
         except Exception:
             logger.exception("Failed to scrape %s", url)
 
-    return _filter_humans_and_products(raw_titles)
+    # Deduplicate while preserving scrape order
+    seen: set[str] = set()
+    unique_titles: list[str] = []
+    for t in raw_titles:
+        if t not in seen:
+            seen.add(t)
+            unique_titles.append(t)
+
+    filtered_titles = _filter_humans_and_products(unique_titles)
+
+    # Resolve P856 official website for every surviving title
+    website_map = _fetch_websites_for_titles(filtered_titles)
+
+    records: list[dict] = []
+    for title in filtered_titles:
+        website = website_map.get(title, "")
+        records.append({
+            "name":    title,
+            "website": website,
+            "domain":  _extract_domain(website),
+        })
+
+    website_count = sum(1 for r in records if r["website"])
+    logger.info(
+        "Wikipedia returned %d companies for niche '%s' (%d with P856 website)",
+        len(records), niche, website_count,
+    )
+    return records

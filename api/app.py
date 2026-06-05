@@ -16,11 +16,15 @@ def _run_migrations() -> None:
     """Create tables and apply column migrations before accepting requests."""
     Base.metadata.create_all(bind=engine)
     stmts = [
+        # Original columns (idempotent)
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS enrichment_failed BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS country TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS headquarters TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS location TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS operating_area TEXT",
+        # Website / domain columns sourced from Wikidata P856
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS website TEXT",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS domain  TEXT",
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -46,18 +50,23 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 
 class BrandRawAdmin(ModelView, model=BrandRaw):
-    name = "Brand Raw"
-    name_plural = "Brands Raw"
-    icon = "fa-solid fa-seedling"
-    column_list = [
+    name         = "Brand Raw"
+    name_plural  = "Brands Raw"
+    icon         = "fa-solid fa-seedling"
+    column_list  = [
         BrandRaw.id,
         BrandRaw.name,
         BrandRaw.niche,
         BrandRaw.source,
+        # Website columns — populated from Wikidata P856 at seed time
+        BrandRaw.website,
+        BrandRaw.domain,
+        # Geo context
         BrandRaw.country,
         BrandRaw.headquarters,
         BrandRaw.location,
         BrandRaw.operating_area,
+        # Status
         BrandRaw.enriched,
         BrandRaw.enrichment_failed,
         BrandRaw.created_at,
@@ -66,6 +75,8 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.name,
         BrandRaw.niche,
         BrandRaw.source,
+        BrandRaw.website,
+        BrandRaw.domain,
         BrandRaw.country,
         BrandRaw.headquarters,
         BrandRaw.location,
@@ -74,6 +85,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
     column_sortable_list = [
         BrandRaw.id,
         BrandRaw.niche,
+        BrandRaw.domain,
         BrandRaw.country,
         BrandRaw.operating_area,
         BrandRaw.enriched,
@@ -84,32 +96,32 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
 
 
 class BrandAdmin(ModelView, model=Brand):
-    name = "Brand"
-    name_plural = "Brands"
-    icon = "fa-solid fa-building"
-    column_list = [
+    name         = "Brand"
+    name_plural  = "Brands"
+    icon         = "fa-solid fa-building"
+    column_list  = [
         Brand.id, Brand.name, Brand.domain, Brand.industry,
         Brand.employee_count, Brand.hq_country, Brand.enrichment_source,
         Brand.contacts_fetched, Brand.contacts_fetch_failed, Brand.enriched_at,
     ]
     column_searchable_list = [Brand.name, Brand.domain, Brand.industry]
-    column_sortable_list = [Brand.id, Brand.domain, Brand.contacts_fetched, Brand.enriched_at]
-    column_default_sort = [(Brand.id, True)]
+    column_sortable_list   = [Brand.id, Brand.domain, Brand.contacts_fetched, Brand.enriched_at]
+    column_default_sort    = [(Brand.id, True)]
     page_size = 50
 
 
 class ContactAdmin(ModelView, model=Contact):
-    name = "Contact"
-    name_plural = "Contacts"
-    icon = "fa-solid fa-user"
-    column_list = [
+    name         = "Contact"
+    name_plural  = "Contacts"
+    icon         = "fa-solid fa-user"
+    column_list  = [
         Contact.id, Contact.full_name, Contact.title, Contact.title_score,
         Contact.email, Contact.email_verified, Contact.email_status,
         Contact.email_guessed, Contact.outreach_sent, Contact.created_at,
     ]
     column_searchable_list = [Contact.full_name, Contact.email, Contact.title]
-    column_sortable_list = [Contact.id, Contact.title_score, Contact.email_verified, Contact.created_at]
-    column_default_sort = [(Contact.id, True)]
+    column_sortable_list   = [Contact.id, Contact.title_score, Contact.email_verified, Contact.created_at]
+    column_default_sort    = [(Contact.id, True)]
     page_size = 50
 
 
@@ -123,13 +135,13 @@ admin.add_view(ContactAdmin)
 # ---------------------------------------------------------------------------
 
 class SeedRequest(BaseModel):
-    niche: str
-    use_google: bool = False
-    limit: int | None = None
-    country: str | None = None
-    headquarters: str | None = None
-    location: str | None = None
-    operating_area: str | None = None
+    niche:          str
+    use_google:     bool        = False
+    limit:          int | None  = None
+    country:        str | None  = None
+    headquarters:   str | None  = None
+    location:       str | None  = None
+    operating_area: str | None  = None
 
 # ---------------------------------------------------------------------------
 # Background job store (in-memory; single-process)
@@ -170,17 +182,17 @@ def frontend():
 
 
 class SeedJobResponse(BaseModel):
-    job_id: str
-    status: str
-    niche: str
+    job_id:  str
+    status:  str
+    niche:   str
     message: str
 
 
 class SeedStatusResponse(BaseModel):
-    status: str
-    niche: str
+    status:   str
+    niche:    str
     inserted: int
-    error: str | None = None
+    error:    str | None = None
 
 # ---------------------------------------------------------------------------
 # Endpoints

@@ -1,11 +1,17 @@
 """
 pipeline/sources/wikidata.py
 
-Fetches brand/company names from Wikidata.
+Fetches brand/company names (and official websites) from Wikidata.
 
 Two-step process:
   1. wbsearchentities (×2) — niche keyword + "niche company" → QIDs
-  2. SPARQL — three complementary patterns with full subclass traversal
+  2. SPARQL — two complementary patterns with optional P856 website fetch
+
+Return value:
+  list[dict] with keys:
+    name    – company/brand label (str)
+    website – official website URL from P856, or "" if not found (str)
+    domain  – bare domain extracted from website, or "" if not found (str)
 
 Geo filter fixes (issues 1–2):
   P159 (headquarters) uses a two-hop join through P17, because headquarters
@@ -32,6 +38,7 @@ Location QID validation (issue 5):
 import logging
 import random
 import time
+from urllib.parse import urlparse
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -90,6 +97,29 @@ _GEO_PROP_LABELS = {
     "P276":  "location",
     "P2541": "operating area",
 }
+
+
+# ── URL / domain helpers ──────────────────────────────────────────────────────
+
+def _extract_domain(url: str) -> str:
+    """
+    Extract a bare domain from a URL string.
+
+    Examples:
+      "https://www.nike.com/us/"  → "nike.com"
+      "http://example.co.uk"      → "example.co.uk"
+      ""                          → ""
+    """
+    if not url:
+        return ""
+    try:
+        netloc = urlparse(url).netloc
+        # Strip leading 'www.' (and 'www2.', etc.) but preserve all other subdomains.
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        return netloc.lower()
+    except Exception:
+        return ""
 
 
 # ── HTTP helper ───────────────────────────────────────────────────────────────
@@ -254,14 +284,22 @@ def search_wikidata_brands(
     headquarters: str | None = None,
     location: str | None = None,
     operating_area: str | None = None,
-) -> list[str]:
+) -> list[dict]:
     """
-    Return deduplicated company/brand names from Wikidata for any niche.
+    Return deduplicated company/brand records from Wikidata for any niche.
+
+    Each record is a dict:
+      {
+        "name":    str,   # company label
+        "website": str,   # official website (P856), or "" if absent
+        "domain":  str,   # bare domain extracted from website, or ""
+      }
 
     SPARQL patterns:
-      1. P452 (industry) with wdt:P279* subclass walk      (fix #3)
-      2. P1056 (product) with wdt:P279* subclass walk      (fix #4)
-      3. Instance-of niche type, restricted to businesses  (fix #6)
+      A. P31 (instance-of) direct match
+      B. P452 (industry) / P1056 (product) direct match
+
+    Both patterns fetch P856 (official website) via OPTIONAL.
 
     Optional geo filters (OR logic, fixes #1 & #2):
       country        — P17   direct match
@@ -300,16 +338,14 @@ def search_wikidata_brands(
     vb = " ".join(capped)
 
     # ── Query A — direct wdt:P31 instance-of match ────────────────────────────
-    # Using wdt:P31 (direct, no P279* traversal) because wdt:P31/wdt:P279* with
-    # a variable class (?nicheClass) forces Wikidata to enumerate all
-    # entity-class pairs across millions of items → always 504 timeout.
-    # _search_qids already returns both parent types ("beverage company") and
-    # specific subtypes ("soft drink company") so direct P31 gives good coverage.
+    # P856 (official website) fetched via OPTIONAL so companies without a
+    # website are still returned (website will be "" in the output record).
     query_a = f"""
-SELECT DISTINCT ?company ?companyLabel WHERE {{
+SELECT DISTINCT ?company ?companyLabel ?website WHERE {{
   VALUES ?type {{ {vb} }}
   ?company wdt:P31 ?type .
   FILTER NOT EXISTS {{ ?company wdt:P31 wd:Q5 }}
+  OPTIONAL {{ ?company wdt:P856 ?website . }}
   {geo_block}
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
 }}
@@ -317,21 +353,25 @@ LIMIT 500
 """
 
     # ── Query B — direct P452/P1056 industry/product match ───────────────────
-    # No traversal — direct VALUES match is fast even with the geo filter.
+    # P856 fetched here too so the two result sets share a uniform schema.
     query_b = f"""
-SELECT DISTINCT ?company ?companyLabel WHERE {{
+SELECT DISTINCT ?company ?companyLabel ?website WHERE {{
   {{
     {{ VALUES ?ind {{ {vb} }} ?company wdt:P452  ?ind . }}
     UNION
     {{ VALUES ?prd {{ {vb} }} ?company wdt:P1056 ?prd . }}
   }}
+  OPTIONAL {{ ?company wdt:P856 ?website . }}
   {geo_block}
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
 }}
 LIMIT 500
 """
 
+    # QID → website: keep the first non-empty website per entity
+    qid_website: dict[str, str] = {}
     bindings: list[dict] = []
+
     for label, query in [("A (instance-of)", query_a), ("B (P452/P1056)", query_b)]:
         try:
             data = _get_json(SPARQL_ENDPOINT, {"query": query})
@@ -341,12 +381,13 @@ LIMIT 500
         except Exception:
             logger.exception("SPARQL query %s failed — skipping", label)
 
-    scored: list[tuple[int, str]] = []
+    scored: list[tuple[int, str, str]] = []   # (score, label, website)
     seen: set[str] = set()
 
     for item in bindings:
-        label = item.get("companyLabel", {}).get("value", "")
-        uri   = item.get("company",      {}).get("value", "")
+        label   = item.get("companyLabel", {}).get("value", "")
+        uri     = item.get("company",      {}).get("value", "")
+        website = item.get("website",      {}).get("value", "")
 
         if not label or not uri:
             continue
@@ -354,6 +395,11 @@ LIMIT 500
             continue
 
         qid = uri.split("/")[-1]
+
+        # Accumulate the first website seen for this QID across both queries
+        if website and qid not in qid_website:
+            qid_website[qid] = website
+
         if qid in seen:
             continue
         seen.add(qid)
@@ -366,9 +412,23 @@ LIMIT 500
         if any(x in label_lower for x in ["inc", "ltd", "corp", "group", "company", "co"]):
             score += 1
 
-        scored.append((score, label))
+        scored.append((score, label, qid))
 
+    # Sort by score, then build output records resolving website via qid_website
     scored.sort(key=lambda x: x[0], reverse=True)
-    names = [label for _, label in scored]
-    logger.info("Wikidata returned %d companies for niche '%s'", len(names), niche)
-    return names
+
+    records: list[dict] = []
+    for _score, name, qid in scored:
+        website = qid_website.get(qid, "")
+        records.append({
+            "name":    name,
+            "website": website,
+            "domain":  _extract_domain(website),
+        })
+
+    website_count = sum(1 for r in records if r["website"])
+    logger.info(
+        "Wikidata returned %d companies for niche '%s' (%d with P856 website)",
+        len(records), niche, website_count,
+    )
+    return records
