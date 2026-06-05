@@ -32,18 +32,29 @@ _HEADERS = {
 }
 
 
+_SPARQL_SLEEP = (8.0, 15.0)   # longer gap before each SPARQL call
+_API_SLEEP    = (1.5,  3.0)   # shorter gap before entity-search API calls
+_MAX_RETRY_AFTER = 60          # never honour a Retry-After above this
+
+
 @retry(
-    wait=wait_exponential(min=10, max=120),
-    stop=stop_after_attempt(5),
+    wait=wait_exponential(min=15, max=90),
+    stop=stop_after_attempt(4),
     reraise=True,
 )
 def _get_json(url: str, params: dict) -> dict:
-    time.sleep(random.uniform(3.0, 7.0))
+    # Be more polite to the SPARQL endpoint than to the search API
+    lo, hi = _SPARQL_SLEEP if "sparql" in url else _API_SLEEP
+    time.sleep(random.uniform(lo, hi))
+
     resp = httpx.get(url, params=params, headers=_HEADERS, timeout=60)
 
     if resp.status_code == 429:
-        wait_secs = int(resp.headers.get("Retry-After", 60))
-        logger.warning("Rate-limited (429) by Wikidata — waiting %ds", wait_secs)
+        raw = int(resp.headers.get("Retry-After", 30))
+        wait_secs = min(raw, _MAX_RETRY_AFTER)
+        logger.warning(
+            "Rate-limited (429) — Retry-After was %ds, capped to %ds", raw, wait_secs
+        )
         time.sleep(wait_secs)
         resp.raise_for_status()
 
@@ -104,33 +115,34 @@ def search_wikidata_brands(niche: str) -> list[str]:
 
     values_block = " ".join(f"wd:{item['id']}" for item in search_results)
     niche_keywords = [item.get("label", "").lower() for item in search_results]
-    print(f"Search results for '{niche}': {values_block} and keywords: {niche_keywords}")
+
+    # Patterns 1 & 2 use direct VALUES matching (no sub-traversal) to keep
+    # the query cheap. Pattern 3 keeps one wdt:P279* walk which is fast
+    # because it starts from a specific, small entity class.
     query = f"""
 SELECT DISTINCT ?company ?companyLabel WHERE {{
 
   {{
-    # Pattern 1: industry (P452) traces back to a niche QID
+    # Pattern 1: company whose industry (P452) is one of the niche QIDs
     ?company wdt:P31/wdt:P279* wd:Q4830453 .
+    VALUES ?industry {{ {values_block} }}
     ?company wdt:P452 ?industry .
-    VALUES ?rootIndustry {{ {values_block} }}
-    ?industry wdt:P279* ?rootIndustry .
   }}
 
   UNION
 
   {{
-    # Pattern 2: produces a product/service (P1056) in the niche
+    # Pattern 2: company that produces (P1056) something in the niche
     ?company wdt:P31/wdt:P279* wd:Q4830453 .
+    VALUES ?product {{ {values_block} }}
     ?company wdt:P1056 ?product .
-    VALUES ?rootProduct {{ {values_block} }}
-    ?product wdt:P279* ?rootProduct .
   }}
 
   UNION
 
   {{
-    # Pattern 3: IS a niche-specific entity type
-    # (record label, footwear brand, soft drink company, sports club, etc.)
+    # Pattern 3: company IS a niche-specific type
+    # (record label, footwear brand, soft drink company, sports club …)
     VALUES ?nicheClass {{ {values_block} }}
     ?company wdt:P31/wdt:P279* ?nicheClass .
     FILTER NOT EXISTS {{ ?company wdt:P31 wd:Q5 }}
@@ -140,7 +152,7 @@ SELECT DISTINCT ?company ?companyLabel WHERE {{
     bd:serviceParam wikibase:language "en".
   }}
 }}
-LIMIT 1000
+LIMIT 500
 """
 
     data = _get_json(SPARQL_ENDPOINT, {"query": query})

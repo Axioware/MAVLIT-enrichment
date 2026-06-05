@@ -11,6 +11,7 @@ Usage:
 """
 
 import logging
+from itertools import zip_longest
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -22,6 +23,25 @@ from pipeline.sources.wikidata import search_wikidata_brands
 from pipeline.sources.wikipedia import search_wikipedia_brands
 
 logger = logging.getLogger(__name__)
+
+
+def _interleave_sources(rows: list[dict]) -> list[dict]:
+    """
+    Round-robin rows by source so that no single source monopolises the
+    results when a limit is applied.
+
+    e.g. [wiki_1, wiki_2, ..., wiki_60, wd_1, ..., wd_30]
+    becomes [wiki_1, wd_1, wiki_2, wd_2, ..., wiki_30, wd_30, wiki_31, ...]
+    """
+    buckets: dict[str, list[dict]] = {}
+    for row in rows:
+        buckets.setdefault(row["source"], []).append(row)
+
+    _sentinel = object()
+    result: list[dict] = []
+    for group in zip_longest(*buckets.values(), fillvalue=_sentinel):
+        result.extend(item for item in group if item is not _sentinel)
+    return result
 
 
 def run_seed(
@@ -109,6 +129,10 @@ def run_seed(
             deduped_rows.append(row)
 
     logger.info("After deduplication: %d unique names", len(deduped_rows))
+
+    # Interleave by source so every source contributes proportionally
+    # when a limit is applied (prevents Wikipedia filling all limit slots).
+    deduped_rows = _interleave_sources(deduped_rows)
 
     if limit is not None:
         deduped_rows = deduped_rows[:limit]

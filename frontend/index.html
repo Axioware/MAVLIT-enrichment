@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MAVLIT Pipeline</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    /* ── Nav ── */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      height: 56px;
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+    }
+    .nav-brand {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      color: #38bdf8;
+      text-decoration: none;
+    }
+    .nav-link {
+      font-size: .85rem;
+      color: #94a3b8;
+      text-decoration: none;
+      padding: .35rem .75rem;
+      border-radius: 6px;
+      transition: background .15s, color .15s;
+    }
+    .nav-link:hover { background: #334155; color: #e2e8f0; }
+
+    /* ── Layout ── */
+    main {
+      max-width: 760px;
+      margin: 3rem auto;
+      padding: 0 1.5rem;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: .4rem;
+    }
+    .subtitle {
+      color: #64748b;
+      font-size: .9rem;
+      margin-bottom: 2.5rem;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 2rem;
+      margin-bottom: 1.5rem;
+    }
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #cbd5e1;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    .card-title svg { opacity: .7; }
+
+    /* ── Form ── */
+    label {
+      display: block;
+      font-size: .8rem;
+      font-weight: 500;
+      color: #94a3b8;
+      margin-bottom: .4rem;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+    }
+    input[type="text"],
+    input[type="number"] {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: .75rem 1rem;
+      color: #f1f5f9;
+      font-size: .95rem;
+      outline: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    input[type="text"]:focus,
+    input[type="number"]:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 3px rgba(56,189,248,.15);
+    }
+    input::placeholder { color: #475569; }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .form-group { margin-bottom: 0; }
+
+    /* toggle switch */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      margin-top: 1.25rem;
+    }
+    .toggle-label { font-size: .85rem; color: #94a3b8; text-transform: none; letter-spacing: 0; margin: 0; }
+    .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; inset: 0;
+      background: #334155; border-radius: 999px; cursor: pointer;
+      transition: background .2s;
+    }
+    .slider::before {
+      content: '';
+      position: absolute;
+      width: 16px; height: 16px;
+      left: 3px; bottom: 3px;
+      background: #94a3b8; border-radius: 50%;
+      transition: transform .2s, background .2s;
+    }
+    .switch input:checked + .slider { background: #0284c7; }
+    .switch input:checked + .slider::before { transform: translateX(18px); background: #fff; }
+
+    /* ── Button ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
+      margin-top: 1.75rem;
+      padding: .75rem 2rem;
+      background: #0284c7;
+      color: #fff;
+      font-size: .95rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background .15s, opacity .15s;
+    }
+    .btn:hover { background: #0369a1; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* ── Status ── */
+    #statusCard { display: none; }
+
+    .status-header {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      margin-bottom: 1rem;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      font-size: .75rem;
+      font-weight: 600;
+      padding: .25rem .65rem;
+      border-radius: 999px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .badge-running { background: rgba(251,191,36,.15); color: #fbbf24; }
+    .badge-done    { background: rgba(34,197,94,.15);  color: #22c55e; }
+    .badge-error   { background: rgba(239,68,68,.15);  color: #ef4444; }
+
+    .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(251,191,36,.3);
+      border-top-color: #fbbf24;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .stat {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 1rem;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #38bdf8;
+    }
+    .stat-label {
+      font-size: .75rem;
+      color: #475569;
+      margin-top: .25rem;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .error-box {
+      background: rgba(239,68,68,.08);
+      border: 1px solid rgba(239,68,68,.3);
+      border-radius: 8px;
+      padding: 1rem;
+      color: #fca5a5;
+      font-size: .85rem;
+      margin-top: 1rem;
+      word-break: break-word;
+    }
+
+    /* ── Job history ── */
+    .history-list { list-style: none; }
+    .history-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: .65rem 0;
+      border-bottom: 1px solid #1e293b;
+      font-size: .875rem;
+    }
+    .history-item:last-child { border-bottom: none; }
+    .history-niche { color: #cbd5e1; font-weight: 500; }
+    .history-meta  { color: #475569; font-size: .8rem; }
+    .history-right { display: flex; align-items: center; gap: .75rem; }
+    .history-count { color: #22c55e; font-weight: 600; font-size: .875rem; }
+    .empty-state { color: #334155; font-size: .875rem; text-align: center; padding: 1.5rem 0; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a class="nav-brand" href="/">⚡ MAVLIT Pipeline</a>
+  <a class="nav-link" href="/admin" target="_blank">Database Admin ↗</a>
+</nav>
+
+<main>
+  <h1>Brand Seeder</h1>
+  <p class="subtitle">Enter a niche to scrape brand names from Wikipedia &amp; Wikidata and insert them into the database.</p>
+
+  <!-- Seed form -->
+  <div class="card">
+    <p class="card-title">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      New seed job
+    </p>
+
+    <label for="niche">Niche</label>
+    <input
+      type="text"
+      id="niche"
+      placeholder="fashion, music, footwear, drinks, tech…"
+      autocomplete="off"
+    />
+
+    <div class="form-row">
+      <div class="form-group">
+        <label for="limit">Limit <span style="color:#475569;text-transform:none;">(optional)</span></label>
+        <input type="number" id="limit" placeholder="e.g. 50" min="1" />
+      </div>
+      <div class="form-group">
+        <label>&nbsp;</label>
+        <div class="toggle-row" style="height:46px">
+          <label class="switch">
+            <input type="checkbox" id="useGoogle" />
+            <span class="slider"></span>
+          </label>
+          <span class="toggle-label">Include Google SERP <span style="color:#475569;">(slow)</span></span>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn" id="seedBtn" onclick="startSeed()">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      Start Seeding
+    </button>
+  </div>
+
+  <!-- Status card -->
+  <div class="card" id="statusCard">
+    <div class="status-header">
+      <p class="card-title" style="margin:0">Job status</p>
+      <span class="badge badge-running" id="statusBadge">
+        <span class="spinner" id="spinner"></span>
+        <span id="statusText">running</span>
+      </span>
+      <span style="color:#475569;font-size:.8rem;margin-left:auto" id="jobIdLabel"></span>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-value" id="statNiche">—</div>
+        <div class="stat-label">Niche</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="statInserted">—</div>
+        <div class="stat-label">Inserted</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="statStatus">—</div>
+        <div class="stat-label">Status</div>
+      </div>
+    </div>
+
+    <div class="error-box" id="errorBox" style="display:none"></div>
+  </div>
+
+  <!-- History -->
+  <div class="card">
+    <p class="card-title">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
+      Recent jobs
+    </p>
+    <ul class="history-list" id="historyList">
+      <li class="empty-state">No jobs yet</li>
+    </ul>
+  </div>
+</main>
+
+<script>
+  let _pollTimer = null;
+  const history = JSON.parse(localStorage.getItem('mavlit_jobs') || '[]');
+
+  // Render history on load
+  renderHistory();
+
+  function startSeed() {
+    const niche = document.getElementById('niche').value.trim();
+    if (!niche) {
+      document.getElementById('niche').focus();
+      return;
+    }
+    const useGoogle = document.getElementById('useGoogle').checked;
+    const limitVal  = document.getElementById('limit').value;
+    const limit     = limitVal ? parseInt(limitVal) : null;
+
+    document.getElementById('seedBtn').disabled = true;
+
+    fetch('/seed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ niche, use_google: useGoogle, limit }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        showStatus({ status: 'running', niche, inserted: 0 }, data.job_id);
+        pollStatus(data.job_id, niche);
+      })
+      .catch(err => {
+        document.getElementById('seedBtn').disabled = false;
+        alert('Failed to start job: ' + err.message);
+      });
+  }
+
+  function pollStatus(jobId, niche) {
+    clearInterval(_pollTimer);
+    _pollTimer = setInterval(() => {
+      fetch(`/seed/status/${jobId}`)
+        .then(r => r.json())
+        .then(data => {
+          showStatus(data, jobId);
+          if (data.status !== 'running') {
+            clearInterval(_pollTimer);
+            document.getElementById('seedBtn').disabled = false;
+            saveHistory({ jobId, niche: data.niche, inserted: data.inserted, status: data.status, ts: Date.now() });
+          }
+        })
+        .catch(() => {});
+    }, 2000);
+  }
+
+  function showStatus(data, jobId) {
+    const card    = document.getElementById('statusCard');
+    const badge   = document.getElementById('statusBadge');
+    const spinner = document.getElementById('spinner');
+    const text    = document.getElementById('statusText');
+    const errBox  = document.getElementById('errorBox');
+
+    card.style.display = 'block';
+    document.getElementById('jobIdLabel').textContent = 'ID: ' + jobId;
+    document.getElementById('statNiche').textContent    = data.niche || '—';
+    document.getElementById('statInserted').textContent = data.inserted ?? '—';
+    document.getElementById('statStatus').textContent   = data.status;
+
+    badge.className = 'badge badge-' + data.status;
+    text.textContent = data.status;
+    spinner.style.display = data.status === 'running' ? 'block' : 'none';
+
+    if (data.status === 'error' && data.error) {
+      errBox.style.display = 'block';
+      errBox.textContent   = data.error;
+    } else {
+      errBox.style.display = 'none';
+    }
+  }
+
+  function saveHistory(entry) {
+    history.unshift(entry);
+    if (history.length > 20) history.length = 20;
+    localStorage.setItem('mavlit_jobs', JSON.stringify(history));
+    renderHistory();
+  }
+
+  function renderHistory() {
+    const list = document.getElementById('historyList');
+    if (!history.length) {
+      list.innerHTML = '<li class="empty-state">No jobs yet</li>';
+      return;
+    }
+    list.innerHTML = history.map(j => `
+      <li class="history-item">
+        <div>
+          <div class="history-niche">${esc(j.niche)}</div>
+          <div class="history-meta">${new Date(j.ts).toLocaleString()} &nbsp;·&nbsp; ID: ${esc(j.jobId)}</div>
+        </div>
+        <div class="history-right">
+          <span class="history-count">+${j.inserted}</span>
+          <span class="badge badge-${j.status}">${j.status}</span>
+        </div>
+      </li>
+    `).join('');
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // Allow Enter key in niche input
+  document.getElementById('niche').addEventListener('keydown', e => {
+    if (e.key === 'Enter') startSeed();
+  });
+</script>
+</body>
+</html>
