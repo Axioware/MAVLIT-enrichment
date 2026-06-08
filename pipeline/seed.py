@@ -5,9 +5,8 @@ Stage 1 of the brand enrichment pipeline.
 Populates brands_raw with raw brand names (and official websites) from
 Wikipedia + Wikidata (and optionally Google SERP).
 
-Both search_wikipedia_brands() and search_wikidata_brands() now return
-  list[dict] with keys: name, website, domain
-google_brand_search() still returns list[str].
+Deduplication priority: wikidata_id > domain > normalized name (fuzzy).
+Source confidence: wikidata=100, wikipedia=80, google=50.
 
 Usage:
     python main.py --niche footwear
@@ -20,7 +19,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from pipeline.db import insert_brands_batch
+from pipeline.db import SOURCE_CONFIDENCE, insert_brands_batch
 from pipeline.normalize import deduplicate, normalize
 from pipeline.sources.google_serp import google_brand_search
 from pipeline.sources.wikidata import search_wikidata_brands
@@ -74,16 +73,30 @@ def run_seed(
 
     collected: list[dict] = []
 
-    def _row(name: str, source: str, source_url: str,
-             website: str = "", domain: str = "") -> dict:
-        """Build a seed row, merging geo context + website/domain."""
+    def _row(
+        name: str,
+        source: str,
+        source_url: str,
+        website: str = "",
+        domain: str = "",
+        wikidata_id: str = "",
+        entity_type: str = "",
+        description: str = "",
+        wikipedia_url: str = "",
+    ) -> dict:
+        """Build a seed row, merging geo context and entity metadata."""
         return {
-            "name":       name,
-            "niche":      niche,
-            "source":     source,
-            "source_url": source_url,
-            "website":    website,
-            "domain":     domain,
+            "name":             name,
+            "niche":            niche,
+            "source":           source,
+            "source_url":       source_url,
+            "source_confidence": SOURCE_CONFIDENCE.get(source, 50),
+            "website":          website,
+            "domain":           domain,
+            "wikidata_id":      wikidata_id or None,
+            "entity_type":      entity_type or None,
+            "description":      description or None,
+            "wikipedia_url":    wikipedia_url or None,
             **geo_active,
         }
 
@@ -104,6 +117,9 @@ def run_seed(
                 source_url=cat_url,
                 website=rec.get("website", ""),
                 domain=rec.get("domain", ""),
+                wikidata_id=rec.get("wikidata_id", ""),
+                description=rec.get("description", ""),
+                wikipedia_url=rec.get("wikipedia_url", ""),
             ))
         logger.info(
             "Wikipedia yielded %d names (%d with website)",
@@ -130,6 +146,10 @@ def run_seed(
                 source_url="https://query.wikidata.org/sparql",
                 website=rec.get("website", ""),
                 domain=rec.get("domain", ""),
+                wikidata_id=rec.get("wikidata_id", ""),
+                entity_type=rec.get("entity_type", ""),
+                description=rec.get("description", ""),
+                wikipedia_url=rec.get("wikipedia_url", ""),
             ))
         logger.info(
             "Wikidata yielded %d names (%d with website)",
@@ -158,22 +178,39 @@ def run_seed(
 
     logger.info("Total raw names collected: %d", len(collected))
 
-    # ── Normalise & deduplicate ───────────────────────────────────────────────
+    # ── Normalise ────────────────────────────────────────────────────────────
     for row in collected:
         row["normalized"] = normalize(row["name"])
     collected = [r for r in collected if r["normalized"]]
 
-    deduped_names = set(deduplicate([r["normalized"] for r in collected]))
-
-    seen: set[str] = set()
-    deduped_rows: list[dict] = []
+    # ── Deduplicate — priority: wikidata_id > fuzzy name ─────────────────────
+    # Pass 1: group by wikidata_id; keep the highest-confidence source record.
+    qid_best: dict[str, dict] = {}
+    no_qid_rows: list[dict] = []
     for row in collected:
-        norm = row["normalized"]
-        if norm in deduped_names and norm not in seen:
-            seen.add(norm)
-            deduped_rows.append(row)
+        qid = row.get("wikidata_id")
+        if qid:
+            existing = qid_best.get(qid)
+            if not existing or row["source_confidence"] > existing["source_confidence"]:
+                qid_best[qid] = row
+        else:
+            no_qid_rows.append(row)
 
-    logger.info("After deduplication: %d unique names", len(deduped_rows))
+    # Pass 2: fuzzy name dedup on the remaining no-QID rows.
+    deduped_names = set(deduplicate([r["normalized"] for r in no_qid_rows]))
+    seen_norms: set[str] = set()
+    final_no_qid: list[dict] = []
+    for row in no_qid_rows:
+        norm = row["normalized"]
+        if norm in deduped_names and norm not in seen_norms:
+            seen_norms.add(norm)
+            final_no_qid.append(row)
+
+    deduped_rows = list(qid_best.values()) + final_no_qid
+    logger.info(
+        "After deduplication: %d unique entities (%d with Wikidata QID, %d without)",
+        len(deduped_rows), len(qid_best), len(final_no_qid),
+    )
 
     # Interleave by source so every source contributes proportionally
     # when a limit is applied (prevents Wikipedia filling all limit slots).

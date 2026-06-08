@@ -3,6 +3,13 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.sql import func
 
+# Source trust scores (higher = more authoritative)
+SOURCE_CONFIDENCE = {
+    "wikidata":  100,
+    "wikipedia": 80,
+    "google":    50,
+}
+
 from config import DATABASE_URL
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
@@ -16,22 +23,28 @@ class Base(DeclarativeBase):
 class BrandRaw(Base):
     __tablename__ = "brands_raw"
 
-    id               = Column(Integer, primary_key=True)
-    name             = Column(Text, nullable=False)
-    name_normalized  = Column(Text, unique=True, nullable=False)
-    niche            = Column(Text, nullable=False)
-    source           = Column(Text, nullable=False)
-    source_url       = Column(Text)
+    id                = Column(Integer, primary_key=True)
+    name              = Column(Text, nullable=False)
+    name_normalized   = Column(Text, unique=True, nullable=False)
+    # Wikidata identity — unique index managed via migration (allows multiple NULLs)
+    wikidata_id       = Column(Text)
+    entity_type       = Column(Text)
+    description       = Column(Text)
+    wikipedia_url     = Column(Text)
+    niche             = Column(Text, nullable=False)
+    source            = Column(Text, nullable=False)
+    source_confidence = Column(Integer)
+    source_url        = Column(Text)
     # Official website (P856) resolved at seed time
-    website          = Column(Text)
-    domain           = Column(Text)
-    enriched         = Column(Boolean, nullable=False, server_default="false", default=False)
-    enrichment_failed= Column(Boolean, nullable=False, server_default="false", default=False)
-    country          = Column(Text)
-    headquarters     = Column(Text)
-    location         = Column(Text)
-    operating_area   = Column(Text)
-    created_at       = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    website           = Column(Text)
+    domain            = Column(Text)
+    enriched          = Column(Boolean, nullable=False, server_default="false", default=False)
+    enrichment_failed = Column(Boolean, nullable=False, server_default="false", default=False)
+    country           = Column(Text)
+    headquarters      = Column(Text)
+    location          = Column(Text)
+    operating_area    = Column(Text)
+    created_at        = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
 class Brand(Base):
@@ -83,27 +96,37 @@ def get_db():
 def _brand_raw_fields(b: dict) -> dict:
     """Extract all optional BrandRaw fields from a seed row dict."""
     return {
-        "website":        b.get("website") or None,
-        "domain":         b.get("domain") or None,
-        "country":        b.get("country"),
-        "headquarters":   b.get("headquarters"),
-        "location":       b.get("location"),
-        "operating_area": b.get("operating_area"),
+        "wikidata_id":       b.get("wikidata_id") or None,
+        "entity_type":       b.get("entity_type") or None,
+        "description":       b.get("description") or None,
+        "wikipedia_url":     b.get("wikipedia_url") or None,
+        "source_confidence": b.get("source_confidence"),
+        "website":           b.get("website") or None,
+        "domain":            b.get("domain") or None,
+        "country":           b.get("country"),
+        "headquarters":      b.get("headquarters"),
+        "location":          b.get("location"),
+        "operating_area":    b.get("operating_area"),
+    }
+
+
+def _row_values(b: dict) -> dict:
+    return {
+        "name":            b["name"],
+        "name_normalized": b["normalized"],
+        "niche":           b["niche"],
+        "source":          b["source"],
+        "source_url":      b.get("source_url"),
+        **_brand_raw_fields(b),
     }
 
 
 def insert_brand(db: Session, brand: dict) -> bool:
     stmt = (
         insert(BrandRaw)
-        .values(
-            name=brand["name"],
-            name_normalized=brand["normalized"],
-            niche=brand["niche"],
-            source=brand["source"],
-            source_url=brand.get("source_url"),
-            **_brand_raw_fields(brand),
-        )
-        .on_conflict_do_nothing(index_elements=["name_normalized"])
+        .values(**_row_values(brand))
+        # on_conflict_do_nothing() with no args handles all unique constraints
+        .on_conflict_do_nothing()
     )
     result = db.execute(stmt)
     db.commit()
@@ -114,23 +137,27 @@ def insert_brands_batch(db: Session, brands: list[dict]) -> int:
     if not brands:
         return 0
 
-    stmt = (
-        insert(BrandRaw)
-        .values(
-            [
-                {
-                    "name":            b["name"],
-                    "name_normalized": b["normalized"],
-                    "niche":           b["niche"],
-                    "source":          b["source"],
-                    "source_url":      b.get("source_url"),
-                    **_brand_raw_fields(b),
-                }
-                for b in brands
-            ]
+    # Split: records with a Wikidata QID conflict on wikidata_id (primary identity);
+    # records without one fall back to name_normalized dedup.
+    with_qid    = [b for b in brands if b.get("wikidata_id")]
+    without_qid = [b for b in brands if not b.get("wikidata_id")]
+    total = 0
+
+    if with_qid:
+        stmt = (
+            insert(BrandRaw)
+            .values([_row_values(b) for b in with_qid])
+            .on_conflict_do_nothing(index_elements=["wikidata_id"])
         )
-        .on_conflict_do_nothing(index_elements=["name_normalized"])
-    )
-    result = db.execute(stmt)
+        total += db.execute(stmt).rowcount
+
+    if without_qid:
+        stmt = (
+            insert(BrandRaw)
+            .values([_row_values(b) for b in without_qid])
+            .on_conflict_do_nothing(index_elements=["name_normalized"])
+        )
+        total += db.execute(stmt).rowcount
+
     db.commit()
-    return result.rowcount
+    return total

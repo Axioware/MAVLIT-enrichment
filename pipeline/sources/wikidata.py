@@ -55,7 +55,7 @@ _HEADERS = {
 
 _SPARQL_SLEEP    = (8.0, 15.0)
 _API_SLEEP       = (1.5,  3.0)
-_MAX_RETRY_AFTER = 60
+_MAX_RETRY_AFTER = 120  # cap for Retry-After header; raised to handle 1 req/min outage rules
 
 # ── QID noise filter ─────────────────────────────────────────────────────────
 # Use PHRASES not single words — single words ("scientific", "series", "event")
@@ -137,11 +137,22 @@ def _get_json(url: str, params: dict) -> dict:
     resp = httpx.get(url, params=params, headers=_HEADERS, timeout=timeout)
 
     if resp.status_code == 429:
-        raw = int(resp.headers.get("Retry-After", 30))
+        raw = int(resp.headers.get("Retry-After", 60))
         wait_secs = min(raw, _MAX_RETRY_AFTER)
-        logger.warning("Rate-limited (429) — Retry-After %ds, capped to %ds", raw, wait_secs)
+        logger.warning(
+            "Rate-limited (429) — Retry-After %ds, waiting %ds then retrying",
+            raw, wait_secs,
+        )
         time.sleep(wait_secs)
-        resp.raise_for_status()
+        # Re-issue the request after the wait — don't just raise and let tenacity sleep
+        # again on top; the Retry-After sleep IS the correct backoff for this error.
+        resp = httpx.get(url, params=params, headers=_HEADERS, timeout=timeout)
+        if resp.status_code == 429:
+            logger.warning(
+                "Still rate-limited after %ds — escalating to tenacity exponential backoff",
+                wait_secs,
+            )
+            resp.raise_for_status()  # tenacity picks this up for further retries
 
     resp.raise_for_status()
     return resp.json()
@@ -286,13 +297,17 @@ def search_wikidata_brands(
     operating_area: str | None = None,
 ) -> list[dict]:
     """
-    Return deduplicated company/brand records from Wikidata for any niche.
+    Return deduplicated entity records from Wikidata for any niche.
 
     Each record is a dict:
       {
-        "name":    str,   # company label
-        "website": str,   # official website (P856), or "" if absent
-        "domain":  str,   # bare domain extracted from website, or ""
+        "wikidata_id":   str,   # Wikidata QID (e.g. "Q483551")
+        "name":          str,   # entity label
+        "website":       str,   # official website (P856), or ""
+        "domain":        str,   # bare domain extracted from website, or ""
+        "description":   str,   # Wikidata description (English), or ""
+        "entity_type":   str,   # label of first P31 (instance-of) value, or ""
+        "wikipedia_url": str,   # always "" — schema:about omitted (causes 500s on WDQS)
       }
 
     SPARQL patterns:
@@ -338,12 +353,15 @@ def search_wikidata_brands(
     vb = " ".join(capped)
 
     # ── Query A — direct wdt:P31 instance-of match ────────────────────────────
-    # P856 (official website) fetched via OPTIONAL so companies without a
-    # website are still returned (website will be "" in the output record).
+    # ?type IS the instanceOf, so BIND gives ?instanceOfLabel via the label service.
+    # ?companyDescription comes automatically from the label service.
+    # schema:about (Wikipedia URL) is intentionally omitted — it causes 500/timeout
+    # errors on Wikidata's SPARQL endpoint due to high cost of that triple pattern.
     query_a = f"""
-SELECT DISTINCT ?company ?companyLabel ?website WHERE {{
+SELECT DISTINCT ?company ?companyLabel ?companyDescription ?instanceOf ?instanceOfLabel ?website WHERE {{
   VALUES ?type {{ {vb} }}
   ?company wdt:P31 ?type .
+  BIND(?type AS ?instanceOf)
   FILTER NOT EXISTS {{ ?company wdt:P31 wd:Q5 }}
   OPTIONAL {{ ?company wdt:P856 ?website . }}
   {geo_block}
@@ -353,23 +371,25 @@ LIMIT 500
 """
 
     # ── Query B — direct P452/P1056 industry/product match ───────────────────
-    # P856 fetched here too so the two result sets share a uniform schema.
+    # P31 is OPTIONAL here (no VALUES constraint), so multiple P31 values can
+    # produce duplicate rows per entity — handled in Python by taking the first
+    # non-empty value for each field per QID.
+    # schema:about omitted for the same reason as Query A.
     query_b = f"""
-SELECT DISTINCT ?company ?companyLabel ?website WHERE {{
+SELECT DISTINCT ?company ?companyLabel ?companyDescription ?instanceOf ?instanceOfLabel ?website WHERE {{
   {{
     {{ VALUES ?ind {{ {vb} }} ?company wdt:P452  ?ind . }}
     UNION
     {{ VALUES ?prd {{ {vb} }} ?company wdt:P1056 ?prd . }}
   }}
   OPTIONAL {{ ?company wdt:P856 ?website . }}
+  OPTIONAL {{ ?company wdt:P31 ?instanceOf . }}
   {geo_block}
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
 }}
 LIMIT 500
 """
 
-    # QID → website: keep the first non-empty website per entity
-    qid_website: dict[str, str] = {}
     bindings: list[dict] = []
 
     for label, query in [("A (instance-of)", query_a), ("B (P452/P1056)", query_b)]:
@@ -381,13 +401,19 @@ LIMIT 500
         except Exception:
             logger.exception("SPARQL query %s failed — skipping", label)
 
-    scored: list[tuple[int, str, str]] = []   # (score, label, website)
+    # Accumulate per-QID metadata (first non-empty value wins for each field).
+    # Query B may produce multiple rows per QID (different P31 values), so we
+    # collect across all rows before deciding which entities to include.
+    qid_meta: dict[str, dict] = {}
+    scored: list[tuple[int, str, str]] = []   # (score, label, qid)
     seen: set[str] = set()
 
     for item in bindings:
-        label   = item.get("companyLabel", {}).get("value", "")
-        uri     = item.get("company",      {}).get("value", "")
-        website = item.get("website",      {}).get("value", "")
+        label       = item.get("companyLabel",       {}).get("value", "")
+        uri         = item.get("company",             {}).get("value", "")
+        website     = item.get("website",             {}).get("value", "")
+        description = item.get("companyDescription",  {}).get("value", "")
+        inst_label  = item.get("instanceOfLabel",     {}).get("value", "")
 
         if not label or not uri:
             continue
@@ -396,9 +422,13 @@ LIMIT 500
 
         qid = uri.split("/")[-1]
 
-        # Accumulate the first website seen for this QID across both queries
-        if website and qid not in qid_website:
-            qid_website[qid] = website
+        # Merge metadata — first non-empty value per field
+        meta = qid_meta.setdefault(qid, {
+            "website": "", "description": "", "entity_type": "",
+        })
+        if website     and not meta["website"]:     meta["website"]     = website
+        if description and not meta["description"]: meta["description"] = description
+        if inst_label  and not meta["entity_type"]: meta["entity_type"] = inst_label
 
         if qid in seen:
             continue
@@ -414,21 +444,25 @@ LIMIT 500
 
         scored.append((score, label, qid))
 
-    # Sort by score, then build output records resolving website via qid_website
     scored.sort(key=lambda x: x[0], reverse=True)
 
     records: list[dict] = []
     for _score, name, qid in scored:
-        website = qid_website.get(qid, "")
+        meta = qid_meta.get(qid, {})
+        website = meta.get("website", "")
         records.append({
-            "name":    name,
-            "website": website,
-            "domain":  _extract_domain(website),
+            "wikidata_id":   qid,
+            "name":          name,
+            "website":       website,
+            "domain":        _extract_domain(website),
+            "description":   meta.get("description", ""),
+            "entity_type":   meta.get("entity_type", ""),
+            "wikipedia_url": "",   # not fetched via SPARQL; schema:about causes 500s
         })
 
     website_count = sum(1 for r in records if r["website"])
     logger.info(
-        "Wikidata returned %d companies for niche '%s' (%d with P856 website)",
+        "Wikidata returned %d entities for niche '%s' (%d with P856 website)",
         len(records), niche, website_count,
     )
     return records

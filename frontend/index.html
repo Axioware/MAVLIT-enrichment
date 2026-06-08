@@ -291,6 +291,23 @@
     .history-right { display: flex; align-items: center; gap: .75rem; }
     .history-count { color: #22c55e; font-weight: 600; font-size: .875rem; }
     .empty-state { color: #334155; font-size: .875rem; text-align: center; padding: 1.5rem 0; }
+
+    .btn-ghost {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      margin-top: 1.25rem;
+      padding: .5rem 1.1rem;
+      background: transparent;
+      color: #475569;
+      font-size: .8rem;
+      font-weight: 500;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .btn-ghost:hover { background: rgba(239,68,68,.08); color: #f87171; border-color: rgba(239,68,68,.4); }
   </style>
 </head>
 <body>
@@ -493,6 +510,10 @@
     <ul class="history-list" id="historyList">
       <li class="empty-state">No jobs yet</li>
     </ul>
+    <button class="btn-ghost" id="clearBtn" onclick="clearHistory()" style="display:none">
+      <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+      Clear history
+    </button>
   </div>
 </main>
 
@@ -600,11 +621,14 @@
   }
 
   function renderHistory() {
-    const list = document.getElementById('historyList');
+    const list    = document.getElementById('historyList');
+    const clearBtn = document.getElementById('clearBtn');
     if (!history.length) {
       list.innerHTML = '<li class="empty-state">No jobs yet</li>';
+      clearBtn.style.display = 'none';
       return;
     }
+    clearBtn.style.display = 'inline-flex';
     list.innerHTML = history.map(j => `
       <li class="history-item">
         <div>
@@ -617,6 +641,12 @@
         </div>
       </li>
     `).join('');
+  }
+
+  function clearHistory() {
+    history.length = 0;
+    localStorage.removeItem('mavlit_jobs');
+    renderHistory();
   }
 
   function esc(s) {

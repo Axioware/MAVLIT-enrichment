@@ -190,19 +190,19 @@ def _filter_humans_and_products(titles: list[str]) -> list[str]:
     return valid
 
 
-# ── Wikidata P856 website lookup ──────────────────────────────────────────────
+# ── Wikidata entity lookup for Wikipedia titles ───────────────────────────────
 
-def _fetch_websites_for_titles(titles: list[str]) -> dict[str, str]:
+def _fetch_wikidata_for_titles(titles: list[str]) -> dict[str, dict]:
     """
-    Given a list of Wikipedia article titles, return a mapping
-    { title → official_website_url } using Wikidata's wbgetentities API
-    with P856 (official website).
+    Given Wikipedia article titles, return a mapping
+    { title → {wikidata_id, website, description} }
+    using Wikidata's wbgetentities API (P856 for website, descriptions for text).
 
     Works in batches of 50 (Wikidata API limit).
-    Titles with no P856 claim are absent from the returned dict.
+    Titles with no Wikidata entity are absent from the returned dict.
     On API failure for a batch, that batch is skipped (fail-safe).
     """
-    website_map: dict[str, str] = {}
+    result: dict[str, dict] = {}
 
     for i in range(0, len(titles), 50):
         batch = titles[i : i + 50]
@@ -213,7 +213,7 @@ def _fetch_websites_for_titles(titles: list[str]) -> dict[str, str]:
                     "action":  "wbgetentities",
                     "sites":   "enwiki",
                     "titles":  "|".join(batch),
-                    "props":   "claims|sitelinks",
+                    "props":   "claims|sitelinks|descriptions",
                     "format":  "json",
                 },
                 headers=_HEADERS,
@@ -223,11 +223,9 @@ def _fetch_websites_for_titles(titles: list[str]) -> dict[str, str]:
             entities = resp.json().get("entities", {})
 
             for entity in entities.values():
-                # Skip "missing" placeholder entities (id starts with "-")
                 if entity.get("id", "").startswith("-"):
                     continue
 
-                # Recover the canonical Wikipedia title for this entity
                 enwiki_title = (
                     entity.get("sitelinks", {})
                           .get("enwiki", {})
@@ -236,33 +234,44 @@ def _fetch_websites_for_titles(titles: list[str]) -> dict[str, str]:
                 if not enwiki_title:
                     continue
 
-                # Extract the first P856 value (official website)
-                p856_claims = entity.get("claims", {}).get("P856", [])
-                if not p856_claims:
-                    continue
+                entity_id = entity.get("id", "")
 
-                url = (
-                    p856_claims[0]
-                    .get("mainsnak", {})
-                    .get("datavalue", {})
-                    .get("value", "")
+                p856_claims = entity.get("claims", {}).get("P856", [])
+                url = ""
+                if p856_claims:
+                    url = (
+                        p856_claims[0]
+                        .get("mainsnak", {})
+                        .get("datavalue", {})
+                        .get("value", "")
+                    )
+
+                description = (
+                    entity.get("descriptions", {})
+                          .get("en", {})
+                          .get("value", "")
                 )
+
+                result[enwiki_title] = {
+                    "wikidata_id": entity_id,
+                    "website":     url,
+                    "description": description,
+                }
                 if url:
-                    website_map[enwiki_title] = url
-                    logger.debug("P856 resolved: %s → %s", enwiki_title, url)
+                    logger.debug("P856 resolved: %s → %s (%s)", enwiki_title, url, entity_id)
 
         except Exception:
             logger.exception(
-                "Website (P856) fetch failed for Wikipedia titles batch %d–%d",
-                i, i + 50,
+                "Wikidata fetch failed for Wikipedia titles batch %d–%d", i, i + 50,
             )
-            # Skip the batch — callers will get "" for these titles
 
     logger.info(
-        "P856 website lookup: %d titles → %d with website",
-        len(titles), len(website_map),
+        "Wikidata entity lookup: %d titles → %d resolved (%d with website)",
+        len(titles),
+        len(result),
+        sum(1 for v in result.values() if v["website"]),
     )
-    return website_map
+    return result
 
 
 # ── Wikipedia scraping helpers ────────────────────────────────────────────────
@@ -347,14 +356,16 @@ def _scrape_category(
 def search_wikipedia_brands(niche: str, **_kwargs) -> list[dict]:
     """
     Find Wikipedia categories for `niche`, scrape all article titles,
-    filter out humans and individual products, then resolve official
-    websites from Wikidata P856.
+    filter out humans and individual products, then resolve Wikidata metadata.
 
     Returns a list of dicts:
       {
-        "name":    str,   # Wikipedia article title
-        "website": str,   # official website URL (P856), or ""
-        "domain":  str,   # bare domain extracted from website, or ""
+        "wikidata_id":   str,   # Wikidata QID, or ""
+        "name":          str,   # Wikipedia article title
+        "website":       str,   # official website URL (P856), or ""
+        "domain":        str,   # bare domain, or ""
+        "description":   str,   # Wikidata English description, or ""
+        "wikipedia_url": str,   # canonical English Wikipedia URL
       }
 
     Any extra kwargs (geo filters) are accepted but ignored —
@@ -377,7 +388,6 @@ def search_wikipedia_brands(niche: str, **_kwargs) -> list[dict]:
         except Exception:
             logger.exception("Failed to scrape %s", url)
 
-    # Deduplicate while preserving scrape order
     seen: set[str] = set()
     unique_titles: list[str] = []
     for t in raw_titles:
@@ -387,21 +397,24 @@ def search_wikipedia_brands(niche: str, **_kwargs) -> list[dict]:
 
     filtered_titles = _filter_humans_and_products(unique_titles)
 
-    # Resolve P856 official website for every surviving title
-    website_map = _fetch_websites_for_titles(filtered_titles)
+    wikidata_map = _fetch_wikidata_for_titles(filtered_titles)
 
     records: list[dict] = []
     for title in filtered_titles:
-        website = website_map.get(title, "")
+        meta    = wikidata_map.get(title, {})
+        website = meta.get("website", "")
         records.append({
-            "name":    title,
-            "website": website,
-            "domain":  _extract_domain(website),
+            "wikidata_id":   meta.get("wikidata_id", ""),
+            "name":          title,
+            "website":       website,
+            "domain":        _extract_domain(website),
+            "description":   meta.get("description", ""),
+            "wikipedia_url": f"{WIKI_BASE}/wiki/{title.replace(' ', '_')}",
         })
 
     website_count = sum(1 for r in records if r["website"])
     logger.info(
-        "Wikipedia returned %d companies for niche '%s' (%d with P856 website)",
+        "Wikipedia returned %d entities for niche '%s' (%d with P856 website)",
         len(records), niche, website_count,
     )
     return records

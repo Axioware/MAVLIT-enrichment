@@ -22,9 +22,17 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS headquarters TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS location TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS operating_area TEXT",
-        # Website / domain columns sourced from Wikidata P856
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS website TEXT",
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS domain  TEXT",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS domain TEXT",
+        # Entity identity and metadata columns
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS wikidata_id TEXT",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS entity_type TEXT",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS description TEXT",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS wikipedia_url TEXT",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS source_confidence INTEGER",
+        # Full unique index on wikidata_id — PostgreSQL treats NULLs as distinct,
+        # so multiple NULL rows are permitted even with a UNIQUE index.
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_brands_raw_wikidata_id ON brands_raw(wikidata_id)",
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -55,39 +63,40 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
     icon         = "fa-solid fa-seedling"
     column_list  = [
         BrandRaw.id,
+        BrandRaw.wikidata_id,
         BrandRaw.name,
+        BrandRaw.entity_type,
+        BrandRaw.description,
         BrandRaw.niche,
         BrandRaw.source,
-        # Website columns — populated from Wikidata P856 at seed time
+        BrandRaw.source_confidence,
         BrandRaw.website,
         BrandRaw.domain,
-        # Geo context
+        BrandRaw.wikipedia_url,
         BrandRaw.country,
-        BrandRaw.headquarters,
-        BrandRaw.location,
-        BrandRaw.operating_area,
-        # Status
         BrandRaw.enriched,
         BrandRaw.enrichment_failed,
         BrandRaw.created_at,
     ]
     column_searchable_list = [
         BrandRaw.name,
+        BrandRaw.wikidata_id,
+        BrandRaw.entity_type,
+        BrandRaw.description,
         BrandRaw.niche,
         BrandRaw.source,
         BrandRaw.website,
         BrandRaw.domain,
+        BrandRaw.wikipedia_url,
         BrandRaw.country,
-        BrandRaw.headquarters,
-        BrandRaw.location,
-        BrandRaw.operating_area,
     ]
     column_sortable_list = [
         BrandRaw.id,
         BrandRaw.niche,
+        BrandRaw.source,
+        BrandRaw.source_confidence,
         BrandRaw.domain,
         BrandRaw.country,
-        BrandRaw.operating_area,
         BrandRaw.enriched,
         BrandRaw.created_at,
     ]
