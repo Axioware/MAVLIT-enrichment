@@ -14,3 +14,8 @@ HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
 ENRICH_BATCH_SIZE = int(os.getenv("ENRICH_BATCH_SIZE", "50"))
 CONTACTS_BATCH_SIZE = int(os.getenv("CONTACTS_BATCH_SIZE", "50"))
 VERIFY_BATCH_SIZE = int(os.getenv("VERIFY_BATCH_SIZE", "80"))
+
+# Signal enrichment
+GOOGLE_API_KEY    = os.getenv("GOOGLE_API_KEY", "")
+GOOGLE_CX         = os.getenv("GOOGLE_CX", "")       # Custom Search Engine ID
+META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN", "")

@@ -336,21 +336,12 @@
       autocomplete="off"
     />
 
-    <div class="form-row">
-      <div class="form-group">
-        <label for="limit">Limit <span style="color:#475569;text-transform:none;">(optional)</span></label>
-        <input type="number" id="limit" placeholder="e.g. 50" min="1" />
-      </div>
-      <div class="form-group">
-        <label>&nbsp;</label>
-        <div class="toggle-row" style="height:46px">
-          <label class="switch">
-            <input type="checkbox" id="useGoogle" />
-            <span class="slider"></span>
-          </label>
-          <span class="toggle-label">Include Google SERP <span style="color:#475569;">(slow)</span></span>
-        </div>
-      </div>
+    <div class="toggle-row" style="margin-top:1.25rem">
+      <label class="switch">
+        <input type="checkbox" id="useGoogle" />
+        <span class="slider"></span>
+      </label>
+      <span class="toggle-label">Include Google SERP <span style="color:#475569;">(slow)</span></span>
     </div>
 
     <!-- Geographic filters -->
@@ -538,8 +529,6 @@
       return;
     }
     const useGoogle     = document.getElementById('useGoogle').checked;
-    const limitVal      = document.getElementById('limit').value;
-    const limit         = limitVal ? parseInt(limitVal) : null;
     const country       = document.getElementById('country').value.trim() || null;
     const headquarters  = document.getElementById('headquarters').value.trim() || null;
     const location      = document.getElementById('location').value.trim() || null;
@@ -553,7 +542,6 @@
       body: JSON.stringify({
         niche,
         use_google: useGoogle,
-        limit,
         country,
         headquarters,
         location,

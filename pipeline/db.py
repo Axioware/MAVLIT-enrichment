@@ -1,5 +1,5 @@
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, Text, TIMESTAMP, create_engine
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import insert, JSONB
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.sql import func
 
@@ -46,6 +46,32 @@ class BrandRaw(Base):
     operating_area    = Column(Text)
     created_at        = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
+    # ── Social media handles (from Wikidata Layer 1 enrichment) ──────────────
+    instagram_handle    = Column(Text)
+    youtube_channel_id  = Column(Text)
+    twitter_handle      = Column(Text)
+    facebook_page       = Column(Text)
+    facebook_page_id    = Column(Text)   # numeric Page ID resolved via Graph API
+    tiktok_handle       = Column(Text)
+    linkedin_id         = Column(Text)
+
+    # ── Website enrichment ────────────────────────────────────────────────────
+    has_official_website     = Column(Boolean)
+    website_source           = Column(Text)   # 'wikidata' | 'google' | 'none'
+    google_discovered_website = Column(Text)
+
+    # ── Signal detection ──────────────────────────────────────────────────────
+    is_shopify      = Column(Boolean)
+    is_woocommerce  = Column(Boolean)
+    in_tranco_list  = Column(Boolean)
+    tranco_rank     = Column(Integer)
+
+    # ── Per-step tracking flags ───────────────────────────────────────────────
+    wikidata_enriched = Column(Boolean, nullable=False, server_default="false", default=False)
+    shopify_checked   = Column(Boolean, nullable=False, server_default="false", default=False)
+    tranco_checked    = Column(Boolean, nullable=False, server_default="false", default=False)
+    meta_ads_fetched  = Column(Boolean, nullable=False, server_default="false", default=False)
+
 
 class Brand(Base):
     __tablename__ = "brands"
@@ -83,6 +109,24 @@ class Contact(Base):
     verified_at         = Column(TIMESTAMP(timezone=True))
     outreach_sent       = Column(Boolean, nullable=False, server_default="false", default=False)
     created_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class MetaAd(Base):
+    __tablename__ = "meta_ads"
+
+    id                  = Column(Integer, primary_key=True)
+    brand_raw_id        = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
+    ad_archive_id       = Column(Text, unique=True)
+    page_name           = Column(Text)
+    page_id             = Column(Text)
+    ad_creative_bodies  = Column(JSONB)     # list[str]
+    publisher_platforms = Column(JSONB)     # list[str]
+    start_date          = Column(Text)
+    end_date            = Column(Text)
+    impressions         = Column(JSONB)     # {lower_bound, upper_bound}
+    spend               = Column(JSONB)     # {lower_bound, upper_bound}
+    currency            = Column(Text)
+    fetched_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
 def get_db():
@@ -133,28 +177,59 @@ def insert_brand(db: Session, brand: dict) -> bool:
     return result.rowcount == 1
 
 
+def _dedup_by(rows: list[dict], key_fn) -> list[dict]:
+    """Keep first occurrence of each key within the list."""
+    seen: set = set()
+    out: list[dict] = []
+    for r in rows:
+        k = key_fn(r)
+        if k not in seen:
+            seen.add(k)
+            out.append(r)
+    return out
+
+
+_CHUNK = 500   # max rows per INSERT to avoid oversized statements
+
+
 def insert_brands_batch(db: Session, brands: list[dict]) -> int:
     if not brands:
         return 0
 
     # Split: records with a Wikidata QID conflict on wikidata_id (primary identity);
     # records without one fall back to name_normalized dedup.
-    with_qid    = [b for b in brands if b.get("wikidata_id")]
-    without_qid = [b for b in brands if not b.get("wikidata_id")]
+    #
+    # ON CONFLICT DO NOTHING only resolves conflicts against existing table rows.
+    # Two rows within the same INSERT that share a unique key will still crash,
+    # so we deduplicate each list before building the VALUES clause.
+    with_qid = _dedup_by(
+        [b for b in brands if b.get("wikidata_id")],
+        lambda b: b["wikidata_id"],
+    )
+    without_qid = _dedup_by(
+        [b for b in brands if not b.get("wikidata_id")],
+        lambda b: b["normalized"],
+    )
     total = 0
 
-    if with_qid:
+    for i in range(0, max(len(with_qid), 1), _CHUNK):
+        chunk = with_qid[i : i + _CHUNK]
+        if not chunk:
+            break
         stmt = (
             insert(BrandRaw)
-            .values([_row_values(b) for b in with_qid])
+            .values([_row_values(b) for b in chunk])
             .on_conflict_do_nothing(index_elements=["wikidata_id"])
         )
         total += db.execute(stmt).rowcount
 
-    if without_qid:
+    for i in range(0, max(len(without_qid), 1), _CHUNK):
+        chunk = without_qid[i : i + _CHUNK]
+        if not chunk:
+            break
         stmt = (
             insert(BrandRaw)
-            .values([_row_values(b) for b in without_qid])
+            .values([_row_values(b) for b in chunk])
             .on_conflict_do_nothing(index_elements=["name_normalized"])
         )
         total += db.execute(stmt).rowcount
