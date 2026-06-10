@@ -28,7 +28,7 @@ import httpx
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from config import YOUTUBE_API_KEY
+from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1
 from pipeline.db import BrandRaw, YoutubeSponsorship
 
 logger = logging.getLogger(__name__)
@@ -134,25 +134,66 @@ def _detect_sponsorship(
                 snippet = _snippet(description or "", m)
                 return stype, confidence, [m.group(0).strip()], snippet
 
-    # No explicit marker — check if brand just appears in description
-    if brand_name.lower() in text:
-        confidence = 0.55 if brand_name.lower() in title.lower() else 0.30
-        return "mention", confidence, [brand_name], description[:300] if description else ""
-
     return "none", 0.0, [], ""
 
 
 # ── YouTube API helpers ────────────────────────────────────────────────────────
 
+class _QuotaExhausted(Exception):
+    """Raised when all YouTube API keys have hit their daily quota."""
+
+
+# Maps key index → env var name for clear log messages
+_KEY_NAMES = ["YOUTUBE_API_KEY", "YOUTUBE_API_KEY_1"]
+
+# Populated lazily so config is read after load_dotenv()
+_API_KEYS: list[str] = []
+_key_index: int = 0
+
+
+def _active_key() -> str:
+    global _API_KEYS
+    if not _API_KEYS:
+        _API_KEYS = [k for k in [YOUTUBE_API_KEY, YOUTUBE_API_KEY_1] if k]
+    if not _API_KEYS:
+        raise _QuotaExhausted("No YouTube API keys configured — set YOUTUBE_API_KEY in .env")
+    return _API_KEYS[_key_index]
+
+
+def _rotate_key() -> None:
+    """Switch to the next key. Raises _QuotaExhausted when all keys are spent."""
+    global _key_index
+    current_name = _KEY_NAMES[_key_index] if _key_index < len(_KEY_NAMES) else f"key_{_key_index}"
+    _key_index += 1
+    if _key_index >= len(_API_KEYS):
+        logger.warning("YouTube quota exhausted — %s daily limit reached. No more fallback keys.", current_name)
+        raise _QuotaExhausted(f"{current_name} quota exhausted and no fallback key available")
+    next_name = _KEY_NAMES[_key_index] if _key_index < len(_KEY_NAMES) else f"key_{_key_index}"
+    logger.warning(
+        "YouTube quota exhausted — %s daily limit reached. Switching to %s.",
+        current_name, next_name,
+    )
+
+
 def _yt_get(url: str, params: dict) -> dict | None:
-    params["key"] = YOUTUBE_API_KEY
+    params["key"] = _active_key()
     try:
         resp = httpx.get(url, params=params, timeout=15)
+        if resp.status_code == 429:
+            _rotate_key()                       # logs which key ran out and which is next
+            params["key"] = _active_key()
+            resp = httpx.get(url, params=params, timeout=15)
+            if resp.status_code == 429:
+                next_name = _KEY_NAMES[_key_index] if _key_index < len(_KEY_NAMES) else f"key_{_key_index}"
+                logger.warning("YouTube quota exhausted — %s daily limit also reached. All keys used up.", next_name)
+                raise _QuotaExhausted("All YouTube API keys exhausted for today")
         if resp.status_code == 403:
-            logger.warning("YouTube API quota exceeded or forbidden")
+            logger.warning("YouTube API forbidden (403) — check API key or permissions")
             return None
         resp.raise_for_status()
         return resp.json()
+    except _QuotaExhausted:
+        raise
     except Exception as exc:
         logger.warning("YouTube API call failed: %s", exc)
         return None
@@ -272,15 +313,22 @@ def enrich_youtube_sponsorships(db: Session, limit: int = 50) -> int:
         name = brand.name
         queries = _build_queries(name)
 
-        # video_id → best tier seen so far (high tiers win over low)
         seen_video_ids: set[str] = set()
-        for query, tier in queries:
-            ids = _search_videos(query)
-            new_ids = [vid for vid in ids if vid not in seen_video_ids]
-            seen_video_ids.update(new_ids)
-            if new_ids:
-                logger.debug("YouTube: '%s' [%s] → %d new videos", name, tier, len(new_ids))
-            time.sleep(0.3)
+        try:
+            for query, tier in queries:
+                ids = _search_videos(query)
+                new_ids = [vid for vid in ids if vid not in seen_video_ids]
+                seen_video_ids.update(new_ids)
+                if new_ids:
+                    logger.debug("YouTube: '%s' [%s] → %d new videos", name, tier, len(new_ids))
+                time.sleep(0.3)
+        except _QuotaExhausted:
+            logger.warning(
+                "YouTube daily quota exhausted — stopping. "
+                "'%s' and remaining brands left as youtube_checked=False and will retry tomorrow.",
+                name,
+            )
+            break  # exit brand loop; brand stays unchecked
 
         if not seen_video_ids:
             brand.youtube_checked = True
