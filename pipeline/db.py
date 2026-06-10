@@ -1,6 +1,6 @@
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, Text, TIMESTAMP, create_engine
+from sqlalchemy import Boolean, Column, Float, ForeignKey, Integer, Text, TIMESTAMP, create_engine
 from sqlalchemy.dialects.postgresql import insert, JSONB
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker, relationship
 from sqlalchemy.sql import func
 
 # Source trust scores (higher = more authoritative)
@@ -67,10 +67,37 @@ class BrandRaw(Base):
     tranco_rank     = Column(Integer)
 
     # ── Per-step tracking flags ───────────────────────────────────────────────
-    wikidata_enriched = Column(Boolean, nullable=False, server_default="false", default=False)
-    shopify_checked   = Column(Boolean, nullable=False, server_default="false", default=False)
-    tranco_checked    = Column(Boolean, nullable=False, server_default="false", default=False)
-    meta_ads_fetched  = Column(Boolean, nullable=False, server_default="false", default=False)
+    wikidata_enriched  = Column(Boolean, nullable=False, server_default="false", default=False)
+    shopify_checked    = Column(Boolean, nullable=False, server_default="false", default=False)
+    tranco_checked     = Column(Boolean, nullable=False, server_default="false", default=False)
+    meta_ads_fetched   = Column(Boolean, nullable=False, server_default="false", default=False)
+    youtube_checked    = Column(Boolean, nullable=False, server_default="false", default=False)
+
+    def __str__(self) -> str:
+        return self.name or f"Brand #{self.id}"
+
+
+class YoutubeSponsorship(Base):
+    __tablename__ = "youtube_sponsorships"
+
+    id               = Column(Integer, primary_key=True)
+    brand_raw_id     = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
+    video_id         = Column(Text, unique=True, nullable=False)
+    video_title      = Column(Text)
+    video_url        = Column(Text)
+    channel_id       = Column(Text)
+    channel_name     = Column(Text)
+    subscriber_count = Column(Integer)
+    published_at     = Column(Text)
+    view_count       = Column(Integer)
+    like_count       = Column(Integer)
+    description_snippet = Column(Text)
+    sponsorship_type    = Column(Text)
+    confidence          = Column(Float)
+    matched_keywords    = Column(JSONB)
+    fetched_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
 
 
 class Brand(Base):
@@ -119,14 +146,16 @@ class MetaAd(Base):
     ad_archive_id       = Column(Text, unique=True)
     page_name           = Column(Text)
     page_id             = Column(Text)
-    ad_creative_bodies  = Column(JSONB)     # list[str]
-    publisher_platforms = Column(JSONB)     # list[str]
+    ad_creative_bodies  = Column(JSONB)
+    publisher_platforms = Column(JSONB)
     start_date          = Column(Text)
     end_date            = Column(Text)
-    impressions         = Column(JSONB)     # {lower_bound, upper_bound}
-    spend               = Column(JSONB)     # {lower_bound, upper_bound}
+    impressions         = Column(JSONB)
+    spend               = Column(JSONB)
     currency            = Column(Text)
     fetched_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
 
 
 def get_db():

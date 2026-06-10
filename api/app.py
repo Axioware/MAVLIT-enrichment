@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
-from pipeline.db import Base, Brand, BrandRaw, Contact, MetaAd, SessionLocal, engine
+from pipeline.db import Base, Brand, BrandRaw, Contact, MetaAd, YoutubeSponsorship, SessionLocal, engine
 from pipeline.enrichment.orchestrator import run_signal_enrichment
 from pipeline.seed import run_seed
 
@@ -56,6 +56,7 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS shopify_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS tranco_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS meta_ads_fetched BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS youtube_checked BOOLEAN NOT NULL DEFAULT false",
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -116,6 +117,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.shopify_checked,
         BrandRaw.tranco_checked,
         BrandRaw.meta_ads_fetched,
+        BrandRaw.youtube_checked,
         BrandRaw.created_at,
     ]
     column_searchable_list = [
@@ -151,6 +153,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.shopify_checked,
         BrandRaw.tranco_checked,
         BrandRaw.meta_ads_fetched,
+        BrandRaw.youtube_checked,
         BrandRaw.created_at,
         BrandRaw.enrichment_failed,
     ]
@@ -164,7 +167,7 @@ class MetaAdAdmin(ModelView, model=MetaAd):
     icon         = "fa-solid fa-rectangle-ad"
     column_list  = [
         MetaAd.id,
-        MetaAd.brand_raw_id,
+        MetaAd.brand_raw,
         MetaAd.ad_archive_id,
         MetaAd.page_name,
         MetaAd.page_id,
@@ -176,9 +179,40 @@ class MetaAdAdmin(ModelView, model=MetaAd):
         MetaAd.currency,
         MetaAd.fetched_at,
     ]
+    column_labels      = {MetaAd.brand_raw: "Brand"}
     column_searchable_list = [MetaAd.page_name, MetaAd.page_id, MetaAd.ad_archive_id]
     column_sortable_list   = [MetaAd.id, MetaAd.brand_raw_id, MetaAd.start_date, MetaAd.fetched_at]
     column_default_sort    = [(MetaAd.id, True)]
+    page_size = 50
+
+
+class YoutubeSponsorshipAdmin(ModelView, model=YoutubeSponsorship):
+    name         = "YouTube Sponsorship"
+    name_plural  = "YouTube Sponsorships"
+    icon         = "fa-brands fa-youtube"
+    column_list  = [
+        YoutubeSponsorship.id,
+        YoutubeSponsorship.brand_raw,
+        YoutubeSponsorship.video_title,
+        YoutubeSponsorship.channel_name,
+        YoutubeSponsorship.subscriber_count,
+        YoutubeSponsorship.sponsorship_type,
+        YoutubeSponsorship.confidence,
+        YoutubeSponsorship.matched_keywords,
+        YoutubeSponsorship.view_count,
+        YoutubeSponsorship.published_at,
+        YoutubeSponsorship.video_url,
+        YoutubeSponsorship.description_snippet,
+        YoutubeSponsorship.fetched_at,
+    ]
+    column_labels      = {YoutubeSponsorship.brand_raw: "Brand"}
+    column_searchable_list = [YoutubeSponsorship.video_title, YoutubeSponsorship.channel_name]
+    column_sortable_list   = [
+        YoutubeSponsorship.id, YoutubeSponsorship.brand_raw_id,
+        YoutubeSponsorship.confidence, YoutubeSponsorship.view_count,
+        YoutubeSponsorship.subscriber_count, YoutubeSponsorship.fetched_at,
+    ]
+    column_default_sort    = [(YoutubeSponsorship.confidence, True)]
     page_size = 50
 
 
@@ -215,6 +249,7 @@ class ContactAdmin(ModelView, model=Contact):
 admin = Admin(app, engine)
 admin.add_view(BrandRawAdmin)
 admin.add_view(MetaAdAdmin)
+admin.add_view(YoutubeSponsorshipAdmin)
 admin.add_view(BrandAdmin)
 admin.add_view(ContactAdmin)
 

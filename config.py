@@ -19,3 +19,4 @@ VERIFY_BATCH_SIZE = int(os.getenv("VERIFY_BATCH_SIZE", "80"))
 GOOGLE_API_KEY    = os.getenv("GOOGLE_API_KEY", "")
 GOOGLE_CX         = os.getenv("GOOGLE_CX", "")       # Custom Search Engine ID
 META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN", "")
+YOUTUBE_API_KEY   = os.getenv("YOUTUBE_API_KEY", "")
