@@ -208,9 +208,18 @@ class YoutubeSponsorshipAdmin(ModelView, model=YoutubeSponsorship):
     column_labels      = {YoutubeSponsorship.brand_raw: "Brand"}
     column_searchable_list = [YoutubeSponsorship.video_title, YoutubeSponsorship.channel_name]
     column_sortable_list   = [
-        YoutubeSponsorship.id, YoutubeSponsorship.brand_raw_id,
-        YoutubeSponsorship.confidence, YoutubeSponsorship.view_count,
-        YoutubeSponsorship.subscriber_count, YoutubeSponsorship.fetched_at,
+        YoutubeSponsorship.id,
+        YoutubeSponsorship.brand_raw_id,
+        YoutubeSponsorship.video_title,
+        YoutubeSponsorship.channel_name,
+        YoutubeSponsorship.subscriber_count,
+        YoutubeSponsorship.sponsorship_type,
+        YoutubeSponsorship.confidence,
+        YoutubeSponsorship.matched_keywords,
+        YoutubeSponsorship.view_count,
+        YoutubeSponsorship.like_count,
+        YoutubeSponsorship.published_at,
+        YoutubeSponsorship.fetched_at,
     ]
     column_default_sort    = [(YoutubeSponsorship.confidence, True)]
     page_size = 50

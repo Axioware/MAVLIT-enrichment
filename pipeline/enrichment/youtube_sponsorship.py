@@ -47,12 +47,7 @@ _PAID_PATTERNS = [
     r'\bpaid\s+partnership\b',
     r'\bpaid\s+promotion\b',
     r'\bin\s+paid\s+collaboration\b',
-    r'#ad\b',
-    r'#sponsored\b',
-    r'#paidpartnership\b',
-    r'#paidpromotion\b',
     r'\bsponsor\s*:\s*',
-    r'\bad\s*:\s*',
 ]
 
 _AFFILIATE_PATTERNS = [
@@ -106,7 +101,9 @@ def _detect_sponsorship(
     Returns:
       (sponsorship_type, confidence, matched_keywords, description_snippet)
     """
-    text = (title + "\n" + description).lower()
+    raw_text = (title + "\n" + description).lower()
+    # Strip @mentions so "@shopify" matches brand name "shopify"
+    text = re.sub(r'@(\w+)', r'\1', raw_text)
 
     for stype, patterns in _COMPILED.items():
         for pat in patterns:
@@ -218,14 +215,19 @@ def _search_videos(query: str) -> list[str]:
 
 
 def _fetch_video_details(video_ids: list[str]) -> list[dict]:
-    """Fetch snippet + statistics for a list of video IDs."""
+    """Fetch snippet + statistics for a list of video IDs (max 50 per request)."""
     if not video_ids:
         return []
-    data = _yt_get(_VIDEOS_URL, {
-        "part": "snippet,statistics",
-        "id":   ",".join(video_ids),
-    })
-    return data.get("items", []) if data else []
+    results: list[dict] = []
+    for i in range(0, len(video_ids), 50):
+        chunk = video_ids[i : i + 50]
+        data = _yt_get(_VIDEOS_URL, {
+            "part": "snippet,statistics",
+            "id":   ",".join(chunk),
+        })
+        if data:
+            results.extend(data.get("items", []))
+    return results
 
 
 def _fetch_channel_subscribers(channel_id: str) -> int | None:
@@ -257,7 +259,6 @@ def _build_queries(brand_name: str) -> list[tuple[str, str]]:
     """
     high: list[tuple[str, str]] = [
         (f'"sponsored by {brand_name}"',                     "paid_sponsor"),
-        (f'"this video is sponsored by {brand_name}"',       "paid_sponsor"),
         (f'"paid partnership with {brand_name}"',            "paid_sponsor"),
         (f'"paid promotion by {brand_name}"',                "paid_sponsor"),
         (f'"ad {brand_name}"',                               "paid_sponsor"),
@@ -393,6 +394,9 @@ def enrich_youtube_sponsorships(db: Session, limit: int = 50) -> int:
         db.commit()
         time.sleep(0.5)
 
-    logger.info("YouTube sponsorships: %d brands processed, %d videos stored",
-                len(brands), total_videos)
+    processed_names = ", ".join(b.name for b in brands)
+    logger.info(
+        "YouTube sponsorships: %d brands processed (%s), %d videos stored",
+        len(brands), processed_names, total_videos,
+    )
     return len(brands)
