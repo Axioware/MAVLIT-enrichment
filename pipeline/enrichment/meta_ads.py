@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://graph.facebook.com/v21.0"
 _ADS_URL  = f"{_BASE_URL}/ads_archive"
-_AD_LIMIT = 25
+_AD_LIMIT    = 100   # max per page allowed by Meta Ad Library API
+_MAX_PAGES   = 10    # safety cap — 10 × 100 = 1,000 ads per brand max
 _FIELDS   = ",".join([
     "id",
     "page_name",
@@ -90,14 +91,15 @@ def _resolve_page_id(slug: str) -> str | None:
 
 def _fetch_ads(*, page_id: str | None, brand_name: str) -> list[dict]:
     """
-    Call Meta Ad Library API.
+    Call Meta Ad Library API and paginate through all results.
     Uses search_page_ids when page_id is available, otherwise search_terms.
+    Fetches up to _MAX_PAGES × _AD_LIMIT ads per brand.
     """
     if not META_ACCESS_TOKEN:
         return []
 
     if page_id:
-        params = {
+        params: dict = {
             "search_page_ids":      f'["{page_id}"]',
             "ad_type":              "ALL",
             "ad_reached_countries": '["US","GB","CA","AU"]',
@@ -117,17 +119,44 @@ def _fetch_ads(*, page_id: str | None, brand_name: str) -> list[dict]:
         }
         logger.debug("Meta Ads: searching by name='%s' (no page_id)", brand_name)
 
-    try:
-        resp = httpx.get(_ADS_URL, params=params, timeout=20)
-        if resp.status_code == 429:
-            logger.warning("Meta Ads API 429 — waiting 60s")
-            time.sleep(60)
-            resp = httpx.get(_ADS_URL, params=params, timeout=20)
-        resp.raise_for_status()
-        return resp.json().get("data", [])
-    except Exception:
-        logger.exception("Meta Ads API call failed for '%s'", brand_name)
-        return []
+    all_ads: list[dict] = []
+    url = _ADS_URL
+
+    for page_num in range(1, _MAX_PAGES + 1):
+        try:
+            resp = httpx.get(url, params=params, timeout=20)
+            if resp.status_code == 429:
+                logger.warning("Meta Ads API 429 — waiting 60s")
+                time.sleep(60)
+                resp = httpx.get(url, params=params, timeout=20)
+            if resp.status_code >= 400:
+                try:
+                    err = resp.json()
+                    logger.error("Meta Ads API %s for '%s' — %s", resp.status_code, brand_name, err)
+                except Exception:
+                    logger.error("Meta Ads API %s for '%s' — %s", resp.status_code, brand_name, resp.text[:300])
+                break
+            body = resp.json()
+        except Exception:
+            logger.exception("Meta Ads API call failed for '%s'", brand_name)
+            break
+
+        page_ads = body.get("data", [])
+        all_ads.extend(page_ads)
+        logger.debug("Meta Ads: '%s' page %d → %d ads (total so far: %d)",
+                     brand_name, page_num, len(page_ads), len(all_ads))
+
+        # Follow next-page cursor if available
+        next_url = body.get("paging", {}).get("next")
+        if not next_url or len(page_ads) < _AD_LIMIT:
+            break
+
+        # next page — Meta returns a full URL, use it directly with no extra params
+        url    = next_url
+        params = {}
+        time.sleep(0.3)
+
+    return all_ads
 
 
 def _insert_ads(db: Session, brand_raw_id: int, ads: list[dict]) -> int:

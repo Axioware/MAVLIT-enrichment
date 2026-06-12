@@ -77,6 +77,16 @@ _COMPILED = {
     "gifted":       [re.compile(p, re.IGNORECASE) for p in _GIFTED_PATTERNS],
 }
 
+# Negative patterns — explicit denials that must disqualify the video
+_NEGATIVE_PATTERNS = [
+    re.compile(r'\bnot\s+sponsored\b',               re.IGNORECASE),
+    re.compile(r'\bnot\s+an?\s+ad\b',                re.IGNORECASE),
+    re.compile(r'\bunsponsored\b',                    re.IGNORECASE),
+    re.compile(r'\bno\s+sponsor\b',                   re.IGNORECASE),
+    re.compile(r'\bnot\s+paid\b',                     re.IGNORECASE),
+    re.compile(r'\bdisclaimer\s*:\s*this\s+video\s+is\s+not\b', re.IGNORECASE),
+]
+
 
 def _snippet(text: str, match: re.Match, window: int = 150) -> str:
     """Extract a window of text around a regex match."""
@@ -101,22 +111,24 @@ def _detect_sponsorship(
     Returns:
       (sponsorship_type, confidence, matched_keywords, description_snippet)
     """
-    raw_text = (title + "\n" + description).lower()
+    raw_text = (description or "").lower()
     # Strip @mentions so "@shopify" matches brand name "shopify"
-    text = re.sub(r'@(\w+)', r'\1', raw_text)
+    text  = re.sub(r'@(\w+)', r'\1', raw_text)
+    brand = brand_name.lower()
 
+    # ── Step 1: reject videos that explicitly deny sponsorship ───────────
+    for neg in _NEGATIVE_PATTERNS:
+        m = neg.search(text)
+        if m:
+            nearby = text[max(0, m.start() - 150) : m.end() + 150]
+            if brand in nearby:
+                return "none", 0.0, [], ""
+
+    # ── Step 2: match positive sponsorship patterns ───────────────────────
     for stype, patterns in _COMPILED.items():
         for pat in patterns:
             m = pat.search(text)
             if m:
-                # Brand must appear AFTER the keyword within 150 chars
-                # (e.g. "sponsored by Nike", "collab with Nike")
-                # OR immediately BEFORE within 20 chars
-                # (e.g. "Nike promo code", "Nike affiliate link").
-                # A wide symmetric window causes false positives when the brand
-                # appears earlier in the text for an unrelated reason
-                # (e.g. "Chuu leaves Blockberry Creative ... collab with B.I").
-                brand = brand_name.lower()
                 after_keyword  = text[m.end() : m.end() + 150]
                 before_keyword = text[max(0, m.start() - 20) : m.start()]
                 if brand not in after_keyword and brand not in before_keyword:
