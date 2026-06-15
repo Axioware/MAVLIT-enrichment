@@ -38,3 +38,8 @@ data/seeds/*.csv
 # Logs
 *.log
 *.json
+run pipeline.txt
+youtubetest.py
+test_instagram_scraper.py
+test_branded_content.py
+test_ad_library.py

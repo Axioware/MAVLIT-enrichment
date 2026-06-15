@@ -51,10 +51,24 @@ def _scrape_handle(handle: str, posts_newer_than: str) -> list[dict]:
         return []
 
 
+def _has_collaboration_signal(item: dict) -> bool:
+    """Return True only if the post has at least one collaboration/sponsorship signal."""
+    return bool(
+        item.get("paidPartnership")
+        or item.get("sponsors")
+        or item.get("mentions")
+        or item.get("taggedUsers")
+        or item.get("coauthorProducers")
+    )
+
+
 def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
-    """Map a raw Apify item to an instagram_posts table row. Returns None if no post_id."""
+    """Map a raw Apify item to an instagram_posts table row.
+    Returns None if no post_id or no collaboration signal."""
     post_id = item.get("id")
     if not post_id:
+        return None
+    if not _has_collaboration_signal(item):
         return None
 
     return {
@@ -150,8 +164,8 @@ def enrich_instagram_posts(
         total_posts += inserted
 
         logger.info(
-            "Instagram: '%s' (@%s) → %d/%d posts stored",
-            brand.name, handle, inserted, len(rows),
+            "Instagram: '%s' (@%s) → %d stored / %d with signals / %d total fetched",
+            brand.name, handle, inserted, len(rows), len(items),
         )
 
         brand.instagram_checked = True
