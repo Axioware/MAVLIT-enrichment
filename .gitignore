@@ -37,3 +37,4 @@ data/seeds/*.csv
 
 # Logs
 *.log
+*.json

@@ -13,3 +13,4 @@ tenacity>=8.0
 fake-useragent>=1.5
 apscheduler>=3.10
 python-dotenv>=1.0
+apify-client>=1.7

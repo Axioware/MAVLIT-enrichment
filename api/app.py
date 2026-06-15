@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
-from pipeline.db import Base, Brand, BrandRaw, Contact, MetaAd, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, Brand, BrandRaw, Contact, InstagramPost, MetaAd, YoutubeSponsorship, SessionLocal, engine
 from pipeline.enrichment.orchestrator import run_signal_enrichment
 from pipeline.seed import run_seed
 
@@ -57,6 +57,7 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS tranco_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS meta_ads_fetched BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS youtube_checked BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS instagram_checked BOOLEAN NOT NULL DEFAULT false",
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -118,6 +119,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.tranco_checked,
         BrandRaw.meta_ads_fetched,
         BrandRaw.youtube_checked,
+        BrandRaw.instagram_checked,
         BrandRaw.created_at,
     ]
     column_searchable_list = [
@@ -154,6 +156,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.tranco_checked,
         BrandRaw.meta_ads_fetched,
         BrandRaw.youtube_checked,
+        BrandRaw.instagram_checked,
         BrandRaw.created_at,
         BrandRaw.enrichment_failed,
     ]
@@ -225,6 +228,47 @@ class YoutubeSponsorshipAdmin(ModelView, model=YoutubeSponsorship):
     page_size = 50
 
 
+class InstagramPostAdmin(ModelView, model=InstagramPost):
+    name         = "Instagram Post"
+    name_plural  = "Instagram Posts"
+    icon         = "fa-brands fa-instagram"
+    column_list  = [
+        InstagramPost.id,
+        InstagramPost.brand_raw,
+        InstagramPost.instagram_handle,
+        InstagramPost.post_type,
+        InstagramPost.timestamp,
+        InstagramPost.likes_count,
+        InstagramPost.comments_count,
+        InstagramPost.video_view_count,
+        InstagramPost.paid_partnership,
+        InstagramPost.sponsors,
+        InstagramPost.mentions,
+        InstagramPost.tagged_users,
+        InstagramPost.coauthor_producers,
+        InstagramPost.followers_count,
+        InstagramPost.caption,
+        InstagramPost.post_url,
+        InstagramPost.fetched_at,
+    ]
+    column_labels          = {InstagramPost.brand_raw: "Brand"}
+    column_searchable_list = [InstagramPost.instagram_handle, InstagramPost.caption, InstagramPost.post_id]
+    column_sortable_list   = [
+        InstagramPost.id,
+        InstagramPost.brand_raw_id,
+        InstagramPost.instagram_handle,
+        InstagramPost.timestamp,
+        InstagramPost.likes_count,
+        InstagramPost.comments_count,
+        InstagramPost.video_view_count,
+        InstagramPost.followers_count,
+        InstagramPost.paid_partnership,
+        InstagramPost.fetched_at,
+    ]
+    column_default_sort    = [(InstagramPost.id, True)]
+    page_size = 50
+
+
 class BrandAdmin(ModelView, model=Brand):
     name         = "Brand"
     name_plural  = "Brands"
@@ -259,6 +303,7 @@ admin = Admin(app, engine)
 admin.add_view(BrandRawAdmin)
 admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
+admin.add_view(InstagramPostAdmin)
 admin.add_view(BrandAdmin)
 admin.add_view(ContactAdmin)
 

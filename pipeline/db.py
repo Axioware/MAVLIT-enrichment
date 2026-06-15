@@ -72,6 +72,7 @@ class BrandRaw(Base):
     tranco_checked     = Column(Boolean, nullable=False, server_default="false", default=False)
     meta_ads_fetched   = Column(Boolean, nullable=False, server_default="false", default=False)
     youtube_checked    = Column(Boolean, nullable=False, server_default="false", default=False)
+    instagram_checked  = Column(Boolean, nullable=False, server_default="false", default=False)
 
     def __str__(self) -> str:
         return self.name or f"Brand #{self.id}"
@@ -154,6 +155,52 @@ class MetaAd(Base):
     spend               = Column(JSONB)
     currency            = Column(Text)
     fetched_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
+
+
+class InstagramPost(Base):
+    __tablename__ = "instagram_posts"
+
+    id                     = Column(Integer, primary_key=True)
+    brand_raw_id           = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
+    instagram_handle       = Column(Text, nullable=False)
+
+    # Post identity
+    post_id                = Column(Text, unique=True, nullable=False)
+    short_code             = Column(Text)
+    post_url               = Column(Text)
+    post_type              = Column(Text)   # Image, Video, Sidecar, etc.
+    timestamp              = Column(Text)
+
+    # Content
+    caption                = Column(Text)
+    hashtags               = Column(JSONB)
+    mentions               = Column(JSONB)
+
+    # Collaboration signals
+    tagged_users           = Column(JSONB)
+    coauthor_producers     = Column(JSONB)
+    paid_partnership       = Column(Boolean)
+    sponsors               = Column(JSONB)
+
+    # Engagement
+    likes_count            = Column(Integer)
+    comments_count         = Column(Integer)
+    video_view_count       = Column(Integer)
+    video_play_count       = Column(Integer)
+
+    # Profile snapshot (at time of scrape)
+    followers_count        = Column(Integer)
+    follows_count          = Column(Integer)
+    posts_count            = Column(Integer)
+    is_business_account    = Column(Boolean)
+    verified               = Column(Boolean)
+    biography              = Column(Text)
+    external_url           = Column(Text)
+    business_category_name = Column(Text)
+
+    fetched_at             = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
 
