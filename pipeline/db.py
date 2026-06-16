@@ -73,6 +73,7 @@ class BrandRaw(Base):
     meta_ads_fetched   = Column(Boolean, nullable=False, server_default="false", default=False)
     youtube_checked    = Column(Boolean, nullable=False, server_default="false", default=False)
     instagram_checked  = Column(Boolean, nullable=False, server_default="false", default=False)
+    tiktok_checked     = Column(Boolean, nullable=False, server_default="false", default=False)
 
     def __str__(self) -> str:
         return self.name or f"Brand #{self.id}"
@@ -201,6 +202,36 @@ class InstagramPost(Base):
     business_category_name = Column(Text)
 
     fetched_at             = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
+
+
+class TiktokPost(Base):
+    __tablename__ = "tiktok_posts"
+
+    id             = Column(Integer, primary_key=True)
+    brand_raw_id   = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
+    tiktok_handle  = Column(Text, nullable=False)
+
+    # Post identity
+    video_id       = Column(Text, unique=True, nullable=False)
+    video_url      = Column(Text)
+    create_time    = Column(Text)
+
+    # Engagement
+    play_count     = Column(Integer)
+    like_count     = Column(Integer)
+    comment_count  = Column(Integer)
+    share_count    = Column(Integer)
+    collect_count  = Column(Integer)
+
+    # Sponsorship signals
+    is_sponsored   = Column(Boolean)
+    is_ad          = Column(Boolean)
+    mentions       = Column(JSONB)
+    hashtags       = Column(JSONB)
+
+    fetched_at     = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
 

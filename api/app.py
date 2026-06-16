@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
-from pipeline.db import Base, Brand, BrandRaw, Contact, InstagramPost, MetaAd, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, Brand, BrandRaw, Contact, InstagramPost, MetaAd, TiktokPost, YoutubeSponsorship, SessionLocal, engine
 from pipeline.enrichment.orchestrator import run_signal_enrichment
 from pipeline.seed import run_seed
 
@@ -58,6 +58,7 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS meta_ads_fetched BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS youtube_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS instagram_checked BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS tiktok_checked BOOLEAN NOT NULL DEFAULT false",
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -120,6 +121,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.meta_ads_fetched,
         BrandRaw.youtube_checked,
         BrandRaw.instagram_checked,
+        BrandRaw.tiktok_checked,
         BrandRaw.created_at,
     ]
     column_searchable_list = [
@@ -157,6 +159,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.meta_ads_fetched,
         BrandRaw.youtube_checked,
         BrandRaw.instagram_checked,
+        BrandRaw.tiktok_checked,
         BrandRaw.created_at,
         BrandRaw.enrichment_failed,
     ]
@@ -269,6 +272,46 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
     page_size = 50
 
 
+class TiktokPostAdmin(ModelView, model=TiktokPost):
+    name         = "TikTok Post"
+    name_plural  = "TikTok Posts"
+    icon         = "fa-brands fa-tiktok"
+    column_list  = [
+        TiktokPost.id,
+        TiktokPost.brand_raw,
+        TiktokPost.tiktok_handle,
+        TiktokPost.create_time,
+        TiktokPost.play_count,
+        TiktokPost.like_count,
+        TiktokPost.comment_count,
+        TiktokPost.share_count,
+        TiktokPost.collect_count,
+        TiktokPost.is_sponsored,
+        TiktokPost.is_ad,
+        TiktokPost.mentions,
+        TiktokPost.hashtags,
+        TiktokPost.video_url,
+        TiktokPost.fetched_at,
+    ]
+    column_labels          = {TiktokPost.brand_raw: "Brand"}
+    column_searchable_list = [TiktokPost.tiktok_handle, TiktokPost.video_id]
+    column_sortable_list   = [
+        TiktokPost.id,
+        TiktokPost.brand_raw_id,
+        TiktokPost.tiktok_handle,
+        TiktokPost.create_time,
+        TiktokPost.play_count,
+        TiktokPost.like_count,
+        TiktokPost.comment_count,
+        TiktokPost.share_count,
+        TiktokPost.is_sponsored,
+        TiktokPost.is_ad,
+        TiktokPost.fetched_at,
+    ]
+    column_default_sort    = [(TiktokPost.play_count, True)]
+    page_size = 50
+
+
 class BrandAdmin(ModelView, model=Brand):
     name         = "Brand"
     name_plural  = "Brands"
@@ -304,6 +347,7 @@ admin.add_view(BrandRawAdmin)
 admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
 admin.add_view(InstagramPostAdmin)
+admin.add_view(TiktokPostAdmin)
 admin.add_view(BrandAdmin)
 admin.add_view(ContactAdmin)
 
