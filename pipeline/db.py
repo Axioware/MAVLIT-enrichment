@@ -246,18 +246,21 @@ def get_db():
 
 def _brand_raw_fields(b: dict) -> dict:
     """Extract all optional BrandRaw fields from a seed row dict."""
+    website = b.get("website") or None
     return {
-        "wikidata_id":       b.get("wikidata_id") or None,
-        "entity_type":       b.get("entity_type") or None,
-        "description":       b.get("description") or None,
-        "wikipedia_url":     b.get("wikipedia_url") or None,
-        "source_confidence": b.get("source_confidence"),
-        "website":           b.get("website") or None,
-        "domain":            b.get("domain") or None,
-        "country":           b.get("country"),
-        "headquarters":      b.get("headquarters"),
-        "location":          b.get("location"),
-        "operating_area":    b.get("operating_area"),
+        "wikidata_id":           b.get("wikidata_id") or None,
+        "entity_type":           b.get("entity_type") or None,
+        "description":           b.get("description") or None,
+        "wikipedia_url":         b.get("wikipedia_url") or None,
+        "source_confidence":     b.get("source_confidence"),
+        "website":               website,
+        "domain":                b.get("domain") or None,
+        "country":               b.get("country"),
+        "headquarters":          b.get("headquarters"),
+        "location":              b.get("location"),
+        "operating_area":        b.get("operating_area"),
+        "has_official_website":  True if website else None,
+        "website_source":        "wikidata" if website else None,
     }
 
 
@@ -323,10 +326,13 @@ def insert_brands_batch(db: Session, brands: list[dict]) -> int:
         chunk = with_qid[i : i + _CHUNK]
         if not chunk:
             break
+        # Use no index_elements so DO NOTHING fires on ANY unique violation
+        # (wikidata_id OR name_normalized) — prevents crash when the same
+        # brand was previously seeded without a wikidata_id.
         stmt = (
             insert(BrandRaw)
             .values([_row_values(b) for b in chunk])
-            .on_conflict_do_nothing(index_elements=["wikidata_id"])
+            .on_conflict_do_nothing()
         )
         total += db.execute(stmt).rowcount
 

@@ -145,15 +145,14 @@ def _extract_socials(html: str) -> dict[str, str]:
 
 def enrich_shopify(db: Session, limit: int = 300) -> int:
     """
-    Fetch homepage for each brand with has_official_website=True and
-    shopify_checked=False. Sets is_shopify / is_woocommerce and fills
-    any NULL social URL columns from links found on the page.
-    Returns number of rows updated.
+    Fetch homepage for each brand with a website URL and shopify_checked=False.
+    Sets is_shopify / is_woocommerce and fills any NULL social URL columns from
+    links found on the page. Returns number of rows updated.
     """
     brands: list[BrandRaw] = (
         db.query(BrandRaw)
         .filter(
-            BrandRaw.has_official_website == True,
+            BrandRaw.website.isnot(None),
             BrandRaw.shopify_checked == False,
         )
         .limit(limit)
