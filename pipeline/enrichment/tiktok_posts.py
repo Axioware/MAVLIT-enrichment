@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 _ACTOR_ID        = "LDHaKxTPJBXL4tgAt"   # apify/tiktok-scraper
 _RESULTS_PER_PAGE = 5000
-_LOOKBACK_DAYS   = 300
+_LOOKBACK_DAYS   = 30
 
 
 def _scrape_handle(handle: str, lookback_days: int) -> list[dict]:
