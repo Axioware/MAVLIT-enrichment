@@ -139,7 +139,9 @@ def _fetch_ads(*, page_id: str | None, brand_name: str) -> list[dict]:
                     body_err = resp.json()
                     err = body_err.get("error", {})
                     # Auth errors (expired/invalid token) — abort the entire run
-                    if err.get("type") == "OAuthException" or err.get("code") == 190:
+                    # Only code 190 = token expired/invalid; other OAuthException
+                    # codes (e.g. 100 = invalid parameter) are non-fatal per-brand errors.
+                    if err.get("code") == 190:
                         raise _AuthError(err.get("message", "token expired/invalid"))
                     logger.error("Meta Ads API %s for '%s' — %s", resp.status_code, brand_name, body_err)
                 except _AuthError:
@@ -164,9 +166,10 @@ def _fetch_ads(*, page_id: str | None, brand_name: str) -> list[dict]:
         if not next_url or len(page_ads) < _AD_LIMIT:
             break
 
-        # next page — Meta returns a full URL, use it directly with no extra params
+        # next page — Meta returns a full URL but omits ad_reached_countries,
+        # so pass it explicitly to avoid a 400 "parameter required" error.
         url    = next_url
-        params = {}
+        params = {"ad_reached_countries": '["US","GB","CA","AU"]'}
         time.sleep(0.3)
 
     return all_ads
