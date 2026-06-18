@@ -89,11 +89,16 @@ def _resolve_page_id(slug: str) -> str | None:
     return None
 
 
+class _AuthError(Exception):
+    """Raised when the Meta token is expired or invalid — aborts the whole run."""
+
+
 def _fetch_ads(*, page_id: str | None, brand_name: str) -> list[dict]:
     """
     Call Meta Ad Library API and paginate through all results.
     Uses search_page_ids when page_id is available, otherwise search_terms.
     Fetches up to _MAX_PAGES × _AD_LIMIT ads per brand.
+    Raises _AuthError if the token is expired/invalid so the caller can abort.
     """
     if not META_ACCESS_TOKEN:
         return []
@@ -131,12 +136,20 @@ def _fetch_ads(*, page_id: str | None, brand_name: str) -> list[dict]:
                 resp = httpx.get(url, params=params, timeout=20)
             if resp.status_code >= 400:
                 try:
-                    err = resp.json()
-                    logger.error("Meta Ads API %s for '%s' — %s", resp.status_code, brand_name, err)
+                    body_err = resp.json()
+                    err = body_err.get("error", {})
+                    # Auth errors (expired/invalid token) — abort the entire run
+                    if err.get("type") == "OAuthException" or err.get("code") == 190:
+                        raise _AuthError(err.get("message", "token expired/invalid"))
+                    logger.error("Meta Ads API %s for '%s' — %s", resp.status_code, brand_name, body_err)
+                except _AuthError:
+                    raise
                 except Exception:
                     logger.error("Meta Ads API %s for '%s' — %s", resp.status_code, brand_name, resp.text[:300])
                 break
             body = resp.json()
+        except _AuthError:
+            raise
         except Exception:
             logger.exception("Meta Ads API call failed for '%s'", brand_name)
             break
@@ -228,7 +241,15 @@ def enrich_meta_ads(db: Session, limit: int = 200) -> int:
             time.sleep(0.3)   # avoid hammering Graph API
 
         # ── Step 2: fetch ads ─────────────────────────────────────────────────
-        ads      = _fetch_ads(page_id=brand.facebook_page_id, brand_name=brand.name)
+        try:
+            ads = _fetch_ads(page_id=brand.facebook_page_id, brand_name=brand.name)
+        except _AuthError as exc:
+            logger.error(
+                "Meta Ads: token expired/invalid — aborting run. "
+                "Update META_ACCESS_TOKEN and re-run. (%s)", exc
+            )
+            return len(brands) - brands.index(brand)  # brands NOT yet processed
+
         inserted = _insert_ads(db, brand.id, ads)
         total_ads += inserted
 
