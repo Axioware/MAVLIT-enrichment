@@ -216,6 +216,14 @@ def run_seed(
     # when a limit is applied (prevents Wikipedia filling all limit slots).
     deduped_rows = _interleave_sources(deduped_rows)
 
+    # Only seed brands that have a website — brands without one cannot be enriched
+    before_filter = len(deduped_rows)
+    deduped_rows = [r for r in deduped_rows if r.get("website")]
+    logger.info(
+        "Website filter: %d → %d rows (%d dropped, no website)",
+        before_filter, len(deduped_rows), before_filter - len(deduped_rows),
+    )
+
     if limit is not None:
         deduped_rows = deduped_rows[:limit]
 

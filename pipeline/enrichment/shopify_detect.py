@@ -182,7 +182,7 @@ def enrich_shopify(db: Session, limit: int = 300) -> int:
 
             socials = _extract_socials(html)
             for field, url in socials.items():
-                if url and not getattr(brand, field):
+                if url:
                     setattr(brand, field, url)
                     socials_count += 1
                     logger.debug("  %s.%s = %s", brand.name, field, url)

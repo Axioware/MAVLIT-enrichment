@@ -141,13 +141,10 @@ def enrich_wikidata_socials(db: Session, limit: int = 500) -> int:
 
         for brand in batch:
             data = socials.get(brand.wikidata_id, {})
-            brand.instagram_handle    = data.get("instagram_handle")
-            brand.twitter_handle      = data.get("twitter_handle")
-            brand.youtube_channel_id  = data.get("youtube_channel_id")
-            brand.facebook_page       = data.get("facebook_page")
-            brand.tiktok_handle       = data.get("tiktok_handle")
-            brand.linkedin_id         = data.get("linkedin_id")
-            brand.wikidata_enriched   = True
+            for field, value in data.items():
+                if value and not getattr(brand, field):
+                    setattr(brand, field, value)
+            brand.wikidata_enriched = True
             updated += 1
 
         db.commit()
