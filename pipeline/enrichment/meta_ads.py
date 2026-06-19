@@ -83,7 +83,11 @@ def _resolve_page_id(slug: str) -> str | None:
             pid = resp.json().get("id")
             logger.debug("Resolved page ID: %s → %s", slug, pid)
             return pid
-        logger.debug("Page ID resolution failed for '%s': HTTP %s", slug, resp.status_code)
+        err = resp.json().get("error", {})
+        logger.warning(
+            "Page ID resolution failed for '%s': HTTP %s — %s (code %s)",
+            slug, resp.status_code, err.get("message"), err.get("code"),
+        )
     except Exception as exc:
         logger.debug("Page ID resolution error for '%s': %s", slug, exc)
     return None
@@ -203,12 +207,15 @@ def _insert_ads(db: Session, brand_raw_id: int, ads: list[dict]) -> int:
 
 def enrich_meta_ads(db: Session, limit: int = 200) -> int:
     """
-    For each brand with meta_ads_fetched=False:
-      1. If facebook_page is set but facebook_page_id is unknown, resolve the
-         numeric page ID via the Graph API and persist it.
-      2. Search ads using page_id (accurate) or brand name (fallback).
+    For each brand with facebook_page URL set and meta_ads_fetched=False:
+      1. Resolve the numeric facebook_page_id from the URL via Graph API
+         (skipped if facebook_page_id already known).
+      2. Search ads by page_id only — no search_terms fallback.
       3. Store found ads in meta_ads table.
       4. Mark meta_ads_fetched=True.
+
+    Brands with no facebook_page URL are skipped entirely and left with
+    meta_ads_fetched=False so they are not re-queued by accident.
 
     Returns number of brand rows processed.
     """
@@ -218,13 +225,16 @@ def enrich_meta_ads(db: Session, limit: int = 200) -> int:
 
     brands: list[BrandRaw] = (
         db.query(BrandRaw)
-        .filter(BrandRaw.meta_ads_fetched == False)
+        .filter(
+            BrandRaw.facebook_page.isnot(None),
+            BrandRaw.meta_ads_fetched == False,
+        )
         .limit(limit)
         .all()
     )
 
     if not brands:
-        logger.info("Meta Ads: no pending brands")
+        logger.info("Meta Ads: no pending brands with facebook_page")
         return 0
 
     logger.info("Meta Ads: processing %d brands", len(brands))
@@ -232,8 +242,8 @@ def enrich_meta_ads(db: Session, limit: int = 200) -> int:
     resolved_ids = 0
 
     for brand in brands:
-        # ── Step 1: resolve facebook_page_id if we have the URL but not the ID ─
-        if brand.facebook_page and not brand.facebook_page_id:
+        # ── Step 1: resolve facebook_page_id from URL if not already known ───
+        if not brand.facebook_page_id:
             slug = _slug_from_url(brand.facebook_page)
             if slug:
                 pid = _resolve_page_id(slug)
@@ -241,9 +251,17 @@ def enrich_meta_ads(db: Session, limit: int = 200) -> int:
                     brand.facebook_page_id = pid
                     resolved_ids += 1
                     db.commit()
-            time.sleep(0.3)   # avoid hammering Graph API
+            time.sleep(0.3)
 
-        # ── Step 2: fetch ads ─────────────────────────────────────────────────
+        if not brand.facebook_page_id:
+            # Could not resolve a page ID — skip without marking as fetched
+            logger.warning(
+                "Meta Ads: could not resolve page_id for '%s' (%s) — skipping",
+                brand.name, brand.facebook_page,
+            )
+            continue
+
+        # ── Step 2: fetch ads by page_id only ────────────────────────────────
         try:
             ads = _fetch_ads(page_id=brand.facebook_page_id, brand_name=brand.name)
         except _AuthError as exc:
@@ -251,20 +269,10 @@ def enrich_meta_ads(db: Session, limit: int = 200) -> int:
                 "Meta Ads: token expired/invalid — aborting run. "
                 "Update META_ACCESS_TOKEN and re-run. (%s)", exc
             )
-            return len(brands) - brands.index(brand)  # brands NOT yet processed
+            return len(brands) - brands.index(brand)
 
         inserted = _insert_ads(db, brand.id, ads)
         total_ads += inserted
-
-        # Auto-save page_id from the first ad result if we don't have it yet.
-        # This means the next run for this brand will use the accurate page_id.
-        if ads and not brand.facebook_page_id:
-            first_pid = ads[0].get("page_id")
-            if first_pid:
-                brand.facebook_page_id = str(first_pid)
-                resolved_ids += 1
-                logger.debug("Auto-saved page_id=%s for '%s' from ad result",
-                             first_pid, brand.name)
 
         brand.meta_ads_fetched = True
         db.commit()

@@ -75,6 +75,7 @@ class BrandRaw(Base):
     youtube_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
     instagram_checked      = Column(Boolean, nullable=False, server_default="false", default=False)
     tiktok_checked         = Column(Boolean, nullable=False, server_default="false", default=False)
+    twitter_checked           = Column(Boolean, nullable=False, server_default="false", default=False)
 
     def __str__(self) -> str:
         return self.name or f"Brand #{self.id}"
@@ -233,6 +234,44 @@ class TiktokPost(Base):
     hashtags       = Column(JSONB)
 
     fetched_at     = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
+
+
+class TwitterPost(Base):
+    __tablename__ = "twitter_posts"
+
+    id              = Column(Integer, primary_key=True)
+    brand_raw_id    = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
+    twitter_handle  = Column(Text, nullable=False)
+
+    # Tweet identity
+    tweet_id        = Column(Text, unique=True, nullable=False)
+    permalink       = Column(Text)
+    created_at      = Column(Text)
+
+    # Content
+    text            = Column(Text)
+    hashtags        = Column(JSONB)
+    mentions        = Column(JSONB)
+
+    # Sponsorship signals
+    is_sponsored    = Column(Boolean)
+    sponsor_signals = Column(JSONB)
+
+    # Engagement
+    likes           = Column(Integer)
+    retweets        = Column(Integer)
+    quotes          = Column(Integer)
+    comments        = Column(Integer)
+    has_media       = Column(Boolean)
+
+    # Author snapshot
+    username        = Column(Text)
+    fullname        = Column(Text)
+    verified        = Column(Boolean)
+
+    fetched_at      = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
 

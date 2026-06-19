@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
-from pipeline.db import Base, Brand, BrandRaw, Contact, InstagramPost, MetaAd, TiktokPost, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, Brand, BrandRaw, Contact, InstagramPost, MetaAd, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
 from pipeline.enrichment.orchestrator import run_signal_enrichment
 from pipeline.seed import run_seed
 
@@ -60,6 +60,7 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS youtube_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS instagram_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS tiktok_checked BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS twitter_checked BOOLEAN NOT NULL DEFAULT false",
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -123,6 +124,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.youtube_checked,
         BrandRaw.instagram_checked,
         BrandRaw.tiktok_checked,
+        BrandRaw.twitter_checked,
         BrandRaw.created_at,
     ]
     column_searchable_list = [
@@ -161,6 +163,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.youtube_checked,
         BrandRaw.instagram_checked,
         BrandRaw.tiktok_checked,
+        BrandRaw.twitter_checked,
         BrandRaw.created_at,
         BrandRaw.enrichment_failed,
     ]
@@ -313,6 +316,47 @@ class TiktokPostAdmin(ModelView, model=TiktokPost):
     page_size = 50
 
 
+class TwitterPostAdmin(ModelView, model=TwitterPost):
+    name         = "Twitter Post"
+    name_plural  = "Twitter Posts"
+    icon         = "fa-brands fa-x-twitter"
+    column_list  = [
+        TwitterPost.id,
+        TwitterPost.brand_raw,
+        TwitterPost.twitter_handle,
+        TwitterPost.created_at,
+        TwitterPost.likes,
+        TwitterPost.retweets,
+        TwitterPost.comments,
+        TwitterPost.quotes,
+        TwitterPost.is_sponsored,
+        TwitterPost.sponsor_signals,
+        TwitterPost.hashtags,
+        TwitterPost.mentions,
+        TwitterPost.has_media,
+        TwitterPost.username,
+        TwitterPost.verified,
+        TwitterPost.text,
+        TwitterPost.permalink,
+        TwitterPost.fetched_at,
+    ]
+    column_labels          = {TwitterPost.brand_raw: "Brand"}
+    column_searchable_list = [TwitterPost.twitter_handle, TwitterPost.username, TwitterPost.tweet_id, TwitterPost.text]
+    column_sortable_list   = [
+        TwitterPost.id,
+        TwitterPost.brand_raw_id,
+        TwitterPost.twitter_handle,
+        TwitterPost.created_at,
+        TwitterPost.likes,
+        TwitterPost.retweets,
+        TwitterPost.comments,
+        TwitterPost.is_sponsored,
+        TwitterPost.fetched_at,
+    ]
+    column_default_sort    = [(TwitterPost.likes, True)]
+    page_size = 50
+
+
 class BrandAdmin(ModelView, model=Brand):
     name         = "Brand"
     name_plural  = "Brands"
@@ -349,6 +393,7 @@ admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
 admin.add_view(InstagramPostAdmin)
 admin.add_view(TiktokPostAdmin)
+admin.add_view(TwitterPostAdmin)
 admin.add_view(BrandAdmin)
 admin.add_view(ContactAdmin)
 
