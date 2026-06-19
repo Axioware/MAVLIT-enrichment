@@ -67,13 +67,14 @@ class BrandRaw(Base):
     tranco_rank     = Column(Integer)
 
     # ── Per-step tracking flags ───────────────────────────────────────────────
-    wikidata_enriched  = Column(Boolean, nullable=False, server_default="false", default=False)
-    shopify_checked    = Column(Boolean, nullable=False, server_default="false", default=False)
-    tranco_checked     = Column(Boolean, nullable=False, server_default="false", default=False)
-    meta_ads_fetched   = Column(Boolean, nullable=False, server_default="false", default=False)
-    youtube_checked    = Column(Boolean, nullable=False, server_default="false", default=False)
-    instagram_checked  = Column(Boolean, nullable=False, server_default="false", default=False)
-    tiktok_checked     = Column(Boolean, nullable=False, server_default="false", default=False)
+    wikidata_enriched      = Column(Boolean, nullable=False, server_default="false", default=False)
+    shopify_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
+    google_social_checked  = Column(Boolean, nullable=False, server_default="false", default=False)
+    tranco_checked         = Column(Boolean, nullable=False, server_default="false", default=False)
+    meta_ads_fetched       = Column(Boolean, nullable=False, server_default="false", default=False)
+    youtube_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
+    instagram_checked      = Column(Boolean, nullable=False, server_default="false", default=False)
+    tiktok_checked         = Column(Boolean, nullable=False, server_default="false", default=False)
 
     def __str__(self) -> str:
         return self.name or f"Brand #{self.id}"

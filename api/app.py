@@ -54,6 +54,7 @@ def _run_migrations() -> None:
         # Signal enrichment — per-step tracking flags
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS wikidata_enriched BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS shopify_checked BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS google_social_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS tranco_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS meta_ads_fetched BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS youtube_checked BOOLEAN NOT NULL DEFAULT false",
@@ -494,7 +495,7 @@ def seed_status(job_id: str):
 def enrich_signals(body: EnrichRequest, background_tasks: BackgroundTasks):
     """
     Kick off signal enrichment in the background.
-    Steps: wikidata_socials, google_fallback, shopify, tranco, meta_ads.
+    Steps: wikidata_socials, shopify, google_social, tranco, meta_ads, youtube.
     Pass `steps` to run only a subset, e.g. ["shopify", "tranco"].
     Poll GET /enrich/signals/status/{job_id} to track progress.
     """
