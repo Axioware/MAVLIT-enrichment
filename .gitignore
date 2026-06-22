@@ -39,11 +39,7 @@ data/seeds/*.csv
 *.log
 *.json
 run pipeline.txt
-youtubetest.py
-test_instagram_scraper.py
 test_branded_content.py
-test_ad_library.py
 test.py
-test_branded_content_api.py
-test_meta_ads.py
 scoring.txt
+test1.py
