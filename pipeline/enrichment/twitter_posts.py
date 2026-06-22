@@ -116,7 +116,7 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
         "has_media":       bool(item.get("images")),
         "username":        item.get("username"),
         "fullname":        item.get("fullname"),
-        "verified":        item.get("verified"),
+        "verified":        v if isinstance(v := item.get("verified"), bool) else None,
     }
 
 
