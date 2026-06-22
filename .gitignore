@@ -38,7 +38,6 @@ data/seeds/*.csv
 # Logs
 *.log
 *.json
-run pipeline.txt
 test_branded_content.py
 test.py
 scoring.txt
