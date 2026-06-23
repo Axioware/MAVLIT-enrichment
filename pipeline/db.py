@@ -193,6 +193,10 @@ class InstagramPost(Base):
     video_view_count       = Column(Integer)
     video_play_count       = Column(Integer)
 
+    # Top commenters (list of {username, comment, profile_url} sorted by comment likes desc)
+    top_commenters                = Column(JSONB)
+    is_comment_profile_scraped    = Column(Boolean, nullable=False, server_default="false", default=False)
+
     # Profile snapshot (at time of scrape)
     followers_count        = Column(Integer)
     follows_count          = Column(Integer)

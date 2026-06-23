@@ -61,6 +61,8 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS instagram_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS tiktok_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS twitter_checked BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS top_commenters JSONB",
+        "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS is_comment_profile_scraped BOOLEAN NOT NULL DEFAULT false",
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -247,6 +249,8 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
         InstagramPost.timestamp,
         InstagramPost.likes_count,
         InstagramPost.comments_count,
+        InstagramPost.top_commenters,
+        InstagramPost.is_comment_profile_scraped,
         InstagramPost.video_view_count,
         InstagramPost.paid_partnership,
         InstagramPost.sponsors,

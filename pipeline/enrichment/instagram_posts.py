@@ -62,6 +62,29 @@ def _has_collaboration_signal(item: dict) -> bool:
     )
 
 
+def _top_commenters(item: dict, n: int = 10) -> list[dict] | None:
+    """Return up to n unique commenters sorted by comment likesCount desc."""
+    comments = item.get("latestComments") or []
+    seen: set[str] = set()
+    ranked: list[tuple[int, str, str]] = []
+    for c in comments:
+        username = c.get("ownerUsername") or ""
+        if not username or username in seen:
+            continue
+        seen.add(username)
+        ranked.append((c.get("likesCount") or 0, username, c.get("text") or ""))
+    ranked.sort(key=lambda x: x[0], reverse=True)
+    top = [
+        {
+            "username":    u,
+            "profile_url": f"https://www.instagram.com/{u}/",
+            "comment":     text,
+        }
+        for _, u, text in ranked[:n]
+    ]
+    return top or None
+
+
 def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
     """Map a raw Apify item to an instagram_posts table row.
     Returns None if no post_id or no collaboration signal."""
@@ -98,6 +121,7 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
         "biography":              item.get("biography"),
         "external_url":           item.get("externalUrl"),
         "business_category_name": item.get("businessCategoryName"),
+        "top_commenters":         _top_commenters(item),
     }
 
 
