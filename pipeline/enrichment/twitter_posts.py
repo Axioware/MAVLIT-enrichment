@@ -21,12 +21,13 @@ import logging
 import re
 import time
 
-from apify_client import ApifyClient
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN
 from pipeline.db import BrandRaw, TwitterPost
+from pipeline.helpers.apify import run_apify_actor
+from pipeline.helpers.db import upsert_rows
+from pipeline.helpers.social import normalize_handle
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +57,11 @@ def _detect_sponsorship(text: str) -> tuple[bool, list[str]]:
     return bool(matched), matched
 
 
-def _scrape_handle(handle: str) -> list[dict]:
-    """Run Apify actor for one Twitter handle and return raw tweet items."""
-    client = ApifyClient(APIFY_TOKEN)
+def _scrape_handle(handle: str) -> list[dict] | None:
+    """Run Apify actor for one Twitter handle and return raw tweet items.
+    Returns None (not []) when the actor fails so callers can skip marking
+    the brand as twitter_checked and retry on the next run."""
+    logger.info("Twitter: scraping @%s", handle)
     run_input = {
         "username":  handle,
         "maxItems":  _MAX_ITEMS,
@@ -66,18 +69,11 @@ def _scrape_handle(handle: str) -> list[dict]:
         "replies":   "exclude",
         "quotes":    "exclude",
     }
-    logger.info("Twitter: scraping @%s", handle)
-    try:
-        run = client.actor(_ACTOR_ID).call(run_input=run_input)
-        if run.get("status") != "SUCCEEDED":
-            logger.error("Twitter: Apify actor failed for @%s — status: %s", handle, run.get("status"))
-            return None   # None = actor failed (different from [] = no tweets)
-        items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-        logger.info("Twitter: @%s → %d items from Apify", handle, len(items))
-        return items
-    except Exception as exc:
-        logger.error("Twitter: Apify actor error for @%s — %s", handle, exc)
-        return None   # None = failed
+    return run_apify_actor(
+        _ACTOR_ID, run_input,
+        label=f"Twitter @{handle}",
+        require_success=True,
+    )
 
 
 def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
@@ -120,19 +116,6 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
     }
 
 
-def _insert_posts(db: Session, rows: list[dict]) -> int:
-    if not rows:
-        return 0
-    stmt = (
-        pg_insert(TwitterPost)
-        .values(rows)
-        .on_conflict_do_nothing(index_elements=["tweet_id"])
-    )
-    result = db.execute(stmt)
-    db.commit()
-    return result.rowcount
-
-
 def enrich_twitter_posts(db: Session, limit: int = 50) -> int:
     """
     For each brand with twitter_handle set and twitter_checked=False:
@@ -166,12 +149,7 @@ def enrich_twitter_posts(db: Session, limit: int = 50) -> int:
     processed   = 0
 
     for brand in brands:
-        raw = brand.twitter_handle.strip()
-        # Handle full URL, @username, or bare username
-        if "/" in raw:
-            handle = raw.rstrip("/").rsplit("/", 1)[-1].lstrip("@")
-        else:
-            handle = raw.lstrip("@")
+        handle = normalize_handle(brand.twitter_handle)
 
         items = _scrape_handle(handle)
 
@@ -182,7 +160,7 @@ def enrich_twitter_posts(db: Session, limit: int = 50) -> int:
             continue
 
         rows     = [r for item in items if (r := _build_row(brand.id, handle, item))]
-        inserted = _insert_posts(db, rows)
+        inserted = upsert_rows(db, TwitterPost, rows, ["tweet_id"])
         total_posts += inserted
 
         logger.info(

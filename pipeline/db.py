@@ -193,9 +193,8 @@ class InstagramPost(Base):
     video_view_count       = Column(Integer)
     video_play_count       = Column(Integer)
 
-    # Top commenters (list of {username, comment, profile_url} sorted by comment likes desc)
-    top_commenters                = Column(JSONB)
-    is_comment_profile_scraped    = Column(Boolean, nullable=False, server_default="false", default=False)
+    # LLM verification
+    llm_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
 
     # Profile snapshot (at time of scrape)
     followers_count        = Column(Integer)
@@ -278,6 +277,15 @@ class TwitterPost(Base):
     fetched_at      = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
+
+
+class Prompt(Base):
+    __tablename__ = "prompts"
+
+    id         = Column(Integer, primary_key=True)
+    name       = Column(Text, unique=True, nullable=False)
+    content    = Column(Text, nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
 def get_db():

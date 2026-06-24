@@ -20,12 +20,13 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
-from apify_client import ApifyClient
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN
 from pipeline.db import BrandRaw, TiktokPost
+from pipeline.helpers.apify import run_apify_actor
+from pipeline.helpers.db import upsert_rows
+from pipeline.helpers.social import normalize_handle
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +37,10 @@ _LOOKBACK_DAYS   = 30
 
 def _scrape_handle(handle: str, lookback_days: int) -> list[dict]:
     """Run Apify actor for one TikTok handle and return raw post items."""
-    client     = ApifyClient(APIFY_TOKEN)
+    logger.info("TikTok: scraping @%s (last %d days)", handle, lookback_days)
     start_date = (
         datetime.now(timezone.utc) - timedelta(days=lookback_days)
     ).strftime("%Y-%m-%d")
-
     run_input = {
         "profiles":              [handle],
         "profileScrapeSections": ["videos"],
@@ -49,16 +49,7 @@ def _scrape_handle(handle: str, lookback_days: int) -> list[dict]:
         "oldestPostDateUnified": start_date,
         "excludePinnedPosts":    True,
     }
-
-    logger.info("TikTok: scraping @%s (last %d days)", handle, lookback_days)
-    try:
-        run   = client.actor(_ACTOR_ID).call(run_input=run_input)
-        items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-        logger.info("TikTok: @%s → %d items from Apify", handle, len(items))
-        return items
-    except Exception as exc:
-        logger.error("TikTok: Apify actor failed for @%s — %s", handle, exc)
-        return []
+    return run_apify_actor(_ACTOR_ID, run_input, label=f"TikTok @{handle}")
 
 
 def _has_signal(item: dict) -> bool:
@@ -118,19 +109,6 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
     }
 
 
-def _insert_posts(db: Session, rows: list[dict]) -> int:
-    if not rows:
-        return 0
-    stmt = (
-        pg_insert(TiktokPost)
-        .values(rows)
-        .on_conflict_do_nothing(index_elements=["video_id"])
-    )
-    result = db.execute(stmt)
-    db.commit()
-    return result.rowcount
-
-
 def enrich_tiktok_posts(
     db: Session,
     limit: int = 50,
@@ -167,16 +145,11 @@ def enrich_tiktok_posts(
     total_posts = 0
 
     for brand in brands:
-        raw = brand.tiktok_handle.strip()
-        # Handle "@username", "username", and full URLs
-        if "/" in raw:
-            handle = raw.rstrip("/").rsplit("/", 1)[-1].lstrip("@")
-        else:
-            handle = raw.lstrip("@")
+        handle = normalize_handle(brand.tiktok_handle)
 
         items    = _scrape_handle(handle, lookback_days)
         rows     = [r for item in items if (r := _build_row(brand.id, handle, item))]
-        inserted = _insert_posts(db, rows)
+        inserted = upsert_rows(db, TiktokPost, rows, ["video_id"])
         total_posts += inserted
 
         logger.info(

@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from config import GOOGLE_API_KEY, GOOGLE_CX
 from pipeline.db import BrandRaw
+from pipeline.helpers.social import normalize_social_url
 
 logger = logging.getLogger(__name__)
 
@@ -81,16 +82,6 @@ def _is_valid_profile_url(url: str, expected_domain: str) -> bool:
         return True
     except Exception:
         return False
-
-
-def _normalize_social_url(url: str) -> str:
-    """Strip query string and fragment, enforce https."""
-    try:
-        p = urlparse(url)
-        path = p.path.rstrip("/")
-        return f"https://{p.netloc.lower()}{path}"
-    except Exception:
-        return url
 
 
 class _APIUnavailable(Exception):
@@ -146,7 +137,7 @@ def _find_social_url(brand_name: str, site_query: str, expected_domain: str) -> 
     urls  = _google_search(query)   # may raise _APIUnavailable
     for url in urls:
         if _is_valid_profile_url(url, expected_domain):
-            return _normalize_social_url(url)
+            return normalize_social_url(url)
     return None
 
 

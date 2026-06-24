@@ -16,13 +16,14 @@ Only runs for brands that have a website (has_official_website=True).
 
 import logging
 import time
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
 from pipeline.db import BrandRaw
+from pipeline.helpers.social import normalize_social_url
 
 logger = logging.getLogger(__name__)
 
@@ -48,16 +49,6 @@ _SKIP_PATHS = frozenset([
     "p", "reel", "explore", "hashtag", "search", "ads",
     "watch", "playlist", "shorts", "results",
 ])
-
-
-def _normalize_url(href: str) -> str:
-    """Keep scheme+host+path only — strip query string, fragment, trailing slash."""
-    try:
-        p = urlparse(href)
-        path = p.path.rstrip("/")
-        return urlunparse(("https", p.netloc, path, "", "", ""))
-    except Exception:
-        return href
 
 
 def _fetch_page(url: str) -> str | None:
@@ -109,36 +100,36 @@ def _extract_socials(html: str) -> dict[str, str]:
 
         if netloc == "instagram.com" and "instagram_handle" not in found:
             if first not in ("p", "reel", "stories", "explore", "tv"):
-                found["instagram_handle"] = _normalize_url(href)
+                found["instagram_handle"] = normalize_social_url(href)
 
         elif netloc in ("twitter.com", "x.com") and "twitter_handle" not in found:
             if first not in _SKIP_PATHS:
-                found["twitter_handle"] = _normalize_url(href)
+                found["twitter_handle"] = normalize_social_url(href)
 
         elif netloc == "facebook.com" and "facebook_page" not in found:
             if first == "pages" and len(parts) >= 2:
-                found["facebook_page"] = _normalize_url(href)
+                found["facebook_page"] = normalize_social_url(href)
             elif first not in _SKIP_PATHS and "." not in first:
-                found["facebook_page"] = _normalize_url(href)
+                found["facebook_page"] = normalize_social_url(href)
 
         elif netloc == "youtube.com" and "youtube_channel_id" not in found:
             if first in ("channel", "c", "user") and len(parts) >= 2:
-                found["youtube_channel_id"] = _normalize_url(href)
+                found["youtube_channel_id"] = normalize_social_url(href)
             elif parts[0].startswith("@"):
-                found["youtube_channel_id"] = _normalize_url(href)
+                found["youtube_channel_id"] = normalize_social_url(href)
             elif first not in _SKIP_PATHS:
-                found["youtube_channel_id"] = _normalize_url(href)
+                found["youtube_channel_id"] = normalize_social_url(href)
 
         elif netloc == "tiktok.com" and "tiktok_handle" not in found:
             handle = parts[0].lower()
             if handle.startswith("@"):
                 handle = handle[1:]
             if handle and handle not in _SKIP_PATHS:
-                found["tiktok_handle"] = _normalize_url(href)
+                found["tiktok_handle"] = normalize_social_url(href)
 
         elif netloc == "linkedin.com" and "linkedin_id" not in found:
             if first == "company" and len(parts) >= 2:
-                found["linkedin_id"] = _normalize_url(href)
+                found["linkedin_id"] = normalize_social_url(href)
 
     return found
 

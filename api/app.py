@@ -8,7 +8,11 @@ from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
-from pipeline.db import Base, Brand, BrandRaw, Contact, InstagramPost, MetaAd, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, Brand, BrandRaw, Contact, InstagramPost, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
+from pipeline.enrichment.instagram_posts import (
+    FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
+    COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT,
+)
 from pipeline.enrichment.orchestrator import run_signal_enrichment
 from pipeline.seed import run_seed
 
@@ -61,13 +65,26 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS instagram_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS tiktok_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS twitter_checked BOOLEAN NOT NULL DEFAULT false",
-        "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS top_commenters JSONB",
-        "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS is_comment_profile_scraped BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS top_commenters",
+        "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS is_comment_profile_scraped",
+        "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS confirmed_creators",
+        "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS llm_checked BOOLEAN NOT NULL DEFAULT false",
+        "DROP TABLE IF EXISTS instagram_commenters",
     ]
     with engine.connect() as conn:
         for sql in stmts:
             conn.execute(text(sql))
         conn.commit()
+
+    # Seed default prompts (on conflict = already exists, keep existing content)
+    with SessionLocal() as db:
+        for name, content in [
+            (FULL_PROMPT_NAME,    FULL_DEFAULT_PROMPT),
+            (COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT),
+        ]:
+            if not db.query(Prompt).filter(Prompt.name == name).first():
+                db.add(Prompt(name=name, content=content))
+        db.commit()
 
 
 @asynccontextmanager
@@ -249,11 +266,10 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
         InstagramPost.timestamp,
         InstagramPost.likes_count,
         InstagramPost.comments_count,
-        InstagramPost.top_commenters,
-        InstagramPost.is_comment_profile_scraped,
         InstagramPost.video_view_count,
         InstagramPost.paid_partnership,
         InstagramPost.sponsors,
+        InstagramPost.llm_checked,
         InstagramPost.mentions,
         InstagramPost.tagged_users,
         InstagramPost.coauthor_producers,
@@ -274,6 +290,8 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
         InstagramPost.video_view_count,
         InstagramPost.followers_count,
         InstagramPost.paid_partnership,
+        InstagramPost.llm_checked,
+        InstagramPost.coauthor_producers,
         InstagramPost.fetched_at,
     ]
     column_default_sort    = [(InstagramPost.id, True)]
@@ -361,6 +379,16 @@ class TwitterPostAdmin(ModelView, model=TwitterPost):
     page_size = 50
 
 
+class PromptAdmin(ModelView, model=Prompt):
+    name         = "Prompt"
+    name_plural  = "Prompts"
+    icon         = "fa-solid fa-wand-magic-sparkles"
+    column_list  = [Prompt.id, Prompt.name, Prompt.content, Prompt.updated_at]
+    column_searchable_list = [Prompt.name]
+    column_default_sort    = [(Prompt.id, True)]
+    page_size = 20
+
+
 class BrandAdmin(ModelView, model=Brand):
     name         = "Brand"
     name_plural  = "Brands"
@@ -396,6 +424,7 @@ admin.add_view(BrandRawAdmin)
 admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
 admin.add_view(InstagramPostAdmin)
+admin.add_view(PromptAdmin)
 admin.add_view(TiktokPostAdmin)
 admin.add_view(TwitterPostAdmin)
 admin.add_view(BrandAdmin)
@@ -569,3 +598,58 @@ def enrich_signals_status(job_id: str):
         results=job.get("results"),
         error=job.get("error"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Prompt endpoints
+# ---------------------------------------------------------------------------
+
+class PromptResponse(BaseModel):
+    name:       str
+    content:    str
+    updated_at: str | None = None
+
+
+class PromptUpdateRequest(BaseModel):
+    content: str
+
+
+@app.get("/prompts/{name}", response_model=PromptResponse)
+def get_prompt(name: str):
+    """Return a prompt by name. Returns the hardcoded default if not found in DB."""
+    db = SessionLocal()
+    try:
+        row = db.query(Prompt).filter(Prompt.name == name).first()
+        if row:
+            return PromptResponse(
+                name=row.name,
+                content=row.content,
+                updated_at=str(row.updated_at) if row.updated_at else None,
+            )
+        if name == PROMPT_NAME:
+            return PromptResponse(name=name, content=DEFAULT_PROMPT)
+        raise HTTPException(status_code=404, detail=f"Prompt '{name}' not found")
+    finally:
+        db.close()
+
+
+@app.put("/prompts/{name}", response_model=PromptResponse)
+def update_prompt(name: str, body: PromptUpdateRequest):
+    """Create or update a prompt by name."""
+    db = SessionLocal()
+    try:
+        row = db.query(Prompt).filter(Prompt.name == name).first()
+        if row:
+            row.content = body.content
+        else:
+            row = Prompt(name=name, content=body.content)
+            db.add(row)
+        db.commit()
+        db.refresh(row)
+        return PromptResponse(
+            name=row.name,
+            content=row.content,
+            updated_at=str(row.updated_at) if row.updated_at else None,
+        )
+    finally:
+        db.close()

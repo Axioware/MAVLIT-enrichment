@@ -28,8 +28,9 @@ import httpx
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, ANTHROPIC_API_KEY, ENABLE_LLM
+from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, MISTRAL_API_KEY, ENABLE_LLM
 from pipeline.db import BrandRaw, YoutubeSponsorship
+from pipeline.helpers.llm import call_mistral_text
 
 logger = logging.getLogger(__name__)
 
@@ -266,17 +267,13 @@ def _llm_verify_sponsorship(
     detected_type: str,
 ) -> tuple[bool, str]:
     """
-    Ask Claude to verify whether a video is a genuine sponsorship for the brand
+    Ask Mistral to verify whether a video is a genuine sponsorship for the brand
     or a false positive detected by the regex.
 
     Returns (is_genuine: bool, reason: str).
-    Falls back to True (keep the video) on any API error so no data is lost.
-    Only called when ENABLE_LLM=true and ANTHROPIC_API_KEY is set.
+    Falls back to True (keep the video) on any error so no data is lost.
+    Only called when ENABLE_LLM=true and MISTRAL_API_KEY is set.
     """
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
     prompt = f"""You are verifying whether a YouTube video is a genuine brand sponsorship or a false positive.
 
 Brand: {brand_name}
@@ -294,25 +291,19 @@ Answer with ONLY this format:
 RESULT: YES or NO
 REASON: one short sentence explaining why"""
 
-    try:
-        message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=100,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = message.content[0].text.strip()
-        result_line = next((l for l in text.splitlines() if l.startswith("RESULT:")), "")
-        reason_line = next((l for l in text.splitlines() if l.startswith("REASON:")), "")
-        is_genuine = "YES" in result_line.upper()
-        reason = reason_line.replace("REASON:", "").strip()
-        logger.debug(
-            "LLM verify '%s' for brand '%s': %s — %s",
-            title[:60], brand_name, "GENUINE" if is_genuine else "FALSE POSITIVE", reason,
-        )
-        return is_genuine, reason
-    except Exception as exc:
-        logger.warning("LLM verification failed for '%s' — keeping video: %s", title[:60], exc)
+    text = call_mistral_text(prompt, context=title[:60])
+    if not text:
         return True, "LLM error — kept by default"
+
+    result_line = next((l for l in text.splitlines() if l.startswith("RESULT:")), "")
+    reason_line = next((l for l in text.splitlines() if l.startswith("REASON:")), "")
+    is_genuine  = "YES" in result_line.upper()
+    reason      = reason_line.replace("REASON:", "").strip()
+    logger.debug(
+        "LLM verify '%s' for brand '%s': %s — %s",
+        title[:60], brand_name, "GENUINE" if is_genuine else "FALSE POSITIVE", reason,
+    )
+    return is_genuine, reason
 
 
 # ── Main enrichment function ───────────────────────────────────────────────────
@@ -434,7 +425,7 @@ def enrich_youtube_sponsorships(db: Session, limit: int = 50) -> int:
                 continue  # skip videos with no sponsorship signal
 
             # ── LLM false-positive check (only when ENABLE_LLM=true) ──────────
-            if ENABLE_LLM and ANTHROPIC_API_KEY:
+            if ENABLE_LLM and MISTRAL_API_KEY:
                 is_genuine, llm_reason = _llm_verify_sponsorship(
                     name, title, description, stype
                 )

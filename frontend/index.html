@@ -308,6 +308,84 @@
       transition: background .15s, color .15s, border-color .15s;
     }
     .btn-ghost:hover { background: rgba(239,68,68,.08); color: #f87171; border-color: rgba(239,68,68,.4); }
+
+    /* ── Prompt editor ── */
+    textarea.prompt-box {
+      width: 100%;
+      min-height: 240px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: .85rem 1rem;
+      color: #f1f5f9;
+      font-size: .85rem;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      line-height: 1.6;
+      resize: vertical;
+      outline: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    textarea.prompt-box:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 3px rgba(56,189,248,.15);
+    }
+    .prompt-actions {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      margin-top: 1rem;
+    }
+    .btn-save {
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
+      padding: .6rem 1.5rem;
+      background: #0284c7;
+      color: #fff;
+      font-size: .875rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background .15s, opacity .15s;
+    }
+    .btn-save:hover { background: #0369a1; }
+    .btn-save:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-reset {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      padding: .6rem 1.1rem;
+      background: transparent;
+      color: #64748b;
+      font-size: .8rem;
+      font-weight: 500;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: color .15s, border-color .15s;
+    }
+    .btn-reset:hover { color: #94a3b8; border-color: #475569; }
+    .prompt-msg {
+      font-size: .8rem;
+      margin-left: auto;
+    }
+    .prompt-msg.ok    { color: #22c55e; }
+    .prompt-msg.error { color: #f87171; }
+    .prompt-hint {
+      font-size: .78rem;
+      color: #475569;
+      margin-top: .6rem;
+      line-height: 1.5;
+    }
+    .prompt-hint code {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 4px;
+      padding: .1em .35em;
+      font-size: .85em;
+      color: #7dd3fc;
+    }
   </style>
 </head>
 <body>
@@ -506,6 +584,31 @@
       Clear history
     </button>
   </div>
+
+  <!-- Prompt editor -->
+  <div class="card" id="promptCard">
+    <p class="card-title">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9.663 17h4.673M12 3v1m6.364 1.636-.707.707M21 12h-1M4 12H3m3.343-5.657-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+      Prompt — Instagram Commentator Scraper
+    </p>
+    <label for="promptBox">LLM Prompt</label>
+    <textarea class="prompt-box" id="promptBox" spellcheck="false"></textarea>
+    <p class="prompt-hint">
+      Available variables: <code>{username}</code> <code>{profile_url}</code> <code>{comment}</code><br>
+      Must return JSON with: <code>should_scrape</code> (true/false) <code>gender</code> <code>country</code> <code>age_group</code>
+    </p>
+    <div class="prompt-actions">
+      <button class="btn-save" id="savePromptBtn" onclick="savePrompt()">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>
+        Save Prompt
+      </button>
+      <button class="btn-reset" onclick="loadPrompt()">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+        Reload
+      </button>
+      <span class="prompt-msg" id="promptMsg"></span>
+    </div>
+  </div>
 </main>
 
 <script>
@@ -645,6 +748,55 @@
   document.getElementById('niche').addEventListener('keydown', e => {
     if (e.key === 'Enter') startSeed();
   });
+
+  // ── Prompt editor ───────────────────────────────────────────────────
+  const PROMPT_NAME = 'instagram_commentator_scraper';
+
+  function loadPrompt() {
+    const msg = document.getElementById('promptMsg');
+    msg.textContent = 'Loading…';
+    msg.className = 'prompt-msg';
+    fetch(`/prompts/${PROMPT_NAME}`)
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById('promptBox').value = data.content;
+        msg.textContent = 'Loaded';
+        msg.className = 'prompt-msg ok';
+        setTimeout(() => { msg.textContent = ''; }, 2000);
+      })
+      .catch(err => {
+        msg.textContent = 'Failed to load: ' + err.message;
+        msg.className = 'prompt-msg error';
+      });
+  }
+
+  function savePrompt() {
+    const content = document.getElementById('promptBox').value;
+    const btn     = document.getElementById('savePromptBtn');
+    const msg     = document.getElementById('promptMsg');
+    if (!content.trim()) return;
+    btn.disabled = true;
+    msg.textContent = 'Saving…';
+    msg.className = 'prompt-msg';
+    fetch(`/prompts/${PROMPT_NAME}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        msg.textContent = 'Saved ✓  ' + (data.updated_at ? new Date(data.updated_at).toLocaleTimeString() : '');
+        msg.className = 'prompt-msg ok';
+      })
+      .catch(err => {
+        msg.textContent = 'Error: ' + err.message;
+        msg.className = 'prompt-msg error';
+      })
+      .finally(() => { btn.disabled = false; });
+  }
+
+  // Load prompt on page open
+  loadPrompt();
 </script>
 </body>
 </html>

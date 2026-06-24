@@ -26,3 +26,11 @@ APIFY_TOKEN       = os.getenv("APIFY_TOKEN", "")
 # LLM verification (Claude) — set ENABLE_LLM=true to activate
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ENABLE_LLM        = os.getenv("ENABLE_LLM", "false").strip().lower() == "true"
+
+# Demographics classification (Mistral)
+MISTRAL_API_KEY   = os.getenv("MISTRAL_API_KEY", "")
+
+# Instagram post LLM creator verification — independent of ENABLE_LLM
+# When true: taggedUsers + mentions are also sent to LLM (in addition to coauthorProducers)
+# When false: only coauthorProducers is LLM-checked (always on)
+ENABLE_INSTA_LLM  = os.getenv("ENABLE_INSTA_LLM", "false").strip().lower() == "true"
