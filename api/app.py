@@ -8,10 +8,13 @@ from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
-from pipeline.db import Base, Brand, BrandRaw, Contact, InstagramPost, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, Brand, BrandInstagramUser, BrandRaw, Contact, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
 from pipeline.enrichment.instagram_posts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
     COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT,
+)
+from pipeline.enrichment.instagram_users import (
+    DEMOGRAPHICS_PROMPT_NAME, DEMOGRAPHICS_DEFAULT_PROMPT,
 )
 from pipeline.enrichment.orchestrator import run_signal_enrichment
 from pipeline.seed import run_seed
@@ -69,6 +72,8 @@ def _run_migrations() -> None:
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS is_comment_profile_scraped",
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS confirmed_creators",
         "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS llm_checked BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS is_users_scraped BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS user_type TEXT",
         "DROP TABLE IF EXISTS instagram_commenters",
     ]
     with engine.connect() as conn:
@@ -79,8 +84,9 @@ def _run_migrations() -> None:
     # Seed default prompts (on conflict = already exists, keep existing content)
     with SessionLocal() as db:
         for name, content in [
-            (FULL_PROMPT_NAME,    FULL_DEFAULT_PROMPT),
-            (COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT),
+            (FULL_PROMPT_NAME,          FULL_DEFAULT_PROMPT),
+            (COAUTHOR_PROMPT_NAME,      COAUTHOR_DEFAULT_PROMPT),
+            (DEMOGRAPHICS_PROMPT_NAME,  DEMOGRAPHICS_DEFAULT_PROMPT),
         ]:
             if not db.query(Prompt).filter(Prompt.name == name).first():
                 db.add(Prompt(name=name, content=content))
@@ -270,6 +276,7 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
         InstagramPost.paid_partnership,
         InstagramPost.sponsors,
         InstagramPost.llm_checked,
+        InstagramPost.is_users_scraped,
         InstagramPost.mentions,
         InstagramPost.tagged_users,
         InstagramPost.coauthor_producers,
@@ -292,12 +299,80 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
         InstagramPost.paid_partnership,
         InstagramPost.sponsors,
         InstagramPost.llm_checked,
+        InstagramPost.is_users_scraped,
         InstagramPost.coauthor_producers,
         InstagramPost.mentions,
         InstagramPost.tagged_users,
         InstagramPost.fetched_at,
     ]
     column_default_sort    = [(InstagramPost.id, True)]
+    page_size = 50
+
+
+class InstagramUserAdmin(ModelView, model=InstagramUser):
+    name         = "Instagram User"
+    name_plural  = "Instagram Users"
+    icon         = "fa-solid fa-user-circle"
+    column_list  = [
+        InstagramUser.id,
+        InstagramUser.username,
+        InstagramUser.user_type,
+        InstagramUser.full_name,
+        InstagramUser.followers_count,
+        InstagramUser.follows_count,
+        InstagramUser.posts_count,
+        InstagramUser.is_verified,
+        InstagramUser.is_business_account,
+        InstagramUser.gender,
+        InstagramUser.country,
+        InstagramUser.language,
+        InstagramUser.location,
+        InstagramUser.age_group,
+        InstagramUser.bio,
+        InstagramUser.external_url,
+        InstagramUser.profile_url,
+        InstagramUser.fetched_at,
+    ]
+    column_searchable_list = [
+        InstagramUser.username,
+        InstagramUser.full_name,
+        InstagramUser.bio,
+        InstagramUser.country,
+        InstagramUser.location,
+    ]
+    column_sortable_list   = [
+        InstagramUser.id,
+        InstagramUser.username,
+        InstagramUser.user_type,
+        InstagramUser.followers_count,
+        InstagramUser.follows_count,
+        InstagramUser.posts_count,
+        InstagramUser.is_verified,
+        InstagramUser.gender,
+        InstagramUser.country,
+        InstagramUser.language,
+        InstagramUser.age_group,
+        InstagramUser.fetched_at,
+    ]
+    column_default_sort    = [(InstagramUser.followers_count, True)]
+    page_size = 50
+
+
+class BrandInstagramUserAdmin(ModelView, model=BrandInstagramUser):
+    name         = "Brand ↔ Instagram User"
+    name_plural  = "Brand Instagram Users"
+    icon         = "fa-solid fa-link"
+    column_list  = [
+        BrandInstagramUser.brand_raw,
+        BrandInstagramUser.instagram_user,
+        BrandInstagramUser.created_at,
+    ]
+    column_labels = {
+        BrandInstagramUser.brand_raw:      "Brand",
+        BrandInstagramUser.instagram_user: "Instagram User",
+    }
+    column_sortable_list = [BrandInstagramUser.created_at]
+    column_default_sort  = [(BrandInstagramUser.created_at, True)]
     page_size = 50
 
 
@@ -427,6 +502,8 @@ admin.add_view(BrandRawAdmin)
 admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
 admin.add_view(InstagramPostAdmin)
+admin.add_view(InstagramUserAdmin)
+admin.add_view(BrandInstagramUserAdmin)
 admin.add_view(PromptAdmin)
 admin.add_view(TiktokPostAdmin)
 admin.add_view(TwitterPostAdmin)

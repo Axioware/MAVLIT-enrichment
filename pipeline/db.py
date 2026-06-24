@@ -196,6 +196,9 @@ class InstagramPost(Base):
     # LLM verification
     llm_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
 
+    # User enrichment tracking
+    is_users_scraped   = Column(Boolean, nullable=False, server_default="false", default=False)
+
     # Profile snapshot (at time of scrape)
     followers_count        = Column(Integer)
     follows_count          = Column(Integer)
@@ -209,6 +212,51 @@ class InstagramPost(Base):
     fetched_at             = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
+
+
+class InstagramUser(Base):
+    __tablename__ = "instagram_users"
+
+    id                  = Column(Integer, primary_key=True)
+    username            = Column(Text, unique=True, nullable=False)
+    profile_url         = Column(Text)
+
+    # Profile snapshot
+    full_name           = Column(Text)
+    bio                 = Column(Text)
+    external_url        = Column(Text)
+    followers_count     = Column(Integer)
+    follows_count       = Column(Integer)
+    posts_count         = Column(Integer)
+    is_verified         = Column(Boolean)
+    is_business_account = Column(Boolean)
+
+    # Source type: "coauthor_producer", "tagged_user", "mention", "commenter"
+    user_type           = Column(Text)
+
+    # LLM demographics
+    gender              = Column(Text)
+    country             = Column(Text)
+    language            = Column(Text)
+    location            = Column(Text)
+    age_group           = Column(Text)
+
+    # Top 5 posts with their top 5 comments each
+    top_posts           = Column(JSONB)
+
+    raw_profile         = Column(JSONB)
+    fetched_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class BrandInstagramUser(Base):
+    __tablename__ = "brand_instagram_users"
+
+    brand_raw_id      = Column(Integer, ForeignKey("brands_raw.id"), primary_key=True)
+    instagram_user_id = Column(Integer, ForeignKey("instagram_users.id"), primary_key=True)
+    created_at        = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    brand_raw      = relationship("BrandRaw",      lazy="selectin", foreign_keys=[brand_raw_id])
+    instagram_user = relationship("InstagramUser", lazy="selectin", foreign_keys=[instagram_user_id])
 
 
 class TiktokPost(Base):

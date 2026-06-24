@@ -106,3 +106,16 @@ db = SessionLocal()
 enrich_twitter_posts(db, limit=1)
 db.close()
 "
+
+## run intagram_users.py
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.instagram_users import enrich_instagram_users
+db = SessionLocal()
+result = enrich_instagram_users(db, limit=1)
+print('Posts processed:', result)
+db.close()
+"
+
