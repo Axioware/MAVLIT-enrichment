@@ -9,7 +9,7 @@ from pipeline.db import SessionLocal
 from pipeline.enrichment.instagram_posts import enrich_instagram_posts
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 db = SessionLocal()
-enrich_instagram_posts(db, limit=5)
+enrich_instagram_posts(db, limit=1)
 db.close()
 "
 
@@ -20,8 +20,8 @@ from dotenv import load_dotenv; load_dotenv()
 from pipeline.db import SessionLocal
 from pipeline.enrichment.youtube_sponsorship import enrich_youtube_sponsorships
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
-db = SessionLocal()
-enrich_youtube_sponsorships(db, limit=500)
+db = SessionLocal() 
+enrich_youtube_sponsorships(db, limit=1)
 db.close()
 "
 
@@ -33,7 +33,7 @@ from pipeline.db import SessionLocal
 from pipeline.enrichment.tiktok_posts import enrich_tiktok_posts
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 db = SessionLocal()
-enrich_tiktok_posts(db, limit=5)
+enrich_tiktok_posts(db, limit=1)
 db.close()
 "
 
@@ -45,7 +45,7 @@ from pipeline.db import SessionLocal
 from pipeline.enrichment.meta_ads import enrich_meta_ads
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 db = SessionLocal()
-enrich_meta_ads(db, limit=50)
+enrich_meta_ads(db, limit=1)
 db.close()
 "
 
@@ -57,7 +57,7 @@ from pipeline.db import SessionLocal
 from pipeline.enrichment.wikidata_socials import enrich_wikidata_socials
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 db = SessionLocal()
-enrich_wikidata_socials(db, limit=5)
+enrich_wikidata_socials(db, limit=1)
 db.close()
 "
 
@@ -68,7 +68,7 @@ from pipeline.db import SessionLocal
 from pipeline.enrichment.shopify_detect import enrich_shopify
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 db = SessionLocal()
-enrich_shopify(db, limit=5)
+enrich_shopify(db, limit=1)
 db.close()
 "
 
@@ -80,7 +80,7 @@ from pipeline.db import SessionLocal
 from pipeline.enrichment.tranco import enrich_tranco
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 db = SessionLocal()
-enrich_tranco(db, limit=5)
+enrich_tranco(db, limit=1)
 db.close()
 "
 
@@ -91,7 +91,7 @@ from pipeline.db import SessionLocal
 from pipeline.enrichment.google_social_search import enrich_google_socials
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 db = SessionLocal()
-enrich_google_socials(db, limit=10)
+enrich_google_socials(db, limit=1)
 db.close()
 "
 
@@ -103,6 +103,6 @@ from pipeline.db import SessionLocal
 from pipeline.enrichment.twitter_posts import enrich_twitter_posts
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 db = SessionLocal()
-enrich_twitter_posts(db, limit=5)
+enrich_twitter_posts(db, limit=1)
 db.close()
 "

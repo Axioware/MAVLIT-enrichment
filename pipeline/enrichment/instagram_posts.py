@@ -116,6 +116,13 @@ def _fmt(value) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _strip_pic(items) -> list[dict] | None:
+    """Remove profile_pic_url from each entry in a list of user dicts."""
+    if not items or not isinstance(items, list):
+        return items
+    return [{k: v for k, v in entry.items() if k != "profile_pic_url"} for entry in items]
+
+
 # ── LLM functions ─────────────────────────────────────────────────────────────
 
 def _llm_filter_all(db: Session, item: dict, brand_name: str) -> dict | None:
@@ -203,8 +210,8 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
         "caption":                item.get("caption"),
         "hashtags":               item.get("hashtags"),
         "mentions":               item.get("mentions"),
-        "tagged_users":           item.get("taggedUsers"),
-        "coauthor_producers":     item.get("coauthorProducers"),
+        "tagged_users":           _strip_pic(item.get("taggedUsers")),
+        "coauthor_producers":     _strip_pic(item.get("coauthorProducers")),
         "paid_partnership":       item.get("paidPartnership"),
         "sponsors":               item.get("sponsors"),
         "likes_count":            item.get("likesCount"),

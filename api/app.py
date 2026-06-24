@@ -293,6 +293,8 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
         InstagramPost.sponsors,
         InstagramPost.llm_checked,
         InstagramPost.coauthor_producers,
+        InstagramPost.mentions,
+        InstagramPost.tagged_users,
         InstagramPost.fetched_at,
     ]
     column_default_sort    = [(InstagramPost.id, True)]
