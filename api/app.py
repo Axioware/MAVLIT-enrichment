@@ -290,6 +290,7 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
         InstagramPost.video_view_count,
         InstagramPost.followers_count,
         InstagramPost.paid_partnership,
+        InstagramPost.sponsors,
         InstagramPost.llm_checked,
         InstagramPost.coauthor_producers,
         InstagramPost.fetched_at,
@@ -626,8 +627,12 @@ def get_prompt(name: str):
                 content=row.content,
                 updated_at=str(row.updated_at) if row.updated_at else None,
             )
-        if name == PROMPT_NAME:
-            return PromptResponse(name=name, content=DEFAULT_PROMPT)
+        _defaults = {
+            FULL_PROMPT_NAME:    FULL_DEFAULT_PROMPT,
+            COAUTHOR_PROMPT_NAME: COAUTHOR_DEFAULT_PROMPT,
+        }
+        if name in _defaults:
+            return PromptResponse(name=name, content=_defaults[name])
         raise HTTPException(status_code=404, detail=f"Prompt '{name}' not found")
     finally:
         db.close()
