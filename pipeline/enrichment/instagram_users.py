@@ -77,44 +77,96 @@ def _collect_creators(post: InstagramPost) -> dict[str, str]:
     """
     Returns {username: user_type} for all users in the post's collaboration fields.
     Priority: coauthor_producer overwrites tagged_user overwrites mention.
+    Skips any username that matches the brand's own Instagram handle.
     """
     result: dict[str, str] = {}
+    brand_handle = (post.instagram_handle or "").lower().lstrip("@")
+
+    def _is_brand(username: str) -> bool:
+        return username.lower() == brand_handle
 
     # lowest priority first so higher priority overwrites
     for m in post.mentions or []:
         if isinstance(m, str) and m:
-            result[m.lstrip("@")] = "mention"
+            u = m.lstrip("@")
+            if u and not _is_brand(u):
+                result[u] = "mention"
 
     for entry in post.tagged_users or []:
-        if isinstance(entry, dict) and entry.get("username"):
-            result[entry["username"]] = "tagged_user"
+        u = entry.get("username") if isinstance(entry, dict) else None
+        if u and not _is_brand(u):
+            result[u] = "tagged_user"
 
     for entry in post.coauthor_producers or []:
-        if isinstance(entry, dict) and entry.get("username"):
-            result[entry["username"]] = "coauthor_producer"
+        u = entry.get("username") if isinstance(entry, dict) else None
+        if u and not _is_brand(u):
+            result[u] = "coauthor_producer"
 
     return result
 
 
+def _post_url(post_item: dict) -> str | None:
+    """Build an Instagram post URL from a post item using shortCode (most reliable)."""
+    short = post_item.get("shortCode")
+    if short:
+        return f"https://www.instagram.com/p/{short}/"
+    return post_item.get("url") or None
+
+
+def _scrape_post_comments(post_url: str, n: int = 5) -> list[str]:
+    """Fetch up to n commenter usernames for a single post URL via Apify comments call."""
+    logger.info("Instagram users: fetching comments via Apify for %s", post_url)
+    items = run_apify_actor(
+        _ACTOR_ID,
+        {
+            "directUrls":   [post_url],
+            "resultsType":  "comments",
+            "resultsLimit": n,
+        },
+        label=f"IGUsers comments {post_url}",
+    )
+    logger.info("Instagram users: comments Apify returned %d item(s) for %s", len(items or []), post_url)
+    return [
+        c.get("ownerUsername", "").strip()
+        for c in (items or [])
+        if (c.get("ownerUsername") or "").strip()
+    ]
+
+
 def _collect_commenters(posts: list[dict], n_per_post: int = 5) -> list[str]:
     """
-    Collect up to n_per_post unique commenter usernames per post (sorted by likes),
-    deduplicated across all posts. Returns up to n_per_post * len(posts) usernames.
+    Collect up to n_per_post unique commenter usernames across all posts.
+    Uses latestComments if present; falls back to a separate Apify call per post if empty.
     """
     seen: set[str] = set()
     result: list[str] = []
-    for post in posts:
-        comments = post.get("latestComments") or []
-        by_likes = sorted(comments, key=lambda c: c.get("likesCount") or 0, reverse=True)
+
+    for post_item in posts:
+        comments = post_item.get("latestComments") or []
+
+        if comments:
+            by_likes = sorted(comments, key=lambda c: c.get("likesCount") or 0, reverse=True)
+            usernames = [
+                (c.get("ownerUsername") or "").strip()
+                for c in by_likes
+                if (c.get("ownerUsername") or "").strip()
+            ]
+        else:
+            url = _post_url(post_item)
+            if not url:
+                continue
+            usernames = _scrape_post_comments(url, n=n_per_post)
+            time.sleep(0.5)
+
         count = 0
-        for c in by_likes:
-            uname = (c.get("ownerUsername") or "").strip()
+        for uname in usernames:
             if uname and uname not in seen:
                 seen.add(uname)
                 result.append(uname)
                 count += 1
                 if count >= n_per_post:
                     break
+
     return result
 
 
