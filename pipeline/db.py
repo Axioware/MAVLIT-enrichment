@@ -46,7 +46,7 @@ class BrandRaw(Base):
     operating_area    = Column(Text)
     created_at        = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
-    # ── Social media handles (from Wikidata Layer 1 enrichment) ──────────────
+    #  Social media handles (from Wikidata Layer 1 enrichment) 
     instagram_handle    = Column(Text)
     youtube_channel_id  = Column(Text)
     twitter_handle      = Column(Text)
@@ -55,18 +55,18 @@ class BrandRaw(Base):
     tiktok_handle       = Column(Text)
     linkedin_id         = Column(Text)
 
-    # ── Website enrichment ────────────────────────────────────────────────────
+    #  Website enrichment 
     has_official_website     = Column(Boolean)
     website_source           = Column(Text)   # 'wikidata' | 'google' | 'none'
     google_discovered_website = Column(Text)
 
-    # ── Signal detection ──────────────────────────────────────────────────────
+    #  Signal detection 
     is_shopify      = Column(Boolean)
     is_woocommerce  = Column(Boolean)
     in_tranco_list  = Column(Boolean)
     tranco_rank     = Column(Integer)
 
-    # ── Per-step tracking flags ───────────────────────────────────────────────
+    #  Per-step tracking flags 
     wikidata_enriched      = Column(Boolean, nullable=False, server_default="false", default=False)
     shopify_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
     google_social_checked  = Column(Boolean, nullable=False, server_default="false", default=False)

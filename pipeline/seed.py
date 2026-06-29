@@ -100,7 +100,7 @@ def run_seed(
             **geo_active,
         }
 
-    # ── Source 1: Wikipedia ───────────────────────────────────────────────────
+    #  Source 1: Wikipedia 
     logger.info("Scraping Wikipedia for niche '%s'", niche)
     try:
         wiki_records = search_wikipedia_brands(
@@ -129,7 +129,7 @@ def run_seed(
     except Exception:
         logger.exception("Wikipedia scrape failed for niche '%s'", niche)
 
-    # ── Source 2: Wikidata ────────────────────────────────────────────────────
+    #  Source 2: Wikidata 
     logger.info("Querying Wikidata for niche '%s'", niche)
     try:
         wikidata_records = search_wikidata_brands(
@@ -159,7 +159,7 @@ def run_seed(
     except Exception:
         logger.exception("Wikidata query failed for niche '%s'", niche)
 
-    # ── Source 3: Google SERP (optional) ─────────────────────────────────────
+    #  Source 3: Google SERP (optional) 
     # google_brand_search still returns list[str]; no website/domain available.
     if use_google:
         query = f"top {niche} brands"
@@ -178,12 +178,12 @@ def run_seed(
 
     logger.info("Total raw names collected: %d", len(collected))
 
-    # ── Normalise ────────────────────────────────────────────────────────────
+    #  Normalise 
     for row in collected:
         row["normalized"] = normalize(row["name"])
     collected = [r for r in collected if r["normalized"]]
 
-    # ── Deduplicate — priority: wikidata_id > fuzzy name ─────────────────────
+    #  Deduplicate — priority: wikidata_id > fuzzy name 
     # Pass 1: group by wikidata_id; keep the highest-confidence source record.
     qid_best: dict[str, dict] = {}
     no_qid_rows: list[dict] = []

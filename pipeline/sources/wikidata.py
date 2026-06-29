@@ -57,7 +57,7 @@ _SPARQL_SLEEP    = (8.0, 15.0)
 _API_SLEEP       = (1.5,  3.0)
 _MAX_RETRY_AFTER = 120  # cap for Retry-After header; raised to handle 1 req/min outage rules
 
-# ── QID noise filter ─────────────────────────────────────────────────────────
+#  QID noise filter 
 # Use PHRASES not single words — single words ("scientific", "series", "event")
 # cause false positives for legitimate niche terms like "technology" whose
 # Wikidata description reads "practical application of scientific knowledge".
@@ -82,7 +82,7 @@ _NOISE_DESC_TERMS = frozenset([
     "fictional ",
 ])
 
-# ── Location QID validator ───────────────────────────────────────────────────
+#  Location QID validator 
 _GEO_DESC_TERMS = frozenset([
     "country", "sovereign state", "republic", "kingdom", "federation",
     "empire", "union", "nation",
@@ -99,7 +99,7 @@ _GEO_PROP_LABELS = {
 }
 
 
-# ── URL / domain helpers ──────────────────────────────────────────────────────
+#  URL / domain helpers 
 
 def _extract_domain(url: str) -> str:
     """
@@ -122,7 +122,7 @@ def _extract_domain(url: str) -> str:
         return ""
 
 
-# ── HTTP helper ───────────────────────────────────────────────────────────────
+#  HTTP helper 
 
 @retry(
     wait=wait_exponential(min=15, max=90),
@@ -158,7 +158,7 @@ def _get_json(url: str, params: dict) -> dict:
     return resp.json()
 
 
-# ── QID helpers ───────────────────────────────────────────────────────────────
+#  QID helpers 
 
 def _is_noisy_qid(item: dict) -> bool:
     """Return True if this QID looks like a book, film, person, event, etc."""
@@ -287,7 +287,7 @@ def _build_geo_block(geo_qids: dict[str, str]) -> str:
     return f"\n  # Geographic filter (OR logic)\n  {{\n{union_body}\n  }}\n"
 
 
-# ── Main public function ──────────────────────────────────────────────────────
+#  Main public function 
 
 def search_wikidata_brands(
     niche: str,
@@ -352,7 +352,7 @@ def search_wikidata_brands(
     capped = values_block.split()[:8]
     vb = " ".join(capped)
 
-    # ── Query A — direct wdt:P31 instance-of match ────────────────────────────
+    #  Query A — direct wdt:P31 instance-of match 
     # ?type IS the instanceOf, so BIND gives ?instanceOfLabel via the label service.
     # ?companyDescription comes automatically from the label service.
     # schema:about (Wikipedia URL) is intentionally omitted — it causes 500/timeout
@@ -370,7 +370,7 @@ SELECT DISTINCT ?company ?companyLabel ?companyDescription ?instanceOf ?instance
 LIMIT 500
 """
 
-    # ── Query B — direct P452/P1056 industry/product match ───────────────────
+    #  Query B — direct P452/P1056 industry/product match 
     # P31 is OPTIONAL here (no VALUES constraint), so multiple P31 values can
     # produce duplicate rows per entity — handled in Python by taking the first
     # non-empty value for each field per QID.

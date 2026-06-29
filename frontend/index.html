@@ -14,7 +14,7 @@
       min-height: 100vh;
     }
 
-    /* ── Nav ── */
+    /*  Nav  */
     nav {
       display: flex;
       align-items: center;
@@ -41,7 +41,7 @@
     }
     .nav-link:hover { background: #334155; color: #e2e8f0; }
 
-    /* ── Layout ── */
+    /*  Layout  */
     main {
       max-width: 760px;
       margin: 3rem auto;
@@ -60,7 +60,7 @@
       margin-bottom: 2.5rem;
     }
 
-    /* ── Card ── */
+    /*  Card  */
     .card {
       background: #1e293b;
       border: 1px solid #334155;
@@ -79,7 +79,7 @@
     }
     .card-title svg { opacity: .7; }
 
-    /* ── Form ── */
+    /*  Form  */
     label {
       display: block;
       font-size: .8rem;
@@ -142,7 +142,7 @@
     .switch input:checked + .slider { background: #0284c7; }
     .switch input:checked + .slider::before { transform: translateX(18px); background: #fff; }
 
-    /* ── Button ── */
+    /*  Button  */
     .btn {
       display: inline-flex;
       align-items: center;
@@ -161,7 +161,7 @@
     .btn:hover { background: #0369a1; }
     .btn:disabled { opacity: .5; cursor: not-allowed; }
 
-    /* ── Status ── */
+    /*  Status  */
     #statusCard { display: none; }
 
     .status-header {
@@ -231,7 +231,7 @@
       word-break: break-word;
     }
 
-    /* ── Geo filters ── */
+    /*  Geo filters  */
     .geo-section {
       margin-top: 1.5rem;
       border-top: 1px solid #1e293b;
@@ -275,7 +275,7 @@
     select:focus { border-color: #38bdf8; }
     select option { background: #1e293b; }
 
-    /* ── Job history ── */
+    /*  Job history  */
     .history-list { list-style: none; }
     .history-item {
       display: flex;
@@ -309,7 +309,7 @@
     }
     .btn-ghost:hover { background: rgba(239,68,68,.08); color: #f87171; border-color: rgba(239,68,68,.4); }
 
-    /* ── Prompt editor ── */
+    /*  Prompt editor  */
     textarea.prompt-box {
       width: 100%;
       min-height: 240px;
@@ -749,7 +749,7 @@
     if (e.key === 'Enter') startSeed();
   });
 
-  // ── Prompt editor ───────────────────────────────────────────────────
+  //  Prompt editor 
   const PROMPT_NAME = 'instagram_commentator_scraper';
 
   function loadPrompt() {

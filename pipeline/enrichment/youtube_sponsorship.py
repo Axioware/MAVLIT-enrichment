@@ -39,7 +39,7 @@ _VIDEOS_URL   = "https://www.googleapis.com/youtube/v3/videos"
 _CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
 _MAX_RESULTS  = 10   # per search query (keeps quota low)
 
-# ── Sponsorship detection patterns ────────────────────────────────────────────
+#  Sponsorship detection patterns 
 
 _PAID_PATTERNS = [
     r'\bsponsored\s+by\b',
@@ -117,7 +117,7 @@ def _detect_sponsorship(
     text  = re.sub(r'@(\w+)', r'\1', raw_text)
     brand = brand_name.lower()
 
-    # ── Step 1: reject videos that explicitly deny sponsorship ───────────
+    #  Step 1: reject videos that explicitly deny sponsorship 
     for neg in _NEGATIVE_PATTERNS:
         m = neg.search(text)
         if m:
@@ -125,7 +125,7 @@ def _detect_sponsorship(
             if brand in nearby:
                 return "none", 0.0, [], ""
 
-    # ── Step 2: match positive sponsorship patterns ───────────────────────
+    #  Step 2: match positive sponsorship patterns 
     for stype, patterns in _COMPILED.items():
         for pat in patterns:
             m = pat.search(text)
@@ -147,7 +147,7 @@ def _detect_sponsorship(
     return "none", 0.0, [], ""
 
 
-# ── YouTube API helpers ────────────────────────────────────────────────────────
+#  YouTube API helpers 
 
 class _QuotaExhausted(Exception):
     """Raised when all YouTube API keys have hit their daily quota."""
@@ -258,7 +258,7 @@ def _fetch_channel_subscribers(channel_id: str) -> int | None:
     return int(count) if count else None
 
 
-# ── LLM false-positive filter ─────────────────────────────────────────────────
+#  LLM false-positive filter 
 
 def _llm_verify_sponsorship(
     brand_name: str,
@@ -306,7 +306,7 @@ REASON: one short sentence explaining why"""
     return is_genuine, reason
 
 
-# ── Main enrichment function ───────────────────────────────────────────────────
+#  Main enrichment function 
 
 def _build_queries(brand_name: str) -> list[tuple[str, str]]:
     """
@@ -424,7 +424,7 @@ def enrich_youtube_sponsorships(db: Session, limit: int = 50) -> int:
             if stype == "none":
                 continue  # skip videos with no sponsorship signal
 
-            # ── LLM false-positive check (only when ENABLE_LLM=true) ──────────
+            #  LLM false-positive check (only when ENABLE_LLM=true) 
             if ENABLE_LLM and MISTRAL_API_KEY:
                 is_genuine, llm_reason = _llm_verify_sponsorship(
                     name, title, description, stype

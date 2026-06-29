@@ -1,10 +1,10 @@
 """
-╔══════════════════════════════════════════════════════════════════╗
+╔══╗
 ║           META BRANDED CONTENT SCRAPER  (branded_content.py)    ║
 ║  Scrapes Instagram AND Facebook branded content (paid            ║
 ║  partnerships) from Meta's public transparency page.            ║
 ║  No API key or login required.                                  ║
-╚══════════════════════════════════════════════════════════════════╝
+╚══╝
 
 URL format Meta uses per platform:
   Instagram:
@@ -34,9 +34,9 @@ from urllib.parse import urlencode
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
 
-# ════════════════════════════════════════════════════════════════
-#  ▼▼▼  EDIT THESE  ▼▼▼
-# ════════════════════════════════════════════════════════════════
+# 
+#    EDIT THESE  
+# 
 
 BRAND_NAME         = "Nike"
 
@@ -50,7 +50,7 @@ START_DATE  = (datetime.today() - timedelta(days=7)).strftime("%Y-%m-%d")
 HEADLESS    = True      # True = invisible browser | False = watch the browser
 TIMEOUT_MS  = 15000     # Max wait per step in milliseconds
 
-# ════════════════════════════════════════════════════════════════
+# 
 
 
 BASE_URL = "https://www.facebook.com/ads/library/branded_content/"
@@ -70,9 +70,9 @@ PLATFORMS = {
 }
 
 
-# ─────────────────────────────────────────────────────────────────
+# 
 #  URL BUILDER
-# ─────────────────────────────────────────────────────────────────
+# 
 
 def build_url(page_id: str, target: str) -> str:
     params = {
@@ -85,9 +85,9 @@ def build_url(page_id: str, target: str) -> str:
     return BASE_URL + "?" + urlencode(params)
 
 
-# ─────────────────────────────────────────────────────────────────
+# 
 #  DISPLAY HELPERS
-# ─────────────────────────────────────────────────────────────────
+# 
 
 def print_header():
     print("\n" + "═" * 72)
@@ -147,16 +147,16 @@ def print_platform_results(platform_name: str, icon: str, url: str, results: lis
     print()
 
 
-# ─────────────────────────────────────────────────────────────────
+# 
 #  SCRAPER (single platform)
-# ─────────────────────────────────────────────────────────────────
+# 
 
 async def scrape_platform(page, platform_name: str, page_id: str, target: str) -> list[dict]:
     """Scrape branded content for one platform using an already-open browser page."""
     results   = []
     url       = build_url(page_id, target)
 
-    # ── 1. Navigate directly to the result URL ─────────────────────
+    #  1. Navigate directly to the result URL 
     print(f"\n  🌐  [{platform_name}] Opening URL...")
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -166,7 +166,7 @@ async def scrape_platform(page, platform_name: str, page_id: str, target: str) -
 
     await page.wait_for_timeout(2500)
 
-    # ── 2. Dismiss cookie / GDPR banner (only matters on first load) ─
+    #  2. Dismiss cookie / GDPR banner (only matters on first load) ─
     for btn_text in ["Allow all cookies", "Accept all", "Allow essential and optional cookies"]:
         try:
             btn = page.get_by_role("button", name=btn_text)
@@ -178,7 +178,7 @@ async def scrape_platform(page, platform_name: str, page_id: str, target: str) -
         except Exception:
             pass
 
-    # ── 3. Wait for results table to appear ────────────────────────
+    #  3. Wait for results table to appear ─
     print(f"  ⏳  [{platform_name}] Waiting for results...")
     try:
         await page.wait_for_selector(
@@ -190,7 +190,7 @@ async def scrape_platform(page, platform_name: str, page_id: str, target: str) -
         print(f"  ⚠️   [{platform_name}] Results table not found within timeout.")
         return results
 
-    # ── 4. Parse the results table ──────────────────────────────────
+    #  4. Parse the results table ─
     print(f"  📊  [{platform_name}] Parsing rows...")
 
     HEADER_KEYWORDS = {"date", "creator", "brand", "partner", "type", "link", "content"}
@@ -240,9 +240,9 @@ async def scrape_platform(page, platform_name: str, page_id: str, target: str) -
     return results
 
 
-# ─────────────────────────────────────────────────────────────────
+# 
 #  MAIN — runs both platforms in one browser session
-# ─────────────────────────────────────────────────────────────────
+# 
 
 async def run_all():
     all_results = {}   # { platform_name: [results] }
@@ -281,7 +281,7 @@ if __name__ == "__main__":
 
     all_results = asyncio.run(run_all())
 
-    # ── Print Instagram results ────────────────────────────────────
+    #  Print Instagram results ─
     ig_cfg = PLATFORMS["Instagram"]
     print_platform_results(
         "Instagram",
@@ -290,7 +290,7 @@ if __name__ == "__main__":
         all_results.get("Instagram", []),
     )
 
-    # ── Print Facebook results ─────────────────────────────────────
+    #  Print Facebook results 
     fb_cfg = PLATFORMS["Facebook"]
     print_platform_results(
         "Facebook",
@@ -299,7 +299,7 @@ if __name__ == "__main__":
         all_results.get("Facebook", []),
     )
 
-    # ── Summary ────────────────────────────────────────────────────
+    #  Summary 
     ig_count = len(all_results.get("Instagram", []))
     fb_count = len(all_results.get("Facebook", []))
     print("═" * 72)

@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"
 
-# ── Prompt ────────────────────────────────────────────────────────────────────
+#  Prompt 
 
 DEMOGRAPHICS_PROMPT_NAME = "instagram_user_demographics"
 DEMOGRAPHICS_DEFAULT_PROMPT = """\
@@ -71,7 +71,7 @@ def _get_demographics_prompt(db: Session) -> str:
     return row.content if row else DEMOGRAPHICS_DEFAULT_PROMPT
 
 
-# ── Collection helpers ────────────────────────────────────────────────────────
+#  Collection helpers 
 
 def _collect_creators(post: InstagramPost) -> dict[str, str]:
     """
@@ -170,7 +170,7 @@ def _collect_commenters(posts: list[dict], n_per_post: int = 5) -> list[str]:
     return result
 
 
-# ── Apify helpers ─────────────────────────────────────────────────────────────
+#  Apify helpers 
 
 def _scrape_posts(username: str, n: int = 5) -> list[dict]:
     """
@@ -241,7 +241,7 @@ def _format_top_posts(raw_posts: list[dict]) -> list[dict] | None:
     ]
 
 
-# ── LLM helper ────────────────────────────────────────────────────────────────
+#  LLM helper 
 
 _UNKNOWN_DEMO = {
     "gender": "unknown", "country": "unknown",
@@ -274,7 +274,7 @@ def _classify_demographics(db: Session, username: str, profile: dict) -> dict:
     }
 
 
-# ── Row builder ───────────────────────────────────────────────────────────────
+#  Row builder 
 
 def _build_user_row(
     username: str,
@@ -305,7 +305,7 @@ def _build_user_row(
     }
 
 
-# ── Brand link helper ─────────────────────────────────────────────────────────
+#  Brand link helper 
 
 def _link_to_brand(db: Session, brand_raw_id: int, username: str) -> None:
     """Insert a brand_instagram_users row linking brand → user (ignore if exists)."""
@@ -318,7 +318,7 @@ def _link_to_brand(db: Session, brand_raw_id: int, username: str) -> None:
         )
 
 
-# ── Main enrichment function ──────────────────────────────────────────────────
+#  Main enrichment function 
 
 def enrich_instagram_users(db: Session, limit: int = 5) -> int:
     """
@@ -369,21 +369,21 @@ def enrich_instagram_users(db: Session, limit: int = 5) -> int:
         for username, user_type in new_creators.items():
             logger.info("Instagram users: scraping creator @%s (%s)", username, user_type)
 
-            # ── a. Scrape top 5 posts (addParentData gets profile info too) ──
+            #  a. Scrape top 5 posts (addParentData gets profile info too) 
             raw_posts = _scrape_posts(username, n=5)
             if not raw_posts:
                 logger.warning("Instagram users: no posts returned for @%s", username)
                 time.sleep(0.5)
                 continue
 
-            # ── b. Extract profile data from first post's parent fields ──────
+            #  b. Extract profile data from first post's parent fields 
             profile = _profile_from_posts(raw_posts)
 
-            # ── c. Classify demographics via LLM ─────────────────────────────
+            #  c. Classify demographics via LLM 
             demo = _classify_demographics(db, username, profile)
             time.sleep(0.3)
 
-            # ── d. Store content creator in instagram_users ───────────────────
+            #  d. Store content creator in instagram_users 
             top_posts = _format_top_posts(raw_posts)
             upsert_rows(db, InstagramUser, [
                 _build_user_row(username, user_type, profile, demo, top_posts)
@@ -397,7 +397,7 @@ def enrich_instagram_users(db: Session, limit: int = 5) -> int:
                 profile.get("followersCount"),
             )
 
-            # ── e. Collect unique commenters from the 5 posts (up to 5/post) ─
+            #  e. Collect unique commenters from the 5 posts (up to 5/post) 
             commenter_usernames = _collect_commenters(raw_posts, n_per_post=5)
             if not commenter_usernames:
                 time.sleep(1.0)
@@ -417,7 +417,7 @@ def enrich_instagram_users(db: Session, limit: int = 5) -> int:
                 username, len(commenter_usernames), len(new_commenters),
             )
 
-            # ── f. Scrape 1 post per commenter for profile data ───────────────
+            #  f. Scrape 1 post per commenter for profile data 
             for commenter in new_commenters:
                 logger.info("Instagram users:   commenter @%s", commenter)
 

@@ -242,7 +242,7 @@ def enrich_meta_ads(db: Session, limit: int = 200) -> int:
     resolved_ids = 0
 
     for brand in brands:
-        # ── Step 1: resolve facebook_page_id from URL if not already known ───
+        #  Step 1: resolve facebook_page_id from URL if not already known 
         if not brand.facebook_page_id:
             slug = _slug_from_url(brand.facebook_page)
             if slug:
@@ -261,7 +261,7 @@ def enrich_meta_ads(db: Session, limit: int = 200) -> int:
             )
             continue
 
-        # ── Step 2: fetch ads by page_id only ────────────────────────────────
+        #  Step 2: fetch ads by page_id only 
         try:
             ads = _fetch_ads(page_id=brand.facebook_page_id, brand_name=brand.name)
         except _AuthError as exc:

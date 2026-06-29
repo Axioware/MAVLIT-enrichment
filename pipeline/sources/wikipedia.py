@@ -33,7 +33,7 @@ _HEADERS = {
     "User-Agent": "MAVLIT-enrichment/1.0 (https://github.com/axioware/MAVLIT-enrichment)",
 }
 
-# ── Person markers ────────────────────────────────────────────────────────────
+#  Person markers 
 _PERSON_CATEGORY_MARKERS = frozenset([
     # Biographical
     "living people", " births", " deaths",
@@ -50,7 +50,7 @@ _PERSON_CATEGORY_MARKERS = frozenset([
     "fictional characters",
 ])
 
-# ── Non-company / noise markers ───────────────────────────────────────────────
+#  Non-company / noise markers 
 _NOISE_CATEGORY_MARKERS = frozenset([
     # Publications
     "books by", "novels by", "magazines", "newspapers", "journals",
@@ -71,7 +71,7 @@ _NOISE_CATEGORY_MARKERS = frozenset([
     "video games", "video game franchises",
 ])
 
-# ── Individual product markers ────────────────────────────────────────────────
+#  Individual product markers 
 _PRODUCT_CATEGORY_MARKERS = frozenset([
     "products introduced",
     "product lines",
@@ -87,7 +87,7 @@ _PRODUCT_CATEGORY_MARKERS = frozenset([
 ])
 
 
-# ── URL / domain helpers ──────────────────────────────────────────────────────
+#  URL / domain helpers 
 
 def _extract_domain(url: str) -> str:
     """
@@ -109,7 +109,7 @@ def _extract_domain(url: str) -> str:
         return ""
 
 
-# ── Category / noise filters ──────────────────────────────────────────────────
+#  Category / noise filters 
 
 def _is_person(categories: list[str]) -> bool:
     for cat in categories:
@@ -190,7 +190,7 @@ def _filter_humans_and_products(titles: list[str]) -> list[str]:
     return valid
 
 
-# ── Wikidata entity lookup for Wikipedia titles ───────────────────────────────
+#  Wikidata entity lookup for Wikipedia titles 
 
 def _fetch_wikidata_for_titles(titles: list[str]) -> dict[str, dict]:
     """
@@ -274,7 +274,7 @@ def _fetch_wikidata_for_titles(titles: list[str]) -> dict[str, dict]:
     return result
 
 
-# ── Wikipedia scraping helpers ────────────────────────────────────────────────
+#  Wikipedia scraping helpers 
 
 def _find_category_urls(niche: str, limit: int = 3) -> list[str]:
     """
@@ -351,7 +351,7 @@ def _scrape_category(
     return titles
 
 
-# ── Main public function ──────────────────────────────────────────────────────
+#  Main public function 
 
 def search_wikipedia_brands(niche: str, **_kwargs) -> list[dict]:
     """

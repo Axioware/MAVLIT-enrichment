@@ -3,7 +3,7 @@ pipeline/enrichment/instagram_posts.py
 
 Scrapes recent Instagram posts for each brand via Apify (shu8hvrXbJbY3Eb9W).
 
-─── Saving logic ────────────────────────────────────────────────────────────
+ Saving logic 
 
 ENABLE_INSTA_LLM = True  (full LLM mode)
   • ALL signals (paid_partnership, sponsors, taggedUsers, mentions,
@@ -20,7 +20,7 @@ ENABLE_INSTA_LLM = False  (coauthor-only LLM mode)
   • llm_checked = False  (never True in this mode)
   • Post is skipped only if the ONLY signal is coauthorProducers AND LLM rejects all.
 
-─── Prompts (editable via /admin > Prompts) ─────────────────────────────────
+ Prompts (editable via /admin > Prompts) 
   instagram_post_full_check   — used when ENABLE_INSTA_LLM=True
   instagram_coauthor_check    — always used for coauthorProducers filtering
 """
@@ -44,7 +44,7 @@ _ACTOR_ID     = "shu8hvrXbJbY3Eb9W"
 _POSTS_NEWER  = "1 months"
 _RESULTS_TYPE = "posts"
 
-# ── Prompt registry ───────────────────────────────────────────────────────────
+#  Prompt registry 
 
 FULL_PROMPT_NAME = "instagram_post_full_check"
 FULL_DEFAULT_PROMPT = """\
@@ -97,7 +97,7 @@ Reply ONLY with this JSON object (empty list if none confirmed):
 """
 
 
-# ── Prompt helpers ────────────────────────────────────────────────────────────
+#  Prompt helpers 
 
 def _get_full_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == FULL_PROMPT_NAME).first()
@@ -123,7 +123,7 @@ def _strip_pic(items) -> list[dict] | None:
     return [{k: v for k, v in entry.items() if k != "profile_pic_url"} for entry in items]
 
 
-# ── LLM functions ─────────────────────────────────────────────────────────────
+#  LLM functions 
 
 def _llm_filter_all(db: Session, item: dict, brand_name: str) -> dict | None:
     """
@@ -192,7 +192,7 @@ def _llm_filter_coauthors(db: Session, item: dict, brand_name: str) -> list:
     return filtered
 
 
-# ── Row builder ───────────────────────────────────────────────────────────────
+#  Row builder 
 
 def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
     """Map a raw Apify item to an instagram_posts row. Returns None if no post_id."""
@@ -230,7 +230,7 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
     }
 
 
-# ── Main enrichment function ──────────────────────────────────────────────────
+#  Main enrichment function 
 
 def enrich_instagram_posts(
     db: Session,
@@ -284,7 +284,7 @@ def enrich_instagram_posts(
             has_social = bool(item.get("taggedUsers") or item.get("mentions"))
 
             if ENABLE_INSTA_LLM:
-                # ── Full LLM mode: all signals filtered ──────────────────────
+                #  Full LLM mode: all signals filtered 
                 if not (has_paid or has_coauth or has_social):
                     skipped_no_signal += 1
                     continue
@@ -317,7 +317,7 @@ def enrich_instagram_posts(
                 time.sleep(0.3)
 
             else:
-                # ── Coauthor-only LLM mode ────────────────────────────────────
+                #  Coauthor-only LLM mode 
                 # Direct signals (paid/sponsors/tagged/mentions) saved as-is.
                 # coauthorProducers always goes through LLM.
                 has_direct = has_paid or has_social
