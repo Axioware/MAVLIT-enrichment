@@ -6,7 +6,8 @@ For each instagram_post where is_users_scraped=False:
   1. Collect unique usernames from coauthor_producers, tagged_users, mentions.
      Each username gets a user_type label (priority: coauthor_producer > tagged_user > mention).
 
-  2. Skip any username already present in instagram_users.
+  2. For any username already present in instagram_users, skip Apify and link the
+     existing user to the post's brand in brand_instagram_users.
 
   3. For each new content creator username:
      a. Scrape their top 5 posts via Apify (addParentData=True embeds profile data in every post).
@@ -18,6 +19,9 @@ For each instagram_post where is_users_scraped=False:
         - Scrape 1 post via Apify (addParentData=True) to get their profile data.
         - Classify demographics via Mistral.
         - Store in instagram_users with user_type="commenter".
+        Existing commenters are linked to the post's brand without scraping.
+     g. Link each discovered commenter to the content creator in
+        instagram_creator_commenters.
 
   4. Mark instagram_post.is_users_scraped=True.
 
@@ -31,7 +35,7 @@ import time
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, MISTRAL_API_KEY
-from pipeline.db import BrandInstagramUser, InstagramPost, InstagramUser, Prompt
+from pipeline.db import BrandInstagramUser, InstagramCreatorCommenter, InstagramPost, InstagramUser, Prompt
 from pipeline.helpers.apify import run_apify_actor
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.llm import call_mistral_json, fill_template
@@ -168,6 +172,76 @@ def _collect_commenters(posts: list[dict], n_per_post: int = 5) -> list[str]:
                     break
 
     return result
+
+
+def _collect_commenter_records(posts: list[dict], n_per_post: int = 5) -> list[dict]:
+    """
+    Collect commenter records with source post/comment context.
+    Keeps one row per username per source post.
+    """
+    seen: set[tuple[str, str]] = set()
+    result: list[dict] = []
+
+    for post_item in posts:
+        post_url = _post_url(post_item) or ""
+        comments = post_item.get("latestComments") or []
+
+        if comments:
+            by_likes = sorted(comments, key=lambda c: c.get("likesCount") or 0, reverse=True)
+            records = [
+                {
+                    "username": (c.get("ownerUsername") or "").strip(),
+                    "source_post_url": post_url,
+                    "comment_text": c.get("text"),
+                    "comment_likes": c.get("likesCount"),
+                }
+                for c in by_likes
+                if (c.get("ownerUsername") or "").strip()
+            ]
+        else:
+            if not post_url:
+                continue
+            records = [
+                {
+                    "username": username,
+                    "source_post_url": post_url,
+                    "comment_text": None,
+                    "comment_likes": None,
+                }
+                for username in _scrape_post_comments(post_url, n=n_per_post)
+            ]
+            time.sleep(0.5)
+
+        count = 0
+        for record in records:
+            username = record["username"]
+            key = (username, post_url)
+            if username and key not in seen:
+                seen.add(key)
+                result.append(record)
+                count += 1
+                if count >= n_per_post:
+                    break
+
+    return result
+
+
+def _commenter_records_from_top_posts(top_posts: list[dict] | None) -> list[dict]:
+    """Rebuild commenter records from the top_posts snapshot stored for a creator."""
+    records: list[dict] = []
+    for post in top_posts or []:
+        post_url = post.get("post_url") or ""
+        for comment in post.get("top_comments") or []:
+            username = (comment.get("username") or "").strip()
+            if not username:
+                continue
+            records.append({
+                "username": username,
+                "source_post_url": post_url,
+                "comment_text": comment.get("text"),
+                "comment_likes": comment.get("likes"),
+            })
+    return records
 
 
 #  Apify helpers 
@@ -318,6 +392,68 @@ def _link_to_brand(db: Session, brand_raw_id: int, username: str) -> None:
         )
 
 
+def _link_commenter_to_creator(
+    db: Session,
+    brand_raw_id: int,
+    creator_username: str,
+    commenter_record: dict,
+) -> None:
+    """Insert a creator-commenter link with source context (ignore if exists)."""
+    commenter_username = commenter_record.get("username")
+    if not commenter_username:
+        return
+
+    creator = db.query(InstagramUser.id).filter(InstagramUser.username == creator_username).first()
+    commenter = db.query(InstagramUser.id).filter(InstagramUser.username == commenter_username).first()
+    if not creator or not commenter:
+        return
+
+    upsert_rows(
+        db, InstagramCreatorCommenter,
+        [{
+            "creator_user_id": creator.id,
+            "commenter_user_id": commenter.id,
+            "brand_raw_id": brand_raw_id,
+            "source_post_url": commenter_record.get("source_post_url") or "",
+            "comment_text": commenter_record.get("comment_text"),
+            "comment_likes": commenter_record.get("comment_likes"),
+        }],
+        ["creator_user_id", "commenter_user_id", "brand_raw_id", "source_post_url"],
+    )
+
+
+def _link_existing_commenters_from_creator_snapshot(
+    db: Session,
+    brand_raw_id: int,
+    creator_username: str,
+) -> None:
+    """Link known commenters from a stored creator snapshot without scraping."""
+    creator = (
+        db.query(InstagramUser)
+        .filter(InstagramUser.username == creator_username)
+        .first()
+    )
+    if not creator:
+        return
+
+    records = _commenter_records_from_top_posts(creator.top_posts)
+    if not records:
+        return
+
+    usernames = sorted({record["username"] for record in records})
+    existing_commenters = {
+        r.username for r in
+        db.query(InstagramUser.username)
+        .filter(InstagramUser.username.in_(usernames))
+        .all()
+    }
+    for commenter in existing_commenters:
+        _link_to_brand(db, brand_raw_id, commenter)
+        for record in records:
+            if record["username"] == commenter:
+                _link_commenter_to_creator(db, brand_raw_id, creator_username, record)
+
+
 #  Main enrichment function 
 
 def enrich_instagram_users(db: Session, limit: int = 5) -> int:
@@ -360,6 +496,9 @@ def enrich_instagram_users(db: Session, limit: int = 5) -> int:
             .all()
         }
         new_creators = {u: t for u, t in creators.items() if u not in existing}
+        for username in existing:
+            _link_to_brand(db, post.brand_raw_id, username)
+            _link_existing_commenters_from_creator_snapshot(db, post.brand_raw_id, username)
 
         logger.info(
             "Instagram users: post %s → %d creator(s) (%d new, %d already in DB)",
@@ -397,8 +536,9 @@ def enrich_instagram_users(db: Session, limit: int = 5) -> int:
                 profile.get("followersCount"),
             )
 
-            #  e. Collect unique commenters from the 5 posts (up to 5/post) 
-            commenter_usernames = _collect_commenters(raw_posts, n_per_post=5)
+            #  e. Collect unique commenters from the 5 posts (up to 5/post)
+            commenter_records = _collect_commenter_records(raw_posts, n_per_post=5)
+            commenter_usernames = sorted({record["username"] for record in commenter_records})
             if not commenter_usernames:
                 time.sleep(1.0)
                 continue
@@ -411,6 +551,11 @@ def enrich_instagram_users(db: Session, limit: int = 5) -> int:
                 .all()
             }
             new_commenters = [u for u in commenter_usernames if u not in existing_c]
+            for commenter in existing_c:
+                _link_to_brand(db, post.brand_raw_id, commenter)
+                for record in commenter_records:
+                    if record["username"] == commenter:
+                        _link_commenter_to_creator(db, post.brand_raw_id, username, record)
 
             logger.info(
                 "Instagram users: @%s has %d unique commenter(s) (%d new)",
@@ -435,6 +580,9 @@ def enrich_instagram_users(db: Session, limit: int = 5) -> int:
                     _build_user_row(commenter, "commenter", c_profile, c_demo, c_top_posts)
                 ], ["username"])
                 _link_to_brand(db, post.brand_raw_id, commenter)
+                for record in commenter_records:
+                    if record["username"] == commenter:
+                        _link_commenter_to_creator(db, post.brand_raw_id, username, record)
 
                 logger.info(
                     "Instagram users:   commenter @%s stored — gender=%s country=%s",

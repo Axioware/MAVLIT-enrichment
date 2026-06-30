@@ -247,6 +247,9 @@ class InstagramUser(Base):
     raw_profile         = Column(JSONB)
     fetched_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
+    def __str__(self) -> str:
+        return self.username or f"Instagram User #{self.id}"
+
 
 class BrandInstagramUser(Base):
     __tablename__ = "brand_instagram_users"
@@ -257,6 +260,22 @@ class BrandInstagramUser(Base):
 
     brand_raw      = relationship("BrandRaw",      lazy="selectin", foreign_keys=[brand_raw_id])
     instagram_user = relationship("InstagramUser", lazy="selectin", foreign_keys=[instagram_user_id])
+
+
+class InstagramCreatorCommenter(Base):
+    __tablename__ = "instagram_creator_commenters"
+
+    creator_user_id   = Column(Integer, ForeignKey("instagram_users.id"), primary_key=True)
+    commenter_user_id = Column(Integer, ForeignKey("instagram_users.id"), primary_key=True)
+    brand_raw_id      = Column(Integer, ForeignKey("brands_raw.id"), primary_key=True)
+    source_post_url   = Column(Text, primary_key=True, default="")
+    comment_text      = Column(Text)
+    comment_likes     = Column(Integer)
+    created_at        = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
+    creator_user = relationship("InstagramUser", lazy="selectin", foreign_keys=[creator_user_id])
+    commenter_user = relationship("InstagramUser", lazy="selectin", foreign_keys=[commenter_user_id])
 
 
 class TiktokPost(Base):

@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
-from pipeline.db import Base, Brand, BrandInstagramUser, BrandRaw, Contact, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, Brand, BrandInstagramUser, BrandRaw, Contact, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
 from pipeline.enrichment.instagram_posts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
     COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT,
@@ -376,6 +376,35 @@ class BrandInstagramUserAdmin(ModelView, model=BrandInstagramUser):
     page_size = 50
 
 
+class InstagramCreatorCommenterAdmin(ModelView, model=InstagramCreatorCommenter):
+    name         = "Creator Commenter"
+    name_plural  = "Creator Commenters"
+    icon         = "fa-solid fa-comments"
+    column_list  = [
+        InstagramCreatorCommenter.brand_raw,
+        InstagramCreatorCommenter.creator_user,
+        InstagramCreatorCommenter.commenter_user,
+        InstagramCreatorCommenter.source_post_url,
+        InstagramCreatorCommenter.comment_likes,
+        InstagramCreatorCommenter.comment_text,
+        InstagramCreatorCommenter.created_at,
+    ]
+    column_labels = {
+        InstagramCreatorCommenter.brand_raw:      "Brand",
+        InstagramCreatorCommenter.creator_user:   "Content Creator",
+        InstagramCreatorCommenter.commenter_user: "Commenter",
+        InstagramCreatorCommenter.source_post_url: "Source Post",
+        InstagramCreatorCommenter.comment_likes:  "Comment Likes",
+        InstagramCreatorCommenter.comment_text:   "Comment",
+    }
+    column_sortable_list = [
+        InstagramCreatorCommenter.created_at,
+        InstagramCreatorCommenter.comment_likes,
+    ]
+    column_default_sort  = [(InstagramCreatorCommenter.created_at, True)]
+    page_size = 50
+
+
 class TiktokPostAdmin(ModelView, model=TiktokPost):
     name         = "TikTok Post"
     name_plural  = "TikTok Posts"
@@ -504,6 +533,7 @@ admin.add_view(YoutubeSponsorshipAdmin)
 admin.add_view(InstagramPostAdmin)
 admin.add_view(InstagramUserAdmin)
 admin.add_view(BrandInstagramUserAdmin)
+admin.add_view(InstagramCreatorCommenterAdmin)
 admin.add_view(PromptAdmin)
 admin.add_view(TiktokPostAdmin)
 admin.add_view(TwitterPostAdmin)
