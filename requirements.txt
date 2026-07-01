@@ -14,4 +14,5 @@ fake-useragent>=1.5
 apscheduler>=3.10
 python-dotenv>=1.0
 apify-client>=1.7
-anthropic>=0.28mistralai>=1.0
+anthropic>=0.28
+mistralai>=1.0
