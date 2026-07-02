@@ -102,7 +102,7 @@ async def google_callback(
     """Step 2 — Google redirects here with ?code=&state= (or ?error= if user cancelled)."""
     # User cancelled the Google consent screen
     if error or not code:
-        response = RedirectResponse(url="/login", status_code=302)
+        response = RedirectResponse(url="/signin", status_code=302)
         response.delete_cookie("oauth_state")
         return response
 

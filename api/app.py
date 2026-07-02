@@ -2,7 +2,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqladmin import Admin, ModelView
@@ -636,9 +636,19 @@ def frontend():
     return FileResponse("frontend/index.html")
 
 
-@app.get("/login", include_in_schema=False)
-def login_page():
+@app.get("/signin", include_in_schema=False)
+def signin_page():
     return FileResponse("frontend/login.html")
+
+
+@app.get("/login", include_in_schema=False)
+def login_redirect():
+    return RedirectResponse(url="/signin", status_code=301)
+
+
+@app.get("/dashboard", include_in_schema=False)
+def dashboard_page():
+    return FileResponse("frontend/index.html")
 
 
 class SeedJobResponse(BaseModel):

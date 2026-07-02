@@ -41,6 +41,36 @@
     }
     .nav-link:hover { background: #334155; color: #e2e8f0; }
 
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+    }
+    .nav-user {
+      font-size: .8rem;
+      color: #64748b;
+      max-width: 160px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .btn-signout {
+      font-size: .8rem;
+      font-weight: 600;
+      color: #64748b;
+      background: transparent;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: .3rem .75rem;
+      cursor: pointer;
+      transition: color .15s, border-color .15s, background .15s;
+    }
+    .btn-signout:hover {
+      color: #f87171;
+      border-color: rgba(239,68,68,.35);
+      background: rgba(239,68,68,.06);
+    }
+
     /*  Layout  */
     main {
       max-width: 760px;
@@ -391,8 +421,12 @@
 <body>
 
 <nav>
-  <a class="nav-brand" href="/">⚡ MAVLIT Pipeline</a>
-  <a class="nav-link" href="/admin" target="_blank">Database Admin ↗</a>
+  <a class="nav-brand" href="/">&#9889; MAVLIT Pipeline</a>
+  <div class="nav-right">
+    <a class="nav-link" href="/admin" target="_blank">Database Admin &#8599;</a>
+    <span class="nav-user" id="navUser" style="display:none"></span>
+    <button class="btn-signout" id="signoutBtn" style="display:none" onclick="signOut()">Sign out</button>
+  </div>
 </nav>
 
 <main>
@@ -797,6 +831,23 @@
 
   // Load prompt on page open
   loadPrompt();
+
+  // Auth: show user info + sign-out button in nav
+  fetch('/auth/me', { credentials: 'include' })
+    .then(r => r.ok ? r.json() : null)
+    .then(user => {
+      if (!user) return;
+      var navUser = document.getElementById('navUser');
+      var signoutBtn = document.getElementById('signoutBtn');
+      navUser.textContent = user.name || user.email;
+      navUser.style.display = 'block';
+      signoutBtn.style.display = 'block';
+    });
+
+  function signOut() {
+    fetch('/auth/logout', { method: 'POST', credentials: 'include' })
+      .then(function() { window.location.replace('/signin'); });
+  }
 </script>
 </body>
 </html>
