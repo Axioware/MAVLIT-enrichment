@@ -346,6 +346,31 @@ class TwitterPost(Base):
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
 
 
+class InitialBrandScore(Base):
+    __tablename__ = "initial_brand_score"
+
+    id                      = Column(Integer, primary_key=True)
+    brand_raw_id            = Column(Integer, ForeignKey("brands_raw.id"), unique=True, nullable=False, index=True)
+
+    influencer_score        = Column(Integer, nullable=False, default=0)
+    ad_spend_score          = Column(Integer, nullable=False, default=0)
+    legitimacy_score        = Column(Integer, nullable=False, default=0)
+    reachability_score      = Column(Integer, nullable=False, default=0)
+
+    total_score             = Column(Integer, nullable=False, default=0)
+    score_band              = Column(Text, nullable=False, default="COLD")
+
+    enrichment_completeness = Column(Integer, nullable=False, default=0)
+
+    score_details           = Column(JSONB)
+    scored_at               = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
+
+    def __str__(self) -> str:
+        return f"Score#{self.id} brand={self.brand_raw_id} {self.score_band}({self.total_score})"
+
+
 class User(Base):
     __tablename__ = "users"
 

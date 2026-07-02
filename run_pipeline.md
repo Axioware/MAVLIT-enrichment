@@ -119,3 +119,14 @@ print('Posts processed:', result)
 db.close()
 "
 
+## run brand_scoring.py
+
+python -c "
+from pipeline.db import SessionLocal
+from pipeline.enrichment.brand_scoring import run_brand_scoring
+
+db = SessionLocal()
+scored = run_brand_scoring(db, limit=1)
+print(f'Scored {scored} brands')
+db.close()
+"

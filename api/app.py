@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
-from pipeline.db import Base, Brand, BrandInstagramUser, BrandRaw, Contact, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, User, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, Brand, BrandInstagramUser, BrandRaw, Contact, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, User, YoutubeSponsorship, SessionLocal, engine
 from api.auth import router as auth_router
 from pipeline.enrichment.instagram_posts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
@@ -18,6 +18,7 @@ from pipeline.enrichment.instagram_users import (
     DEMOGRAPHICS_PROMPT_NAME, DEMOGRAPHICS_DEFAULT_PROMPT,
 )
 from pipeline.enrichment.orchestrator import run_signal_enrichment
+from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 from pipeline.seed import run_seed
 
 
@@ -109,9 +110,9 @@ app = FastAPI(
 
 app.include_router(auth_router)
 
-# ---------------------------------------------------------------------------
+# 
 # SQLAdmin — /admin
-# ---------------------------------------------------------------------------
+# 
 
 class BrandRawAdmin(ModelView, model=BrandRaw):
     name         = "Brand Raw"
@@ -531,6 +532,38 @@ class ContactAdmin(ModelView, model=Contact):
     page_size = 50
 
 
+class InitialBrandScoreAdmin(ModelView, model=InitialBrandScore):
+    name         = "Initial Brand Score"
+    name_plural  = "Initial Brand Scores"
+    icon         = "fa-solid fa-star"
+    column_list  = [
+        InitialBrandScore.id,
+        InitialBrandScore.brand_raw,
+        InitialBrandScore.total_score,
+        InitialBrandScore.score_band,
+        InitialBrandScore.influencer_score,
+        InitialBrandScore.ad_spend_score,
+        InitialBrandScore.legitimacy_score,
+        InitialBrandScore.reachability_score,
+        InitialBrandScore.enrichment_completeness,
+        InitialBrandScore.scored_at,
+    ]
+    column_labels = {InitialBrandScore.brand_raw: "Brand"}
+    column_sortable_list = [
+        InitialBrandScore.id,
+        InitialBrandScore.total_score,
+        InitialBrandScore.score_band,
+        InitialBrandScore.influencer_score,
+        InitialBrandScore.ad_spend_score,
+        InitialBrandScore.legitimacy_score,
+        InitialBrandScore.reachability_score,
+        InitialBrandScore.enrichment_completeness,
+        InitialBrandScore.scored_at,
+    ]
+    column_default_sort = [(InitialBrandScore.total_score, True)]
+    page_size = 50
+
+
 class UserAdmin(ModelView, model=User):
     name         = "User"
     name_plural  = "Users"
@@ -551,6 +584,7 @@ class UserAdmin(ModelView, model=User):
 
 admin = Admin(app, engine)
 admin.add_view(UserAdmin)
+admin.add_view(InitialBrandScoreAdmin)
 admin.add_view(BrandRawAdmin)
 admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
@@ -564,9 +598,9 @@ admin.add_view(TwitterPostAdmin)
 admin.add_view(BrandAdmin)
 admin.add_view(ContactAdmin)
 
-# ---------------------------------------------------------------------------
+# 
 # API models
-# ---------------------------------------------------------------------------
+# 
 
 class SeedRequest(BaseModel):
     niche:          str
@@ -584,9 +618,9 @@ class EnrichRequest(BaseModel):
     steps:           list[str] | None = None  # None = all steps
 
 
-# ---------------------------------------------------------------------------
+# 
 # Background job store (in-memory; single-process)
-# ---------------------------------------------------------------------------
+# 
 
 _jobs: dict[str, dict] = {}
 
@@ -626,9 +660,9 @@ def _run_enrich_job(job_id: str, body: EnrichRequest) -> None:
     finally:
         db.close()
 
-# ---------------------------------------------------------------------------
+# 
 # Frontend — /
-# ---------------------------------------------------------------------------
+# 
 
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
@@ -678,9 +712,9 @@ class EnrichStatusResponse(BaseModel):
     results: dict | None = None
     error:   str | None  = None
 
-# ---------------------------------------------------------------------------
+# 
 # Endpoints
-# ---------------------------------------------------------------------------
+# 
 
 @app.get("/health")
 def health():
@@ -749,9 +783,67 @@ def enrich_signals_status(job_id: str):
     )
 
 
-# ---------------------------------------------------------------------------
+# 
+# Scoring endpoints
+# 
+
+class ScoreRequest(BaseModel):
+    limit: int = 500
+
+
+class ScoreJobResponse(BaseModel):
+    job_id:  str
+    status:  str
+    message: str
+
+
+class ScoreStatusResponse(BaseModel):
+    status:  str
+    scored:  int | None = None
+    error:   str | None = None
+
+
+
+def _run_scoring_job(job_id: str, limit: int) -> None:
+    db = SessionLocal()
+    try:
+        scored = run_brand_scoring(db, limit=limit)
+        _jobs[job_id].update({"status": "done", "scored": scored})
+    except Exception as exc:
+        _jobs[job_id].update({"status": "error", "error": str(exc)})
+    finally:
+        db.close()
+
+
+@app.post("/score/brands", response_model=ScoreJobResponse)
+def score_brands(body: ScoreRequest, background_tasks: BackgroundTasks):
+    """
+    Score all brands that have enrichment data. Results are written to initial_brand_score.
+    Poll GET /score/brands/status/{job_id} to track progress.
+    """
+    job_id = str(uuid.uuid4())[:8]
+    _jobs[job_id] = {"status": "running", "scored": 0}
+    background_tasks.add_task(_run_scoring_job, job_id, body.limit)
+    return ScoreJobResponse(job_id=job_id, status="running", message="Brand scoring started")
+
+
+@app.get("/score/brands/status/{job_id}", response_model=ScoreStatusResponse)
+def score_brands_status(job_id: str):
+    """Poll until status is 'done' or 'error'."""
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return ScoreStatusResponse(
+        status=job["status"],
+        scored=job.get("scored"),
+        error=job.get("error"),
+    )
+
+
+
+# 
 # Prompt endpoints
-# ---------------------------------------------------------------------------
+# 
 
 class PromptResponse(BaseModel):
     name:       str

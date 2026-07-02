@@ -32,7 +32,7 @@ _ALGORITHM        = "HS256"
 _TOKEN_DAYS       = 7
 
 
-# ── JWT helpers ───────────────────────────────────────────────────────────────
+#  JWT helpers 
 
 def _make_jwt(user_id: int, email: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=_TOKEN_DAYS)
@@ -50,7 +50,7 @@ def _decode_jwt(token: str) -> dict:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
-# ── Auth dependency ───────────────────────────────────────────────────────────
+#  Auth dependency 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     """FastAPI dependency — returns the logged-in User or raises 401."""
@@ -64,7 +64,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+#  Routes 
 
 @router.get("/google")
 def login_google():
