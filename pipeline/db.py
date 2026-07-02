@@ -346,6 +346,21 @@ class TwitterPost(Base):
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id         = Column(Integer, primary_key=True)
+    email      = Column(Text, unique=True, nullable=False)
+    name       = Column(Text)
+    google_id  = Column(Text, unique=True)
+    avatar_url = Column(Text)
+    is_active  = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    def __str__(self) -> str:
+        return self.email or f"User #{self.id}"
+
+
 class Prompt(Base):
     __tablename__ = "prompts"
 

@@ -34,3 +34,9 @@ MISTRAL_API_KEY   = os.getenv("MISTRAL_API_KEY", "")
 # When true: taggedUsers + mentions are also sent to LLM (in addition to coauthorProducers)
 # When false: only coauthorProducers is LLM-checked (always on)
 ENABLE_INSTA_LLM  = os.getenv("ENABLE_INSTA_LLM", "false").strip().lower() == "true"
+
+# Google OAuth + JWT auth
+GOOGLE_CLIENT_ID     = os.getenv("CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("CLIENT_SECRET", "")
+JWT_SECRET           = os.getenv("JWT_SECRET", "")
+OAUTH_REDIRECT_URI   = os.getenv("OAUTH_REDIRECT_URI", "http://127.0.0.1:8000/auth/google/callback")

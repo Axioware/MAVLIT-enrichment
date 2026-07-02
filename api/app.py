@@ -8,7 +8,8 @@ from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
-from pipeline.db import Base, Brand, BrandInstagramUser, BrandRaw, Contact, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, Brand, BrandInstagramUser, BrandRaw, Contact, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, User, YoutubeSponsorship, SessionLocal, engine
+from api.auth import router as auth_router
 from pipeline.enrichment.instagram_posts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
     COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT,
@@ -105,6 +106,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+app.include_router(auth_router)
 
 # ---------------------------------------------------------------------------
 # SQLAdmin — /admin
@@ -526,7 +529,26 @@ class ContactAdmin(ModelView, model=Contact):
     page_size = 50
 
 
+class UserAdmin(ModelView, model=User):
+    name         = "User"
+    name_plural  = "Users"
+    icon         = "fa-solid fa-circle-user"
+    column_list  = [
+        User.id,
+        User.email,
+        User.name,
+        User.google_id,
+        User.is_active,
+        User.created_at,
+    ]
+    column_searchable_list = [User.email, User.name]
+    column_sortable_list   = [User.id, User.email, User.name, User.is_active, User.created_at]
+    column_default_sort    = [(User.created_at, True)]
+    page_size = 50
+
+
 admin = Admin(app, engine)
+admin.add_view(UserAdmin)
 admin.add_view(BrandRawAdmin)
 admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
@@ -612,6 +634,11 @@ app.mount("/static", StaticFiles(directory="frontend"), name="static")
 @app.get("/", include_in_schema=False)
 def frontend():
     return FileResponse("frontend/index.html")
+
+
+@app.get("/login", include_in_schema=False)
+def login_page():
+    return FileResponse("frontend/login.html")
 
 
 class SeedJobResponse(BaseModel):

@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in — MAVLIT</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .logo {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: .06em;
+      color: #38bdf8;
+      margin-bottom: 2rem;
+      text-align: center;
+    }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 14px;
+      padding: 2.5rem 2rem;
+      width: 100%;
+      max-width: 380px;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: .4rem;
+    }
+    .subtitle {
+      font-size: .85rem;
+      color: #64748b;
+      margin-bottom: 2rem;
+    }
+
+    /* Google button */
+    .btn-google {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: .75rem;
+      width: 100%;
+      padding: .75rem 1.25rem;
+      background: #fff;
+      color: #1f2937;
+      font-size: .95rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background .15s, box-shadow .15s;
+    }
+    .btn-google:hover {
+      background: #f1f5f9;
+      box-shadow: 0 2px 8px rgba(0,0,0,.25);
+    }
+    .btn-google svg { flex-shrink: 0; }
+
+    /* Logged-in section */
+    .avatar {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      border: 2px solid #334155;
+      margin: 0 auto 1rem;
+      display: block;
+      object-fit: cover;
+    }
+    .avatar-placeholder {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: #334155;
+      margin: 0 auto 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.75rem;
+      color: #64748b;
+    }
+    .user-name {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #f1f5f9;
+      margin-bottom: .25rem;
+    }
+    .user-email {
+      font-size: .8rem;
+      color: #64748b;
+      margin-bottom: 1.75rem;
+    }
+
+    .btn-dashboard {
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
+      padding: .65rem 1.5rem;
+      background: #0284c7;
+      color: #fff;
+      font-size: .9rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background .15s;
+      margin-bottom: .75rem;
+      width: 100%;
+      justify-content: center;
+    }
+    .btn-dashboard:hover { background: #0369a1; }
+
+    .btn-logout {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: .4rem;
+      width: 100%;
+      padding: .6rem;
+      background: transparent;
+      color: #64748b;
+      font-size: .85rem;
+      font-weight: 500;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: color .15s, border-color .15s, background .15s;
+    }
+    .btn-logout:hover {
+      background: rgba(239,68,68,.08);
+      color: #f87171;
+      border-color: rgba(239,68,68,.3);
+    }
+
+    .divider {
+      height: 1px;
+      background: #1e293b;
+      margin: 1.5rem 0;
+    }
+
+    .spinner-wrap {
+      display: flex;
+      justify-content: center;
+      padding: 1rem 0;
+    }
+    .spinner {
+      width: 22px; height: 22px;
+      border: 2px solid #334155;
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Sections */
+    #loadingSection { display: block; }
+    #loginSection   { display: none; }
+    #userSection    { display: none; }
+  </style>
+</head>
+<body>
+
+  <div class="logo">⚡ MAVLIT Pipeline</div>
+
+  <div class="card">
+
+    <!-- Loading state -->
+    <div id="loadingSection">
+      <div class="spinner-wrap"><div class="spinner"></div></div>
+    </div>
+
+    <!-- Not logged in -->
+    <div id="loginSection">
+      <h1>Welcome back</h1>
+      <p class="subtitle">Sign in to access the pipeline</p>
+      <a class="btn-google" href="/auth/google">
+        <!-- Google "G" logo -->
+        <svg width="20" height="20" viewBox="0 0 48 48">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+          <path fill="none" d="M0 0h48v48H0z"/>
+        </svg>
+        Continue with Google
+      </a>
+    </div>
+
+    <!-- Logged in -->
+    <div id="userSection">
+      <img id="userAvatar" class="avatar" src="" alt="avatar" style="display:none" />
+      <div id="userAvatarPlaceholder" class="avatar-placeholder">👤</div>
+      <div class="user-name" id="userName"></div>
+      <div class="user-email" id="userEmail"></div>
+      <a class="btn-dashboard" href="/">Go to Dashboard</a>
+      <button class="btn-logout" onclick="logout()">Sign out</button>
+    </div>
+
+  </div>
+
+<script>
+  // Check if user is already logged in
+  fetch('/auth/me', { credentials: 'include' })
+    .then(r => r.ok ? r.json() : null)
+    .then(user => {
+      document.getElementById('loadingSection').style.display = 'none';
+      if (user) {
+        showUser(user);
+      } else {
+        document.getElementById('loginSection').style.display = 'block';
+      }
+    })
+    .catch(() => {
+      document.getElementById('loadingSection').style.display = 'none';
+      document.getElementById('loginSection').style.display = 'block';
+    });
+
+  function showUser(user) {
+    document.getElementById('userSection').style.display = 'block';
+    document.getElementById('userName').textContent  = user.name  || user.email;
+    document.getElementById('userEmail').textContent = user.email || '';
+    if (user.avatar_url) {
+      const img = document.getElementById('userAvatar');
+      img.src = user.avatar_url;
+      img.style.display = 'block';
+      document.getElementById('userAvatarPlaceholder').style.display = 'none';
+    }
+  }
+
+  function logout() {
+    fetch('/auth/logout', { method: 'POST', credentials: 'include' })
+      .then(() => {
+        document.getElementById('userSection').style.display  = 'none';
+        document.getElementById('loginSection').style.display = 'block';
+      });
+  }
+</script>
+</body>
+</html>
