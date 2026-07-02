@@ -193,6 +193,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.tiktok_checked,
         BrandRaw.twitter_checked,
         BrandRaw.created_at,
+        BrandRaw.description,
         BrandRaw.enrichment_failed,
     ]
     column_default_sort = [(BrandRaw.id, True)]

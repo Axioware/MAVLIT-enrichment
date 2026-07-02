@@ -6,15 +6,17 @@ Fetches each brand's homepage to:
   2. Detect WooCommerce (wp-content/plugins/woocommerce fingerprint) → is_woocommerce
   3. Extract full social media profile URLs → instagram_handle, twitter_handle,
      facebook_page, youtube_channel_id, tiktok_handle, linkedin_id
+  4. Scrape the brand's about page → description
 
-Social fields are only written if the column is currently NULL so they don't
-overwrite more-authoritative Wikidata data fetched earlier.
+Social and description fields are only written if the column is currently NULL
+so they don't overwrite more-authoritative Wikidata data fetched earlier.
 
 Sets shopify_checked=True for every processed brand.
 Only runs for brands that have a website (has_official_website=True).
 """
 
 import logging
+import re
 import time
 from urllib.parse import urlparse
 
@@ -134,6 +136,78 @@ def _extract_socials(html: str) -> dict[str, str]:
     return found
 
 
+_ABOUT_PATHS = ["/about", "/about-us", "/pages/about", "/pages/about-us", "/our-story", "/pages/our-story"]
+_ABOUT_MIN_LEN = 80
+_ABOUT_MAX_LEN = 1000
+
+# Tags that never contain useful about-page copy
+_NOISE_TAGS = ["script", "style", "nav", "header", "footer", "noscript", "iframe", "form", "aside"]
+
+
+def _extract_meta_description(html: str) -> str | None:
+    """
+    Extract description from HTML meta tags.
+    Works on SPAs and any site with proper meta tags.
+    Tries og:description, then name=description, then twitter:description.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    for attrs in [
+        {"property": "og:description"},
+        {"name": "description"},
+        {"name": "twitter:description"},
+    ]:
+        tag = soup.find("meta", attrs=attrs)
+        if tag and tag.get("content"):
+            text = tag["content"].strip()
+            if len(text) >= _ABOUT_MIN_LEN:
+                return text[:_ABOUT_MAX_LEN]
+    return None
+
+
+def _extract_about_text(html: str) -> str | None:
+    """Return cleaned, truncated body text from an about page HTML string."""
+    soup = BeautifulSoup(html, "html.parser")
+
+    for tag in soup(_NOISE_TAGS):
+        tag.decompose()
+
+    # Prefer semantic content containers
+    for selector in ["main", "article", '[class*="about"]', '[id*="about"]', "section"]:
+        container = soup.select_one(selector)
+        if container:
+            text = re.sub(r"\s+", " ", container.get_text(" ", strip=True)).strip()
+            if len(text) >= _ABOUT_MIN_LEN:
+                return text[:_ABOUT_MAX_LEN]
+
+    # Fallback: full body
+    body = soup.find("body")
+    if body:
+        text = re.sub(r"\s+", " ", body.get_text(" ", strip=True)).strip()
+        if len(text) >= _ABOUT_MIN_LEN:
+            return text[:_ABOUT_MAX_LEN]
+
+    return None
+
+
+def _fetch_about_text(website: str) -> str | None:
+    """Try common about-page paths for a brand's website; return first usable body text."""
+    if not website.startswith(("http://", "https://")):
+        website = "https://" + website
+    p = urlparse(website)
+    origin = f"{p.scheme}://{p.netloc}"
+
+    for path in _ABOUT_PATHS:
+        html = _fetch_page(origin + path)
+        if html is None:
+            continue
+        text = _extract_about_text(html)
+        if text:
+            logger.debug("About body text found at %s%s (%d chars)", origin, path, len(text))
+            return text
+
+    return None
+
+
 def enrich_shopify(db: Session, limit: int = 300) -> int:
     """
     Fetch homepage for each brand with a website URL and shopify_checked=False.
@@ -158,6 +232,7 @@ def enrich_shopify(db: Session, limit: int = 300) -> int:
     updated       = 0
     shopify_count = 0
     socials_count = 0
+    about_count   = 0
 
     for brand in brands:
         html = _fetch_page(brand.website)
@@ -181,13 +256,24 @@ def enrich_shopify(db: Session, limit: int = 300) -> int:
             if brand.is_shopify:
                 shopify_count += 1
 
+            # Description — always overwrite with freshly scraped text
+            # 1st: meta tags from homepage (no extra request, works on SPAs)
+            about_text = _extract_meta_description(html)
+            # 2nd: body text from common about-page paths (fallback for older sites)
+            if not about_text:
+                about_text = _fetch_about_text(brand.website)
+            if about_text:
+                brand.description = about_text
+                about_count += 1
+                logger.debug("  %s.description set (%d chars)", brand.name, len(about_text))
+
         updated += 1
         db.commit()
         time.sleep(0.3)
 
     woo_count = sum(1 for b in brands if b.is_woocommerce)
     logger.info(
-        "Shopify/socials check: %d done, %d Shopify, %d WooCommerce, %d social URLs filled",
-        updated, shopify_count, woo_count, socials_count,
+        "Shopify/socials check: %d done, %d Shopify, %d WooCommerce, %d social URLs filled, %d about descriptions set",
+        updated, shopify_count, woo_count, socials_count, about_count,
     )
     return updated

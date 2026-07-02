@@ -13,6 +13,8 @@ Properties fetched per entity:
 
 Works in batches of 50 QIDs per SPARQL request.
 Updates brands_raw in-place; sets wikidata_enriched=True when done.
+
+if social handle is already present in brands_raw, it will not be overwritten.
 """
 
 import logging
