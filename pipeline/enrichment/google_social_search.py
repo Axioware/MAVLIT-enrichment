@@ -21,6 +21,14 @@ Google Custom Search free tier: 100 queries/day → ~16 brands/day.
 
 Sets google_social_checked=True after processing each brand.
 Requires GOOGLE_API_KEY and GOOGLE_CX in .env.
+
+Changes:
+  - Domain-anchored search: when brand.domain is available, the query is
+    "{brand} {domain} site:platform.com" instead of just "{brand} site:platform.com".
+    This reduces false positives for generic brand names (e.g. "Dove", "Axe", "Coast")
+    because Google anchors results to pages that mention the brand's own website.
+    If the domain-anchored search returns no valid profile, falls back to the
+    name-only query automatically (so brands without a known domain still work).
 """
 
 import logging
@@ -127,17 +135,36 @@ def _google_search(query: str) -> list[str]:
         return []
 
 
-def _find_social_url(brand_name: str, site_query: str, expected_domain: str) -> str | None:
+def _find_social_url(
+    brand_name: str,
+    site_query: str,
+    expected_domain: str,
+    brand_domain: str | None = None,
+) -> str | None:
     """
     Search Google for a brand's social profile on one platform.
-    Returns the first valid profile URL found, or None.
+    When brand_domain is available, includes it in the query so Google anchors
+    results to pages that mention the brand's own website — reducing false positives
+    for generic brand names (e.g. "Axe", "Coast", "Dove").
+    Falls back to name-only search if the domain-anchored search returns nothing.
     Propagates _APIUnavailable so the caller can abort the run.
     """
+    # Domain-anchored search first (higher precision)
+    if brand_domain:
+        anchored_query = f"{brand_name} {brand_domain} {site_query}"
+        urls = _google_search(anchored_query)
+        for url in urls:
+            if _is_valid_profile_url(url, expected_domain):
+                return normalize_social_url(url)
+
+    # Fallback: name-only search (lower precision, but catches brands whose
+    # social About pages don't mention the domain)
     query = f"{brand_name} {site_query}"
-    urls  = _google_search(query)   # may raise _APIUnavailable
+    urls  = _google_search(query)
     for url in urls:
         if _is_valid_profile_url(url, expected_domain):
             return normalize_social_url(url)
+
     return None
 
 
@@ -191,7 +218,7 @@ def enrich_google_socials(db: Session, limit: int = 50) -> int:
                 continue
 
             try:
-                url = _find_social_url(brand.name, site_query, expected_domain)
+                url = _find_social_url(brand.name, site_query, expected_domain, brand_domain=brand.domain)
             except _APIUnavailable as exc:
                 logger.error(
                     "Google Social Search: API unavailable — aborting run without "
