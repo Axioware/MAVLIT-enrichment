@@ -8,14 +8,15 @@ Requires META_ACCESS_TOKEN in config.
 Stores each ad as a row in meta_ads table.
 Sets meta_ads_fetched=True on the brands_raw row after processing.
 
-Search strategy (priority order):
-  1. search_page_ids  — if facebook_page_id is known (most accurate)
-  2. search_terms     — brand name fallback (may match unrelated pages)
+Search strategy:
+  Ads are fetched exclusively by search_page_ids (numeric Facebook page ID).
+  search_terms is NOT used — it produces too many false positives.
 
 Page ID resolution:
   When a brand has facebook_page URL but no facebook_page_id, the Graph API
   is called to resolve the numeric page ID from the page slug.  The ID is
   persisted so it is only resolved once per brand.
+  If the page ID cannot be resolved, the brand is skipped (not marked as fetched).
 """
 
 import logging
@@ -207,15 +208,15 @@ def _insert_ads(db: Session, brand_raw_id: int, ads: list[dict]) -> int:
 
 def enrich_meta_ads(db: Session, limit: int = 200) -> int:
     """
-    For each brand with facebook_page URL set and meta_ads_fetched=False:
-      1. Resolve the numeric facebook_page_id from the URL via Graph API
-         (skipped if facebook_page_id already known).
+    For each brand with facebook_page or facebook_page_id set and meta_ads_fetched=False:
+      1. Resolve the numeric facebook_page_id from the facebook_page URL via Graph API
+         (skipped if facebook_page_id already known or facebook_page is NULL).
       2. Search ads by page_id only — no search_terms fallback.
       3. Store found ads in meta_ads table.
       4. Mark meta_ads_fetched=True.
 
-    Brands with no facebook_page URL are skipped entirely and left with
-    meta_ads_fetched=False so they are not re-queued by accident.
+    Brands where BOTH facebook_page and facebook_page_id are NULL are never
+    selected and meta_ads_fetched is left as-is for them.
 
     Returns number of brand rows processed.
     """
@@ -226,15 +227,18 @@ def enrich_meta_ads(db: Session, limit: int = 200) -> int:
     brands: list[BrandRaw] = (
         db.query(BrandRaw)
         .filter(
-            BrandRaw.facebook_page.isnot(None),
             BrandRaw.meta_ads_fetched == False,
+            (
+                BrandRaw.facebook_page.isnot(None) |
+                BrandRaw.facebook_page_id.isnot(None)
+            ),
         )
         .limit(limit)
         .all()
     )
 
     if not brands:
-        logger.info("Meta Ads: no pending brands with facebook_page")
+        logger.info("Meta Ads: no pending brands with facebook info")
         return 0
 
     logger.info("Meta Ads: processing %d brands", len(brands))
@@ -242,8 +246,8 @@ def enrich_meta_ads(db: Session, limit: int = 200) -> int:
     resolved_ids = 0
 
     for brand in brands:
-        #  Step 1: resolve facebook_page_id from URL if not already known 
-        if not brand.facebook_page_id:
+        #  Step 1: resolve facebook_page_id from URL if not already known
+        if not brand.facebook_page_id and brand.facebook_page:
             slug = _slug_from_url(brand.facebook_page)
             if slug:
                 pid = _resolve_page_id(slug)
@@ -256,7 +260,7 @@ def enrich_meta_ads(db: Session, limit: int = 200) -> int:
         if not brand.facebook_page_id:
             # Could not resolve a page ID — skip without marking as fetched
             logger.warning(
-                "Meta Ads: could not resolve page_id for '%s' (%s) — skipping",
+                "Meta Ads: could not resolve page_id for '%s' (facebook_page=%s) — skipping",
                 brand.name, brand.facebook_page,
             )
             continue

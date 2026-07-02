@@ -181,6 +181,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.website_source,
         BrandRaw.is_shopify,
         BrandRaw.is_woocommerce,
+        BrandRaw.facebook_page_id,
         BrandRaw.in_tranco_list,
         BrandRaw.tranco_rank,
         BrandRaw.enriched,
@@ -220,7 +221,7 @@ class MetaAdAdmin(ModelView, model=MetaAd):
     ]
     column_labels      = {MetaAd.brand_raw: "Brand"}
     column_searchable_list = [MetaAd.page_name, MetaAd.page_id, MetaAd.ad_archive_id]
-    column_sortable_list   = [MetaAd.id, MetaAd.brand_raw_id, MetaAd.start_date, MetaAd.fetched_at]
+    column_sortable_list   = [MetaAd.id, MetaAd.brand_raw_id, MetaAd.start_date, MetaAd.fetched_at, MetaAd.impressions, MetaAd.spend]
     column_default_sort    = [(MetaAd.id, True)]
     page_size = 50
 
