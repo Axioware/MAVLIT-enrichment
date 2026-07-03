@@ -41,6 +41,18 @@
     }
     .nav-link:hover { background: #334155; color: #e2e8f0; }
 
+    .nav-link.nav-btn {
+      padding: .5rem 1rem;
+      background: #0284c7;
+      color: #ffffff;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+    .nav-link.nav-btn:hover {
+      background: #0369a1;
+      color: #ffffff;
+    }
+
     .nav-right {
       display: flex;
       align-items: center;
@@ -423,7 +435,7 @@
 <nav>
   <a class="nav-brand" href="/">&#9889; MAVLIT Pipeline</a>
   <div class="nav-right">
-    <a class="nav-link" href="/login">Login</a>
+    <a class="nav-link nav-btn" href="/login">Login</a>
     <a class="nav-link" href="/admin" target="_blank">Database Admin &#8599;</a>
     <span class="nav-user" id="navUser" style="display:none"></span>
     <button class="btn-signout" id="signoutBtn" style="display:none" onclick="signOut()">Sign out</button>
