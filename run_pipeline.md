@@ -123,7 +123,7 @@ db.close()
 
 python -c "
 from pipeline.db import SessionLocal
-from pipeline.enrichment.brand_scoring import run_brand_scoring
+from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 
 db = SessionLocal()
 scored = run_brand_scoring(db, limit=1)

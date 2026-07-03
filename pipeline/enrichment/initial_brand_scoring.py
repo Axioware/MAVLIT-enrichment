@@ -463,6 +463,10 @@ def score_brand(db: Session, brand_raw_id: int) -> dict[str, Any] | None:
         )
     )
     db.execute(stmt)
+    
+    # Mark brand as scored
+    brand.initial_brand_scored = True
+    db.add(brand)
     db.commit()
 
     logger.info(
@@ -493,6 +497,7 @@ def run_brand_scoring(db: Session, limit: int = 500) -> int:
             BrandRaw.instagram_checked  == True,
             BrandRaw.tiktok_checked     == True,
             BrandRaw.twitter_checked    == True,
+            BrandRaw.initial_brand_scored == False,
         )
         .limit(limit)
         .all()

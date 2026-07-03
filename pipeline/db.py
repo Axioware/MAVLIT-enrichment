@@ -75,7 +75,8 @@ class BrandRaw(Base):
     youtube_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
     instagram_checked      = Column(Boolean, nullable=False, server_default="false", default=False)
     tiktok_checked         = Column(Boolean, nullable=False, server_default="false", default=False)
-    twitter_checked           = Column(Boolean, nullable=False, server_default="false", default=False)
+    twitter_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
+    initial_brand_scored   = Column(Boolean, nullable=False, server_default="false", default=False)
 
     def __str__(self) -> str:
         return self.name or f"Brand #{self.id}"

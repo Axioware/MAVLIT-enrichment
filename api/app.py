@@ -71,6 +71,7 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS instagram_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS tiktok_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS twitter_checked BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS initial_brand_scored BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS top_commenters",
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS is_comment_profile_scraped",
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS confirmed_creators",
@@ -167,6 +168,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.instagram_checked,
         BrandRaw.tiktok_checked,
         BrandRaw.twitter_checked,
+        BrandRaw.initial_brand_scored,
         BrandRaw.created_at,
     ]
     column_searchable_list = [
@@ -207,6 +209,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.instagram_checked,
         BrandRaw.tiktok_checked,
         BrandRaw.twitter_checked,
+        BrandRaw.initial_brand_scored,
         BrandRaw.created_at,
         BrandRaw.description,
         BrandRaw.enrichment_failed,
