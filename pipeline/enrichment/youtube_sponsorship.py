@@ -25,11 +25,11 @@ import re
 import time
 
 import httpx
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, MISTRAL_API_KEY, ENABLE_LLM
 from pipeline.db import BrandRaw, YoutubeSponsorship
+from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.llm import call_mistral_text
 
 logger = logging.getLogger(__name__)
@@ -454,12 +454,7 @@ def enrich_youtube_sponsorships(db: Session, limit: int = 50) -> int:
             })
 
         if rows_to_insert:
-            stmt = (
-                pg_insert(YoutubeSponsorship)
-                .values(rows_to_insert)
-                .on_conflict_do_nothing(index_elements=["video_id"])
-            )
-            inserted = db.execute(stmt).rowcount
+            inserted = upsert_rows(db, YoutubeSponsorship, rows_to_insert, ["video_id"])
             total_videos += inserted
             logger.info("YouTube: '%s' → %d/%d videos stored", name, inserted, len(rows_to_insert))
 

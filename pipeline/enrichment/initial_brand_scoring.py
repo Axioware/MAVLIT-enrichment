@@ -4,9 +4,6 @@ pipeline/enrichment/brand_scoring.py
 Computes the initial brand score for each brand using the formula in scoring.md.
 Scores are written to initial_brand_score (one row per brand, UPSERTed on re-run).
 
-Public API:
-  score_brand(db, brand_raw_id)  — score one brand by ID, return the score dict
-  run_brand_scoring(db, limit)   — score all brands that have enrichment data
 """
 
 import logging

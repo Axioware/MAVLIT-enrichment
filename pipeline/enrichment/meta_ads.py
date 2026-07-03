@@ -24,11 +24,11 @@ import time
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from config import META_ACCESS_TOKEN
 from pipeline.db import BrandRaw, MetaAd
+from pipeline.helpers.db import upsert_rows
 
 logger = logging.getLogger(__name__)
 
@@ -198,12 +198,7 @@ def _insert_ads(db: Session, brand_raw_id: int, ads: list[dict]) -> int:
             "spend":               ad.get("spend"),
             "currency":            ad.get("currency"),
         })
-    stmt = pg_insert(MetaAd).values(rows).on_conflict_do_nothing(
-        index_elements=["ad_archive_id"]
-    )
-    result = db.execute(stmt)
-    db.commit()
-    return result.rowcount
+    return upsert_rows(db, MetaAd, rows, ["ad_archive_id"])
 
 
 def enrich_meta_ads(db: Session, limit: int = 200) -> int:
