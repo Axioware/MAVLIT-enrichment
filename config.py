@@ -36,7 +36,15 @@ MISTRAL_API_KEY   = os.getenv("MISTRAL_API_KEY", "")
 ENABLE_INSTA_LLM  = os.getenv("ENABLE_INSTA_LLM", "false").strip().lower() == "true"
 
 # Google OAuth + JWT auth
-GOOGLE_CLIENT_ID     = os.getenv("CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.getenv("CLIENT_SECRET", "")
-JWT_SECRET           = os.getenv("JWT_SECRET", "")
+GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID") or os.getenv("CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET") or os.getenv("CLIENT_SECRET", "")
 OAUTH_REDIRECT_URI   = os.getenv("OAUTH_REDIRECT_URI", "http://127.0.0.1:8000/auth/google/callback")
+
+JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET is not set in environment")
+
+# Controls cookie Secure flag + HSTS header. Set ENVIRONMENT=production when
+# deploying behind HTTPS — cookies must never be sent unencrypted in prod.
+ENVIRONMENT   = os.getenv("ENVIRONMENT", "development").strip().lower()
+IS_PRODUCTION = ENVIRONMENT == "production"

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
+from config import IS_PRODUCTION
 from pipeline.db import Base, Brand, BrandInstagramUser, BrandRaw, Contact, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, User, YoutubeSponsorship, SessionLocal, engine
 from api.auth import router as auth_router
 from pipeline.enrichment.instagram_posts import (
@@ -109,6 +110,18 @@ app = FastAPI(
 )
 
 app.include_router(auth_router)
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    """Defense-in-depth headers for the auth cookies and the frontend pages."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if IS_PRODUCTION:
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+    return response
 
 # 
 # SQLAdmin — /admin

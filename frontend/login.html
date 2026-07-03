@@ -213,7 +213,23 @@
     document.getElementById('googleBtnText').textContent = 'Redirecting...';
   }
 
+  function resetGoogleButton() {
+    var btn = document.getElementById('googleBtn');
+    btn.removeAttribute('aria-disabled');
+    document.getElementById('googleBtnText').textContent = 'Continue with Google';
+  }
+
   checkAuth();
+
+  // Bfcache restore (e.g. user hit "back" from Google's account chooser) —
+  // the page reappears with its old DOM instead of re-running from scratch,
+  // so the button would stay stuck on "Redirecting..." without this.
+  window.addEventListener('pageshow', function(event) {
+    if (event.persisted) {
+      resetGoogleButton();
+      checkAuth();
+    }
+  });
 </script>
 </body>
 </html>
