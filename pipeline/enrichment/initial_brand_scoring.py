@@ -19,7 +19,6 @@ from pipeline.db import (
     InitialBrandScore,
     InstagramPost,
     MetaAd,
-    TiktokPost,
     YoutubeSponsorship,
 )
 
@@ -57,7 +56,7 @@ def _days_since(date_str: str | None) -> int | None:
 # 
 
 def _score_youtube(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any]]:
-    """YouTube Sponsorships — 20 pts max."""
+    """YouTube Sponsorships — 25 pts max."""
     rows = db.query(YoutubeSponsorship).filter(
         YoutubeSponsorship.brand_raw_id == brand_raw_id
     ).all()
@@ -65,19 +64,19 @@ def _score_youtube(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any]]
     count = len(rows)
     details: dict[str, Any] = {"sponsorship_count": count}
 
-    # 1a. Recency (0-8 pts) — most recent published_at
+    # 1a. Recency (0-10 pts) — most recent published_at
     days_list = [d for d in (_days_since(r.published_at) for r in rows) if d is not None]
     if days_list:
         min_days = min(days_list)
         details["recency_days"] = min_days
         if min_days <= 30:
-            recency_pts = 8
+            recency_pts = 10
         elif min_days <= 90:
-            recency_pts = 6
+            recency_pts = 8
         elif min_days <= 180:
-            recency_pts = 4
+            recency_pts = 5
         elif min_days <= 365:
-            recency_pts = 2
+            recency_pts = 3
         else:
             recency_pts = 0
     else:
@@ -85,55 +84,55 @@ def _score_youtube(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any]]
         recency_pts = 0
     details["recency_pts"] = recency_pts
 
-    # 1b. Count (0-7 pts)
+    # 1b. Count (0-8 pts)
     if count == 0:
         count_pts = 0
     elif count <= 2:
-        count_pts = 3
+        count_pts = 4
     elif count <= 9:
-        count_pts = 5
+        count_pts = 6
     else:
-        count_pts = 7
+        count_pts = 8
     details["count_pts"] = count_pts
 
-    # 1c. Creator audience reach (0-5 pts) — max subscriber_count
+    # 1c. Creator audience reach (0-7 pts) — max subscriber_count
     subs = [r.subscriber_count for r in rows if r.subscriber_count is not None]
     max_subs = max(subs) if subs else 0
     details["max_subscriber_count"] = max_subs
     if max_subs >= 1_000_000:
-        subscriber_pts = 5
+        subscriber_pts = 7
     elif max_subs >= 100_000:
-        subscriber_pts = 3
+        subscriber_pts = 5
     elif max_subs >= 10_000:
-        subscriber_pts = 2
+        subscriber_pts = 3
     else:
         subscriber_pts = 0
     details["subscriber_pts"] = subscriber_pts
 
-    total = min(recency_pts + count_pts + subscriber_pts, 20)
+    total = min(recency_pts + count_pts + subscriber_pts, 25)
     details["total"] = total
     return total, details
 
 
 def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any]]:
-    """Instagram Paid Partnerships — 20 pts max."""
+    """Instagram Paid Partnerships — 25 pts max."""
     posts = db.query(InstagramPost).filter(
         InstagramPost.brand_raw_id == brand_raw_id
     ).all()
 
     details: dict[str, Any] = {}
 
-    # 2a. Paid partnership posts (0-10 pts)
+    # 2a. Paid partnership posts (0-12 pts)
     paid_count = sum(1 for p in posts if p.paid_partnership)
     details["paid_partnership_posts"] = paid_count
     if paid_count == 0:
         paid_pts = 0
     elif paid_count <= 2:
-        paid_pts = 5
+        paid_pts = 6
     elif paid_count <= 5:
-        paid_pts = 8
+        paid_pts = 9
     else:
-        paid_pts = 10
+        paid_pts = 12
     details["paid_pts"] = paid_pts
 
     # 2b. Sponsors field populated (0-3 pts)
@@ -142,7 +141,7 @@ def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any
     sponsors_pts = 3 if sponsors_populated else 0
     details["sponsors_pts"] = sponsors_pts
 
-    # 2c. Creator network in brand_instagram_users (0-5 pts)
+    # 2c. Creator network in brand_instagram_users (0-7 pts)
     creator_count = db.query(BrandInstagramUser).filter(
         BrandInstagramUser.brand_raw_id == brand_raw_id
     ).count()
@@ -150,43 +149,25 @@ def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any
     if creator_count == 0:
         creator_pts = 0
     elif creator_count < 10:
-        creator_pts = 3
+        creator_pts = 4
     else:
-        creator_pts = 5
+        creator_pts = 7
     details["creator_pts"] = creator_pts
 
-    # 2d. Collaboration signals (0-2 pts)
+    # 2d. Collaboration signals (0-3 pts)
     collab_signals = any(
         (p.tagged_users or p.coauthor_producers) for p in posts
     )
     details["collab_signals"] = collab_signals
-    collab_pts = 2 if collab_signals else 0
+    collab_pts = 3 if collab_signals else 0
     details["collab_pts"] = collab_pts
 
-    total = min(paid_pts + sponsors_pts + creator_pts + collab_pts, 20)
+    total = min(paid_pts + sponsors_pts + creator_pts + collab_pts, 25)
     details["total"] = total
     return total, details
 
 
-def _score_tiktok(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any]]:
-    """TikTok Sponsorships — 10 pts max."""
-    sponsored_count = db.query(TiktokPost).filter(
-        TiktokPost.brand_raw_id == brand_raw_id,
-        (TiktokPost.is_sponsored == True) | (TiktokPost.is_ad == True),
-    ).count()
-
-    details: dict[str, Any] = {"sponsored_posts": sponsored_count}
-    if sponsored_count == 0:
-        total = 0
-    elif sponsored_count < 3:
-        total = 6
-    else:
-        total = 10
-    details["total"] = total
-    return total, details
-
-
-# 
+#
 # Section 2 — Advertising Budget / Meta Ads (15 pts max)
 # 
 
@@ -325,24 +306,18 @@ def _score_legitimacy(brand: BrandRaw) -> tuple[int, dict[str, Any]]:
         ecommerce_pts = 0
     details["ecommerce_pts"] = ecommerce_pts
 
-    # Social presence (0-7 pts)
+    # Social presence (0-7 pts) — Instagram/YouTube/Facebook only (V1 has no TikTok/Twitter)
     social_handles = []
     social_pts = 0
     if brand.instagram_handle:
         social_handles.append("instagram_handle")
-        social_pts += 2
-    if brand.tiktok_handle:
-        social_handles.append("tiktok_handle")
-        social_pts += 2
+        social_pts += 3
     if brand.youtube_channel_id:
         social_handles.append("youtube_channel_id")
-        social_pts += 1
+        social_pts += 2
     if brand.facebook_page:
         social_handles.append("facebook_page")
-        social_pts += 1
-    if brand.twitter_handle:
-        social_handles.append("twitter_handle")
-        social_pts += 1
+        social_pts += 2
     details["social_handles"] = social_handles
     details["social_pts"]     = social_pts
 
@@ -408,31 +383,28 @@ def score_brand(db: Session, brand_raw_id: int) -> dict[str, Any] | None:
         logger.warning("score_brand: brand_raw_id=%d not found", brand_raw_id)
         return None
 
-    # Enrichment completeness (0-4)
+    # Enrichment completeness (0-3) — V1 doesn't score TikTok/Twitter, so they're excluded here
     completeness = sum([
         bool(brand.youtube_checked),
         bool(brand.instagram_checked),
-        bool(brand.tiktok_checked),
         bool(brand.meta_ads_fetched),
     ])
 
     yt_score,    yt_details    = _score_youtube(db, brand_raw_id)
     ig_score,    ig_details    = _score_instagram(db, brand_raw_id)
-    tt_score,    tt_details    = _score_tiktok(db, brand_raw_id)
     meta_score,  meta_details  = _score_meta_ads(db, brand_raw_id)
     leg_score,   leg_details   = _score_legitimacy(brand)
     reach_score, reach_details = _score_reachability(brand)
 
-    influencer_score   = yt_score + ig_score + tt_score   # max 50
-    ad_spend_score     = meta_score                        # max 15
-    legitimacy_score   = leg_score                         # max 25
-    reachability_score = reach_score                       # max 10
+    influencer_score   = yt_score + ig_score   # max 50
+    ad_spend_score     = meta_score            # max 15
+    legitimacy_score   = leg_score              # max 25
+    reachability_score = reach_score            # max 10
     total_score        = influencer_score + ad_spend_score + legitimacy_score + reachability_score
 
     score_details = {
         "youtube":      yt_details,
         "instagram":    ig_details,
-        "tiktok":       tt_details,
         "meta_ads":     meta_details,
         "legitimacy":   leg_details,
         "reachability": reach_details,
@@ -467,7 +439,7 @@ def score_brand(db: Session, brand_raw_id: int) -> dict[str, Any] | None:
     db.commit()
 
     logger.info(
-        "Scored '%s' (id=%d) → total=%d band=%s [infl=%d ads=%d leg=%d reach=%d] completeness=%d/4",
+        "Scored '%s' (id=%d) → total=%d band=%s [infl=%d ads=%d leg=%d reach=%d] completeness=%d/3",
         brand.name, brand_raw_id,
         total_score, _band(total_score),
         influencer_score, ad_spend_score, legitimacy_score, reachability_score,
@@ -492,8 +464,6 @@ def run_brand_scoring(db: Session, limit: int = 500) -> int:
             BrandRaw.meta_ads_fetched   == True,
             BrandRaw.youtube_checked    == True,
             BrandRaw.instagram_checked  == True,
-            BrandRaw.tiktok_checked     == True,
-            BrandRaw.twitter_checked    == True,
             BrandRaw.initial_brand_scored == False,
         )
         .limit(limit)

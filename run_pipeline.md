@@ -106,6 +106,17 @@ db = SessionLocal()
 enrich_twitter_posts(db, limit=1)
 db.close()
 "
+OR
+python3 -c "
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.twitter_posts import enrich_twitter_posts
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+db = SessionLocal()
+enrich_twitter_posts(db, brand_id=123)
+db.close()
+"
+
 
 ## run intagram_users.py
 python3 -c "

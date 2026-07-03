@@ -116,7 +116,7 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
     }
 
 
-def enrich_twitter_posts(db: Session, limit: int = 50) -> int:
+def enrich_twitter_posts(db: Session, limit: int = 50, brand_id: int | None = None) -> int:
     """
     For each brand with twitter_handle set and twitter_checked=False:
       1. Run Apify Twitter scraper for the brand's handle
@@ -124,21 +124,24 @@ def enrich_twitter_posts(db: Session, limit: int = 50) -> int:
       3. Mark twitter_checked=True ONLY if the actor run succeeded
 
     If the actor fails, twitter_checked stays False so it will be retried.
+
+    Pass brand_id to target one specific brand directly — this bypasses the
+    twitter_checked filter (so you can re-run/test a brand that was already
+    processed), but twitter_handle must still be set.
+
     Returns number of brands processed.
     """
     if not APIFY_TOKEN:
         logger.warning("APIFY_TOKEN not set — skipping Twitter enrichment")
         return 0
 
-    brands: list[BrandRaw] = (
-        db.query(BrandRaw)
-        .filter(
-            BrandRaw.twitter_handle.isnot(None),
-            BrandRaw.twitter_checked == False,
-        )
-        .limit(limit)
-        .all()
-    )
+    query = db.query(BrandRaw).filter(BrandRaw.twitter_handle.isnot(None))
+    if brand_id is not None:
+        query = query.filter(BrandRaw.id == brand_id)
+    else:
+        query = query.filter(BrandRaw.twitter_checked == False)
+
+    brands: list[BrandRaw] = query.limit(limit).all()
 
     if not brands:
         logger.info("Twitter: no pending brands with twitter_handle")

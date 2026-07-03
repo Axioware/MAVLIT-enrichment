@@ -40,9 +40,7 @@ data/seeds/*.csv
 *.json
 test_branded_content.py
 test.py
-scoring.txt
 test1.py
 matching algorithm.md
-matching algorithm.pdf
-Untitled 1.pdf
 brand_signals_scoring.md
+initial scoring formula.docx
