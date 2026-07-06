@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Creator Profile — MAVLIT</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.5rem;
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+    }
+    .nav-brand {
+      font-weight: 700;
+      color: #38bdf8;
+      text-decoration: none;
+      font-size: 1rem;
+      letter-spacing: .03em;
+    }
+    .nav-link {
+      color: #94a3b8;
+      text-decoration: none;
+      font-size: .875rem;
+      padding: .4rem .75rem;
+      border-radius: 6px;
+    }
+    .nav-link:hover { background: #334155; color: #e2e8f0; }
+
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: .3rem;
+    }
+    .subtitle {
+      font-size: .875rem;
+      color: #64748b;
+      margin-bottom: 2rem;
+    }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+    .card h2 {
+      font-size: .95rem;
+      font-weight: 700;
+      color: #cbd5e1;
+      margin-bottom: 1rem;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 640px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .field { display: flex; flex-direction: column; gap: .35rem; }
+    .field.full { grid-column: 1 / -1; }
+    label {
+      font-size: .8rem;
+      color: #94a3b8;
+    }
+    input, select, textarea {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: .6rem .75rem;
+      color: #e2e8f0;
+      font-size: .9rem;
+      font-family: inherit;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: #38bdf8;
+    }
+    input::placeholder, textarea::placeholder { color: #475569; }
+    textarea { resize: vertical; min-height: 70px; }
+
+    .btn-save {
+      width: 100%;
+      padding: .8rem 1.25rem;
+      background: #0284c7;
+      color: #fff;
+      font-size: .95rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .btn-save:hover:not(:disabled) { background: #0369a1; }
+    .btn-save:disabled { opacity: .6; cursor: not-allowed; }
+
+    .status-msg {
+      font-size: .85rem;
+      text-align: center;
+      margin-top: .75rem;
+      min-height: 1.2em;
+    }
+    .status-msg.ok { color: #4ade80; }
+    .status-msg.err { color: #f87171; }
+
+    .loading-wrap {
+      display: flex;
+      justify-content: center;
+      padding: 3rem 0;
+    }
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 2px solid #334155;
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #formSection { display: none; }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <a class="nav-brand" href="/">&#9889; MAVLIT Pipeline</a>
+    <a class="nav-link" href="/dashboard">&larr; Dashboard</a>
+  </nav>
+
+  <div class="wrap">
+    <div class="loading-wrap" id="loadingSection">
+      <div class="spinner"></div>
+    </div>
+
+    <form id="formSection" onsubmit="return handleSubmit(event)">
+      <h1>Creator Profile</h1>
+      <p class="subtitle">Fill this out, then sign in with Google to save it — no account needed until you're ready to submit.</p>
+
+      <div class="card">
+        <h2>Identity</h2>
+        <div class="grid">
+          <div class="field">
+            <label for="full_name">Full name *</label>
+            <input id="full_name" name="full_name" type="text" required placeholder="Jane Doe" />
+          </div>
+          <div class="field">
+            <label for="creator_handle">Creator handle *</label>
+            <input id="creator_handle" name="creator_handle" type="text" required placeholder="@janedoe" />
+          </div>
+          <div class="field">
+            <label for="location_city">City</label>
+            <input id="location_city" name="location_city" type="text" placeholder="Austin" />
+          </div>
+          <div class="field">
+            <label for="location_country">Country</label>
+            <input id="location_country" name="location_country" type="text" placeholder="United States" />
+          </div>
+          <div class="field full">
+            <label for="bio_tagline">Bio / tagline</label>
+            <textarea id="bio_tagline" name="bio_tagline" placeholder="Short line about who you are and what you create"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Content Niche</h2>
+        <div class="grid">
+          <div class="field full">
+            <label for="content_niche">Primary niche *</label>
+            <select id="content_niche" name="content_niche" required>
+              <option value="">Select a niche…</option>
+              <option value="music">Music</option>
+              <option value="podcast_audio">Podcast / Audio</option>
+              <option value="photography">Photography</option>
+              <option value="gaming">Gaming</option>
+              <option value="education">Education</option>
+              <option value="fitness">Fitness</option>
+              <option value="food_cooking">Food & Cooking</option>
+              <option value="finance">Finance</option>
+              <option value="substack_newsletter">Substack / Newsletter</option>
+            </select>
+          </div>
+          <div class="field full">
+            <label for="primary_platform">Primary platform</label>
+            <select id="primary_platform" name="primary_platform">
+              <option value="">Select a platform…</option>
+              <option value="instagram">Instagram</option>
+              <option value="tiktok">TikTok</option>
+              <option value="youtube">YouTube</option>
+              <option value="facebook">Facebook</option>
+              <option value="substack">Substack</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Platform Links</h2>
+        <div class="grid">
+          <div class="field">
+            <label for="instagram_handle">Instagram</label>
+            <input id="instagram_handle" name="instagram_handle" type="text" placeholder="https://instagram.com/janedoe" />
+          </div>
+          <div class="field">
+            <label for="tiktok_handle">TikTok</label>
+            <input id="tiktok_handle" name="tiktok_handle" type="text" placeholder="https://tiktok.com/@janedoe" />
+          </div>
+          <div class="field">
+            <label for="youtube_channel">YouTube</label>
+            <input id="youtube_channel" name="youtube_channel" type="text" placeholder="https://youtube.com/@janedoe" />
+          </div>
+          <div class="field">
+            <label for="facebook_page">Facebook</label>
+            <input id="facebook_page" name="facebook_page" type="text" placeholder="https://facebook.com/janedoe" />
+          </div>
+          <div class="field">
+            <label for="substack_url">Substack</label>
+            <input id="substack_url" name="substack_url" type="text" placeholder="https://janedoe.substack.com" />
+          </div>
+          <div class="field">
+            <label for="substack_subscribers">Substack subscribers</label>
+            <input id="substack_subscribers" name="substack_subscribers" type="number" min="0" placeholder="0" />
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Audience Demographics</h2>
+        <p class="subtitle" style="margin-bottom:.75rem;">Pull these numbers from your platform's own analytics/insights dashboard.</p>
+        <div class="grid">
+          <div class="field">
+            <label for="audience_gender_male_pct">Audience — male (%)</label>
+            <input id="audience_gender_male_pct" name="audience_gender_male_pct" type="number" min="0" max="100" step="0.1" placeholder="45" />
+          </div>
+          <div class="field">
+            <label for="audience_gender_female_pct">Audience — female (%)</label>
+            <input id="audience_gender_female_pct" name="audience_gender_female_pct" type="number" min="0" max="100" step="0.1" placeholder="55" />
+          </div>
+          <div class="field full">
+            <label for="audience_age_bracket">Largest audience age bracket</label>
+            <select id="audience_age_bracket" name="audience_age_bracket">
+              <option value="">Select a range…</option>
+              <option value="13-17">13-17</option>
+              <option value="18-24">18-24</option>
+              <option value="25-30">25-30</option>
+              <option value="30-40">30-40</option>
+              <option value="40-50">40-50</option>
+              <option value="50+">50+</option>
+            </select>
+          </div>
+          <div class="field full">
+            <label for="audience_top_country">Top audience country</label>
+            <input id="audience_top_country" name="audience_top_country" type="text" placeholder="United States" />
+          </div>
+        </div>
+      </div>
+
+      <button class="btn-save" id="saveBtn" type="submit">Save profile</button>
+      <p class="status-msg" id="statusMsg"></p>
+    </form>
+  </div>
+
+<script>
+  var PENDING_KEY = 'mavlit_pending_creator_profile';
+  var isLoggedIn  = false;
+
+  function showForm() {
+    document.getElementById('loadingSection').style.display = 'none';
+    document.getElementById('formSection').style.display = 'block';
+  }
+
+  function setStatus(text, isError) {
+    var el = document.getElementById('statusMsg');
+    el.textContent = text;
+    el.className = 'status-msg ' + (isError ? 'err' : 'ok');
+  }
+
+  function setButtonMode() {
+    document.getElementById('saveBtn').textContent =
+      isLoggedIn ? 'Save profile' : 'Continue with Google to save';
+  }
+
+  // profile/body objects always store percentages as 0–1 decimals and
+  // audience_top_countries as [{country, pct}, ...] — convert both back to
+  // the form's display format (0–100 number, plain text country).
+  function applyProfileToForm(profile) {
+    if (!profile) return;
+    var form = document.getElementById('formSection');
+    Object.keys(profile).forEach(function(key) {
+      var input = form.elements[key];
+      if (!input || profile[key] === null || profile[key] === undefined) return;
+      if (key === 'audience_gender_male_pct' || key === 'audience_gender_female_pct') {
+        input.value = profile[key] * 100;
+      } else {
+        input.value = profile[key];
+      }
+    });
+    if (profile.audience_top_countries && profile.audience_top_countries.length) {
+      form.elements['audience_top_country'].value = profile.audience_top_countries[0].country || '';
+    }
+  }
+
+  function buildProfileBody() {
+    var form = document.getElementById('formSection');
+    var numOrNull = function(v) { return v === '' ? null : Number(v); };
+
+    var genderMale   = numOrNull(form.elements['audience_gender_male_pct'].value);
+    var genderFemale = numOrNull(form.elements['audience_gender_female_pct'].value);
+    var topCountry   = form.elements['audience_top_country'].value.trim();
+
+    return {
+      full_name:        form.elements['full_name'].value,
+      creator_handle:   form.elements['creator_handle'].value,
+      location_city:    form.elements['location_city'].value || null,
+      location_country: form.elements['location_country'].value || null,
+      bio_tagline:      form.elements['bio_tagline'].value || null,
+      content_niche:    form.elements['content_niche'].value,
+      instagram_handle: form.elements['instagram_handle'].value || null,
+      tiktok_handle:    form.elements['tiktok_handle'].value || null,
+      youtube_channel:  form.elements['youtube_channel'].value || null,
+      facebook_page:    form.elements['facebook_page'].value || null,
+      substack_url:     form.elements['substack_url'].value || null,
+      substack_subscribers: numOrNull(form.elements['substack_subscribers'].value),
+      primary_platform: form.elements['primary_platform'].value || null,
+      audience_gender_male_pct:   genderMale === null ? null : genderMale / 100,
+      audience_gender_female_pct: genderFemale === null ? null : genderFemale / 100,
+      audience_age_bracket:       form.elements['audience_age_bracket'].value || null,
+      audience_top_countries:     topCountry ? [{ country: topCountry, pct: 1.0 }] : null,
+    };
+  }
+
+  function submitProfile(body, successMessage) {
+    var btn = document.getElementById('saveBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    setStatus('', false);
+
+    return fetch('/creator-profile/me', {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+      .then(function(r) {
+        if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
+        return r.json();
+      })
+      .then(function() {
+        setStatus(successMessage || 'Profile saved.', false);
+      })
+      .catch(function(err) {
+        // Keep the data around so the user doesn't lose it on a failed save
+        localStorage.setItem(PENDING_KEY, JSON.stringify(body));
+        setStatus(err.message || 'Something went wrong — please try again.', true);
+      })
+      .finally(function() {
+        btn.disabled = false;
+        setButtonMode();
+      });
+  }
+
+  function loadProfile() {
+    fetch('/creator-profile/me', { credentials: 'include' })
+      .then(function(r) { return r.status === 404 ? null : r.json(); })
+      .then(applyProfileToForm)
+      .catch(function() { /* no existing profile — leave form blank */ })
+      .finally(showForm);
+  }
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    var form = document.getElementById('formSection');
+    if (!form.checkValidity()) {
+      form.reportValidity();
+      return false;
+    }
+
+    var body = buildProfileBody();
+
+    if (isLoggedIn) {
+      submitProfile(body);
+    } else {
+      // Stash the filled-out form, then send the user through Google sign-in.
+      // /auth/google/callback reads return_to and lands them back here so
+      // this same page can finish the save once a session exists.
+      localStorage.setItem(PENDING_KEY, JSON.stringify(body));
+      window.location.href = '/auth/google?return_to=' + encodeURIComponent('/creator-profile');
+    }
+    return false;
+  }
+
+  function checkAuth() {
+    fetch('/auth/me', { credentials: 'include' })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(user) {
+        isLoggedIn = !!user;
+        setButtonMode();
+
+        var pending = localStorage.getItem(PENDING_KEY);
+
+        if (isLoggedIn && pending) {
+          localStorage.removeItem(PENDING_KEY);
+          var body = JSON.parse(pending);
+          applyProfileToForm(body);
+          showForm();
+          submitProfile(body, 'Signed in — your profile has been saved.');
+          return;
+        }
+
+        if (isLoggedIn) {
+          loadProfile();
+          return;
+        }
+
+        // Not logged in — restore any unsaved draft so a reload doesn't lose it
+        if (pending) {
+          try { applyProfileToForm(JSON.parse(pending)); } catch (e) { /* ignore bad draft */ }
+        }
+        showForm();
+      })
+      .catch(function() {
+        // Network error checking auth — still let the user fill out the form
+        showForm();
+      });
+  }
+
+  checkAuth();
+</script>
+</body>
+</html>

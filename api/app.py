@@ -1,7 +1,7 @@
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -9,8 +9,8 @@ from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
 from config import IS_PRODUCTION
-from pipeline.db import Base, Brand, BrandInstagramUser, BrandRaw, Contact, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, User, YoutubeSponsorship, SessionLocal, engine
-from api.auth import router as auth_router
+from pipeline.db import Base, Brand, BrandInstagramUser, BrandRaw, Contact, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
+from api.auth import get_current_user, router as auth_router
 from pipeline.enrichment.instagram_posts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
     COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT,
@@ -79,11 +79,46 @@ def _run_migrations() -> None:
         "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS is_users_scraped BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS user_type TEXT",
         "DROP TABLE IF EXISTS instagram_commenters",
+        # creator_profiles absorbed the separate `users` table — auth fields
+        # now live directly on creator_profiles (see backfill block below).
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS email TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS google_id TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE creator_profiles ALTER COLUMN full_name DROP NOT NULL",
+        "ALTER TABLE creator_profiles ALTER COLUMN creator_handle DROP NOT NULL",
+        "ALTER TABLE creator_profiles ALTER COLUMN content_niche DROP NOT NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_profiles_email ON creator_profiles(email)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_profiles_google_id ON creator_profiles(google_id)",
     ]
     with engine.connect() as conn:
         for sql in stmts:
             conn.execute(text(sql))
         conn.commit()
+
+        # One-time data migration: fold the old `users` table into
+        # creator_profiles, then drop it. Only runs if `users` still exists
+        # (no-op on fresh installs or after the first successful run).
+        users_table_exists = conn.execute(
+            text("SELECT to_regclass('public.users') IS NOT NULL")
+        ).scalar()
+        if users_table_exists:
+            conn.execute(text("""
+                UPDATE creator_profiles cp
+                SET email = u.email, google_id = u.google_id,
+                    avatar_url = u.avatar_url, is_active = u.is_active
+                FROM users u
+                WHERE cp.user_id = u.id AND cp.email IS NULL
+            """))
+            conn.execute(text("""
+                INSERT INTO creator_profiles (user_id, full_name, email, google_id, avatar_url, is_active, created_at)
+                SELECT u.id, u.name, u.email, u.google_id, u.avatar_url, u.is_active, u.created_at
+                FROM users u
+                WHERE NOT EXISTS (SELECT 1 FROM creator_profiles cp WHERE cp.user_id = u.id)
+            """))
+            conn.execute(text("ALTER TABLE creator_profiles DROP COLUMN IF EXISTS user_id"))
+            conn.execute(text("DROP TABLE IF EXISTS users"))
+            conn.commit()
 
     # Seed default prompts (on conflict = already exists, keep existing content)
     with SessionLocal() as db:
@@ -580,26 +615,42 @@ class InitialBrandScoreAdmin(ModelView, model=InitialBrandScore):
     page_size = 50
 
 
-class UserAdmin(ModelView, model=User):
-    name         = "User"
-    name_plural  = "Users"
-    icon         = "fa-solid fa-circle-user"
+class CreatorProfileAdmin(ModelView, model=CreatorProfile):
+    name         = "Creator Profile"
+    name_plural  = "Creator Profiles"
+    icon         = "fa-solid fa-id-badge"
     column_list  = [
-        User.id,
-        User.email,
-        User.name,
-        User.google_id,
-        User.is_active,
-        User.created_at,
+        CreatorProfile.id,
+        CreatorProfile.email,
+        CreatorProfile.google_id,
+        CreatorProfile.is_active,
+        CreatorProfile.full_name,
+        CreatorProfile.creator_handle,
+        CreatorProfile.content_niche,
+        CreatorProfile.primary_platform,
+        CreatorProfile.location_city,
+        CreatorProfile.location_country,
+        CreatorProfile.instagram_handle,
+        CreatorProfile.tiktok_handle,
+        CreatorProfile.youtube_channel,
+        CreatorProfile.facebook_page,
+        CreatorProfile.substack_url,
+        CreatorProfile.creator_tier,
+        CreatorProfile.created_at,
+        CreatorProfile.updated_at,
     ]
-    column_searchable_list = [User.email, User.name]
-    column_sortable_list   = [User.id, User.email, User.name, User.is_active, User.created_at]
-    column_default_sort    = [(User.created_at, True)]
+    column_searchable_list = [CreatorProfile.email, CreatorProfile.full_name, CreatorProfile.creator_handle, CreatorProfile.content_niche]
+    column_sortable_list    = [
+        CreatorProfile.id, CreatorProfile.email, CreatorProfile.is_active,
+        CreatorProfile.full_name, CreatorProfile.content_niche,
+        CreatorProfile.primary_platform, CreatorProfile.creator_tier, CreatorProfile.created_at,
+    ]
+    column_default_sort    = [(CreatorProfile.created_at, True)]
     page_size = 50
 
 
 admin = Admin(app, engine)
-admin.add_view(UserAdmin)
+admin.add_view(CreatorProfileAdmin)
 admin.add_view(InitialBrandScoreAdmin)
 admin.add_view(BrandRawAdmin)
 admin.add_view(MetaAdAdmin)
@@ -701,6 +752,11 @@ def login_redirect():
 @app.get("/dashboard", include_in_schema=False)
 def dashboard_page():
     return FileResponse("frontend/index.html")
+
+
+@app.get("/creator-profile", include_in_schema=False)
+def creator_profile_page():
+    return FileResponse("frontend/creator-profile.html")
 
 
 class SeedJobResponse(BaseModel):
@@ -912,5 +968,118 @@ def update_prompt(name: str, body: PromptUpdateRequest):
             content=row.content,
             updated_at=str(row.updated_at) if row.updated_at else None,
         )
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Creator profile endpoints — self-service, one profile per logged-in user
+# ---------------------------------------------------------------------------
+
+class CreatorProfileRequest(BaseModel):
+    full_name:        str
+    creator_handle:   str
+    location_city:    str | None = None
+    location_country: str | None = None
+    bio_tagline:      str | None = None
+
+    content_niche: str
+
+    instagram_handle: str | None = None
+    tiktok_handle:     str | None = None
+    youtube_channel:   str | None = None
+    facebook_page:     str | None = None
+    substack_url:      str | None = None
+    substack_subscribers: int | None = None
+
+    primary_platform: str | None = None
+
+    audience_gender_male_pct:   float | None = None
+    audience_gender_female_pct: float | None = None
+    audience_age_bracket:       str | None = None
+    audience_top_countries:     list[dict] | None = None
+
+
+class CreatorProfileResponse(BaseModel):
+    id:         int
+    email:      str
+    is_active:  bool
+
+    full_name:        str | None = None
+    creator_handle:   str | None = None
+    location_city:    str | None = None
+    location_country: str | None = None
+    bio_tagline:      str | None = None
+
+    content_niche: str | None = None
+
+    instagram_handle: str | None = None
+    tiktok_handle:     str | None = None
+    youtube_channel:   str | None = None
+    facebook_page:     str | None = None
+    substack_url:      str | None = None
+    substack_subscribers: int | None = None
+
+    primary_platform: str | None = None
+
+    audience_gender_male_pct:   float | None = None
+    audience_gender_female_pct: float | None = None
+    audience_age_bracket:       str | None = None
+    audience_top_countries:     list[dict] | None = None
+
+    creator_tier: str | None = None
+    created_at: str
+    updated_at: str | None = None
+
+
+def _profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
+    return CreatorProfileResponse(
+        id=row.id,
+        email=row.email,
+        is_active=row.is_active,
+        full_name=row.full_name,
+        creator_handle=row.creator_handle,
+        location_city=row.location_city,
+        location_country=row.location_country,
+        bio_tagline=row.bio_tagline,
+        content_niche=row.content_niche,
+        instagram_handle=row.instagram_handle,
+        tiktok_handle=row.tiktok_handle,
+        youtube_channel=row.youtube_channel,
+        facebook_page=row.facebook_page,
+        substack_url=row.substack_url,
+        substack_subscribers=row.substack_subscribers,
+        primary_platform=row.primary_platform,
+        audience_gender_male_pct=row.audience_gender_male_pct,
+        audience_gender_female_pct=row.audience_gender_female_pct,
+        audience_age_bracket=row.audience_age_bracket,
+        audience_top_countries=row.audience_top_countries,
+        creator_tier=row.creator_tier,
+        created_at=str(row.created_at) if row.created_at else "",
+        updated_at=str(row.updated_at) if row.updated_at else None,
+    )
+
+
+@app.get("/creator-profile/me", response_model=CreatorProfileResponse)
+def get_my_creator_profile(current_user: CreatorProfile = Depends(get_current_user)):
+    """Return the logged-in user's creator profile."""
+    return _profile_to_response(current_user)
+
+
+@app.put("/creator-profile/me", response_model=CreatorProfileResponse)
+def upsert_my_creator_profile(
+    body: CreatorProfileRequest,
+    current_user: CreatorProfile = Depends(get_current_user),
+):
+    """Update the logged-in user's creator profile fields."""
+    db = SessionLocal()
+    try:
+        row = db.query(CreatorProfile).filter(CreatorProfile.id == current_user.id).first()
+        for field, value in body.model_dump().items():
+            setattr(row, field, value)
+
+        db.commit()
+        db.refresh(row)
+        return _profile_to_response(row)
     finally:
         db.close()

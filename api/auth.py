@@ -26,7 +26,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, IS_PRODUCTION, JWT_SECRET, OAUTH_REDIRECT_URI
-from pipeline.db import User, get_db
+from pipeline.db import CreatorProfile, get_db
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,17 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _safe_return_to(path: str | None) -> str:
+    """
+    Only allow same-origin relative paths as a post-login redirect target.
+    Rejects protocol-relative ("//evil.com"), absolute ("https://evil.com"),
+    and backslash-based ("/\\evil.com") open-redirect tricks.
+    """
+    if not path or not path.startswith("/") or path.startswith("//") or path.startswith("/\\") or ":" in path:
+        return "/"
+    return path
+
+
 #  JWT helpers
 
 def _make_jwt(user_id: int, email: str) -> str:
@@ -82,13 +93,13 @@ def _decode_jwt(token: str) -> dict:
 
 #  Auth dependency
 
-def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
-    """FastAPI dependency — returns the logged-in User or raises 401."""
+def get_current_user(request: Request, db: Session = Depends(get_db)) -> CreatorProfile:
+    """FastAPI dependency — returns the logged-in CreatorProfile or raises 401."""
     token = request.cookies.get("access_token")
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     payload = _decode_jwt(token)
-    user = db.query(User).filter(User.id == int(payload["sub"])).first()
+    user = db.query(CreatorProfile).filter(CreatorProfile.id == int(payload["sub"])).first()
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive")
     return user
@@ -97,8 +108,13 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
 #  Routes
 
 @router.get("/google")
-def login_google(request: Request):
-    """Step 1 — redirect the browser to Google's OAuth consent screen."""
+def login_google(request: Request, return_to: str | None = None):
+    """Step 1 — redirect the browser to Google's OAuth consent screen.
+
+    Pass ?return_to=/some/path to send the user back to that page after
+    login instead of the default dashboard — e.g. so a form filled out
+    before signing in can be resumed and saved once the session exists.
+    """
     if not GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID not configured")
 
@@ -120,6 +136,10 @@ def login_google(request: Request):
         "oauth_state", state,
         httponly=True, max_age=600, samesite="lax", secure=IS_PRODUCTION,
     )
+    response.set_cookie(
+        "oauth_return_to", _safe_return_to(return_to),
+        httponly=True, max_age=600, samesite="lax", secure=IS_PRODUCTION,
+    )
     return response
 
 
@@ -138,6 +158,7 @@ async def google_callback(
     if error or not code:
         response = RedirectResponse(url="/signin", status_code=302)
         response.delete_cookie("oauth_state")
+        response.delete_cookie("oauth_return_to")
         return response
 
     # Verify CSRF state (constant-time compare)
@@ -197,19 +218,21 @@ async def google_callback(
         logger.warning("Rejected Google sign-in with unverified email: %s", g.get("email"))
         raise HTTPException(status_code=403, detail="Google account email is not verified")
 
-    # Find or create user in DB
-    user = db.query(User).filter(User.google_id == g["id"]).first()
+    # Find or create the creator's account row in DB
+    user = db.query(CreatorProfile).filter(CreatorProfile.google_id == g["id"]).first()
     if not user:
-        user = db.query(User).filter(User.email == g["email"]).first()
+        user = db.query(CreatorProfile).filter(CreatorProfile.email == g["email"]).first()
         if user:
             # Existing email — link Google account to it
             user.google_id  = g["id"]
             user.avatar_url = g.get("picture")
         else:
-            # Brand-new user — create row
-            user = User(
+            # Brand-new account — create row. Creator-specific fields
+            # (creator_handle, content_niche, etc.) stay NULL until the
+            # user fills out the creator profile form.
+            user = CreatorProfile(
                 email=g["email"],
-                name=g.get("name"),
+                full_name=g.get("name"),
                 google_id=g["id"],
                 avatar_url=g.get("picture"),
             )
@@ -218,11 +241,11 @@ async def google_callback(
             db.commit()
         except IntegrityError:
             # Concurrent request (double-click / duplicate tab) already created
-            # this user — roll back and re-fetch instead of erroring out.
+            # this account — roll back and re-fetch instead of erroring out.
             db.rollback()
             user = (
-                db.query(User)
-                .filter((User.google_id == g["id"]) | (User.email == g["email"]))
+                db.query(CreatorProfile)
+                .filter((CreatorProfile.google_id == g["id"]) | (CreatorProfile.email == g["email"]))
                 .first()
             )
             if not user:
@@ -233,9 +256,11 @@ async def google_callback(
     if not user.is_active:
         raise HTTPException(status_code=403, detail="This account has been deactivated")
 
-    # Issue JWT in a secure httpOnly cookie and redirect to dashboard
+    # Issue JWT in a secure httpOnly cookie and redirect back to where the
+    # user started (or the dashboard by default)
+    return_to = _safe_return_to(request.cookies.get("oauth_return_to"))
     token = _make_jwt(user.id, user.email)
-    response = RedirectResponse(url="/", status_code=302)
+    response = RedirectResponse(url=return_to, status_code=302)
     response.set_cookie(
         "access_token", token,
         httponly=True,
@@ -244,16 +269,17 @@ async def google_callback(
         secure=IS_PRODUCTION,
     )
     response.delete_cookie("oauth_state")
+    response.delete_cookie("oauth_return_to")
     return response
 
 
 @router.get("/me")
-def me(current_user: User = Depends(get_current_user)):
+def me(current_user: CreatorProfile = Depends(get_current_user)):
     """Return the logged-in user's profile."""
     return {
         "id":         current_user.id,
         "email":      current_user.email,
-        "name":       current_user.name,
+        "name":       current_user.full_name,
         "avatar_url": current_user.avatar_url,
     }
 

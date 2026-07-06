@@ -372,19 +372,63 @@ class InitialBrandScore(Base):
         return f"Score#{self.id} brand={self.brand_raw_id} {self.score_band}({self.total_score})"
 
 
-class User(Base):
-    __tablename__ = "users"
+class CreatorProfile(Base):
+    __tablename__ = "creator_profiles"
 
-    id         = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True)
+
+    #  Account / auth identity (formerly the separate `users` table)
     email      = Column(Text, unique=True, nullable=False)
-    name       = Column(Text)
     google_id  = Column(Text, unique=True)
     avatar_url = Column(Text)
     is_active  = Column(Boolean, nullable=False, server_default="true", default=True)
+
+    #  Identity
+    full_name        = Column(Text)
+    creator_handle   = Column(Text)
+    location_city    = Column(Text)
+    location_country = Column(Text)
+    bio_tagline      = Column(Text)
+
+    #  Content niche
+    content_niche = Column(Text)
+    # 'music', 'podcast_audio', 'photography', 'gaming', 'education',
+    # 'fitness', 'food_cooking', 'finance', 'substack_newsletter'
+
+    #  Platform links
+    instagram_handle = Column(Text)
+    tiktok_handle     = Column(Text)
+    youtube_channel   = Column(Text)
+    facebook_page     = Column(Text)
+    substack_url      = Column(Text)
+
+    #  Platform stats
+    instagram_stats = Column(JSONB)
+    tiktok_stats     = Column(JSONB)
+    youtube_stats    = Column(JSONB)
+    facebook_stats   = Column(JSONB)
+    substack_subscribers = Column(Integer)
+
+    primary_platform = Column(Text)
+
+    #  Audience demographics
+    # Same shape as BrandMatchProfile's audience fields, so the two sides
+    # compare directly in score_audience_demographics().
+    audience_gender_male_pct    = Column(Float)      # 0.0 – 1.0
+    audience_gender_female_pct  = Column(Float)      # 0.0 – 1.0
+    audience_age_bracket        = Column(Text)       # e.g. "18-24", "25-30", "30-40"
+    audience_top_countries      = Column(JSONB)      # [{"country": "US", "pct": 0.45}, ...]
+
+    #  Derived / computed fields
+    creator_tier  = Column(Text)
+    content_tags  = Column(JSONB)
+    # embedding: Vector(1536) — pending pgvector extension install on the DB server
+
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), onupdate=func.now())
 
     def __str__(self) -> str:
-        return self.email or f"User #{self.id}"
+        return self.creator_handle or self.email or f"Creator #{self.id}"
 
 
 class Prompt(Base):
