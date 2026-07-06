@@ -167,46 +167,52 @@ async def google_callback(
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
 
     # Exchange authorization code for access token
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-        token_resp = await client.post(_GOOGLE_TOKEN_URL, data={
-            "code":          code,
-            "client_id":     GOOGLE_CLIENT_ID,
-            "client_secret": GOOGLE_CLIENT_SECRET,
-            "redirect_uri":  OAUTH_REDIRECT_URI,
-            "grant_type":    "authorization_code",
-        })
-        try:
-            token_data = token_resp.json()
-        except ValueError:
-            logger.error("Google token endpoint returned non-JSON response: %s", token_resp.text[:300])
-            raise HTTPException(status_code=502, detail="Google sign-in failed — please try again")
+    try:
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            token_resp = await client.post(_GOOGLE_TOKEN_URL, data={
+                "code":          code,
+                "client_id":     GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uri":  OAUTH_REDIRECT_URI,
+                "grant_type":    "authorization_code",
+            })
+            try:
+                token_data = token_resp.json()
+            except ValueError:
+                logger.error("Google token endpoint returned non-JSON response: %s", token_resp.text[:300])
+                raise HTTPException(status_code=502, detail="Google sign-in failed — please try again")
 
-        if token_resp.status_code != 200 or "error" in token_data:
-            logger.warning(
-                "Google token exchange failed: HTTP %s — %s",
-                token_resp.status_code, token_data.get("error_description", token_data.get("error")),
+            if token_resp.status_code != 200 or "error" in token_data:
+                logger.warning(
+                    "Google token exchange failed: HTTP %s — %s",
+                    token_resp.status_code, token_data.get("error_description", token_data.get("error")),
+                )
+                raise HTTPException(status_code=400, detail="Google sign-in failed — please try again")
+
+            access_token = token_data.get("access_token")
+            if not access_token:
+                logger.error("Google token response missing access_token")
+                raise HTTPException(status_code=502, detail="Google sign-in failed — please try again")
+
+            # Fetch Google profile using the access token
+            info_resp = await client.get(
+                _GOOGLE_USERINFO,
+                headers={"Authorization": f"Bearer {access_token}"},
             )
-            raise HTTPException(status_code=400, detail="Google sign-in failed — please try again")
+            if info_resp.status_code != 200:
+                logger.error("Google userinfo request failed: HTTP %s", info_resp.status_code)
+                raise HTTPException(status_code=502, detail="Failed to fetch Google profile")
 
-        access_token = token_data.get("access_token")
-        if not access_token:
-            logger.error("Google token response missing access_token")
-            raise HTTPException(status_code=502, detail="Google sign-in failed — please try again")
-
-        # Fetch Google profile using the access token
-        info_resp = await client.get(
-            _GOOGLE_USERINFO,
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        if info_resp.status_code != 200:
-            logger.error("Google userinfo request failed: HTTP %s", info_resp.status_code)
-            raise HTTPException(status_code=502, detail="Failed to fetch Google profile")
-
-        try:
-            g = info_resp.json()
-        except ValueError:
-            logger.error("Google userinfo returned non-JSON response")
-            raise HTTPException(status_code=502, detail="Failed to fetch Google profile")
+            try:
+                g = info_resp.json()
+            except ValueError:
+                logger.error("Google userinfo returned non-JSON response")
+                raise HTTPException(status_code=502, detail="Failed to fetch Google profile")
+    except httpx.HTTPError as exc:
+        # Network-level failure (timeout, connection refused, DNS, etc.) reaching
+        # Google — not a bug in our logic, just a transient outbound call failing.
+        logger.error("Network error talking to Google during sign-in: %s", exc)
+        raise HTTPException(status_code=502, detail="Couldn't reach Google — please try again")
 
     if not g.get("id") or not g.get("email"):
         logger.error("Google userinfo response missing required fields: %s", list(g.keys()))
