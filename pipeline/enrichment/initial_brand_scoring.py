@@ -122,26 +122,54 @@ def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any
 
     details: dict[str, Any] = {}
 
-    # 2a. Paid partnership posts (0-12 pts)
+    # Posts that carry any collaboration signal — used for the recency sub-score
+    signal_posts = [
+        p for p in posts
+        if p.paid_partnership or p.sponsors or p.tagged_users or p.coauthor_producers
+    ]
+
+    # 2a. Recency (0-9 pts) — most recent post with any collaboration signal.
+    # Mirrors YouTube: a brand that worked with a creator last month outranks
+    # one whose last collab was over a year ago.
+    days_list = [d for d in (_days_since(p.timestamp) for p in signal_posts) if d is not None]
+    if days_list:
+        min_days = min(days_list)
+        details["recency_days"] = min_days
+        if min_days <= 30:
+            recency_pts = 9
+        elif min_days <= 90:
+            recency_pts = 7
+        elif min_days <= 180:
+            recency_pts = 4
+        elif min_days <= 365:
+            recency_pts = 2
+        else:
+            recency_pts = 0
+    else:
+        details["recency_days"] = None
+        recency_pts = 0
+    details["recency_pts"] = recency_pts
+
+    # 2b. Paid partnership posts (0-8 pts)
     paid_count = sum(1 for p in posts if p.paid_partnership)
     details["paid_partnership_posts"] = paid_count
     if paid_count == 0:
         paid_pts = 0
     elif paid_count <= 2:
-        paid_pts = 6
+        paid_pts = 4
     elif paid_count <= 5:
-        paid_pts = 9
+        paid_pts = 6
     else:
-        paid_pts = 12
+        paid_pts = 8
     details["paid_pts"] = paid_pts
 
-    # 2b. Sponsors field populated (0-3 pts)
+    # 2c. Sponsors field populated (0-2 pts)
     sponsors_populated = any(p.sponsors for p in posts)
     details["sponsors_populated"] = sponsors_populated
-    sponsors_pts = 3 if sponsors_populated else 0
+    sponsors_pts = 2 if sponsors_populated else 0
     details["sponsors_pts"] = sponsors_pts
 
-    # 2c. Creator network in brand_instagram_users (0-7 pts)
+    # 2d. Creator network in brand_instagram_users (0-4 pts)
     creator_count = db.query(BrandInstagramUser).filter(
         BrandInstagramUser.brand_raw_id == brand_raw_id
     ).count()
@@ -149,20 +177,20 @@ def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any
     if creator_count == 0:
         creator_pts = 0
     elif creator_count < 10:
-        creator_pts = 4
+        creator_pts = 2
     else:
-        creator_pts = 7
+        creator_pts = 4
     details["creator_pts"] = creator_pts
 
-    # 2d. Collaboration signals (0-3 pts)
+    # 2e. Collaboration signals (0-2 pts)
     collab_signals = any(
         (p.tagged_users or p.coauthor_producers) for p in posts
     )
     details["collab_signals"] = collab_signals
-    collab_pts = 3 if collab_signals else 0
+    collab_pts = 2 if collab_signals else 0
     details["collab_pts"] = collab_pts
 
-    total = min(paid_pts + sponsors_pts + creator_pts + collab_pts, 25)
+    total = min(recency_pts + paid_pts + sponsors_pts + creator_pts + collab_pts, 25)
     details["total"] = total
     return total, details
 

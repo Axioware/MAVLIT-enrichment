@@ -108,40 +108,52 @@ Brands sponsoring large channels have bigger influencer budgets and are more ser
 ### Instagram Paid Partnerships — 25 pts max
 Source: `instagram_posts` + `brand_instagram_users` tables
 
-#### 2a. Paid Partnership Posts (0 – 12 pts)
+#### 2a. Recency — most recent post with any collaboration signal (0 – 9 pts)
+
+Mirrors the YouTube recency logic: a brand that worked with a creator last month is a hotter lead than one whose last collab was over a year ago. A "signal post" is any post where `paid_partnership`, `sponsors`, `tagged_users`, or `coauthor_producers` is non-empty; recency is measured from that post's `timestamp`.
+
+| Days since most recent signal post | Points |
+|-------------------------------------|--------|
+| ≤ 30 days | 9 |
+| 31 – 90 days | 7 |
+| 91 – 180 days | 4 |
+| 181 – 365 days | 2 |
+| 1+ year or no data | 0 |
+
+#### 2b. Paid Partnership Posts (0 – 8 pts)
 
 `paid_partnership = true` is officially labelled by Meta — the strongest Instagram signal that the brand paid a creator.
 
 | Count of posts with `paid_partnership = true` | Points |
 |-----------------------------------------------|--------|
 | 0 | 0 |
-| 1 – 2 | 6 |
-| 3 – 5 | 9 |
-| 6+ | 12 |
+| 1 – 2 | 4 |
+| 3 – 5 | 6 |
+| 6+ | 8 |
 
-#### 2b. Sponsors Field Populated (0 – 3 pts)
+#### 2c. Sponsors Field Populated (0 – 2 pts)
 
 Brand tagged as a sponsor in creator posts — additional confirmation of paid activity.
 
 | Condition | Points |
 |-----------|--------|
-| Any `instagram_post` has `sponsors` field non-empty | +3 |
+| Any `instagram_post` has `sponsors` field non-empty | +2 |
 
-#### 2c. Creator Network Size in `brand_instagram_users` (0 – 7 pts)
+#### 2d. Creator Network Size in `brand_instagram_users` (0 – 4 pts)
 
 Brands with larger creator networks run systematic influencer programs, not one-off posts.
 
 | Count of linked creators | Points |
 |--------------------------|--------|
 | 0 | 0 |
-| 1 – 9 | 4 |
-| 10+ | 7 |
+| 1 – 9 | 2 |
+| 10+ | 4 |
 
-#### 2d. Collaboration Signals (0 – 3 pts)
+#### 2e. Collaboration Signals (0 – 2 pts)
 
 | Condition | Points |
 |-----------|--------|
-| Any post has `tagged_users` or `coauthor_producers` non-empty | +3 |
+| Any post has `tagged_users` or `coauthor_producers` non-empty | +2 |
 
 ---
 
@@ -280,7 +292,7 @@ Source: `brands_raw`
 A brand scoring 0 in Section 1 is deprioritized regardless of Meta Ads spend or Tranco rank. No YouTube or Instagram creator spending = no proven intent to buy influencer marketing. They may have budget but they are not yet in the market.
 
 **Rule 2 — Recency beats volume.**
-An old influencer campaign is weak signal. A brand that sponsored 1 YouTuber last month is a better target than a brand that sponsored 20 two years ago. Recency scoring reflects this in both YouTube and Meta Ads sections.
+An old influencer campaign is weak signal. A brand that sponsored 1 YouTuber last month is a better target than a brand that sponsored 20 two years ago. Recency scoring reflects this in the YouTube, Instagram, and Meta Ads sections.
 
 **Rule 3 — Meta Ads prove budget, not intent.**
 Section 2 is capped at 15 pts, always below Section 1. A brand spending heavily on Meta Ads but running no creator campaigns is a cold-call. One with both is a warm lead.
@@ -329,15 +341,17 @@ scored_at               TIMESTAMPTZ When this score was last computed
     "total": 23
   },
   "instagram": {
+    "recency_days": 24,
+    "recency_pts": 9,
     "paid_partnership_posts": 4,
-    "paid_pts": 9,
+    "paid_pts": 6,
     "sponsors_populated": true,
-    "sponsors_pts": 3,
+    "sponsors_pts": 2,
     "creator_network_count": 14,
-    "creator_pts": 7,
+    "creator_pts": 4,
     "collab_signals": true,
-    "collab_pts": 3,
-    "total": 22
+    "collab_pts": 2,
+    "total": 23
   },
   "meta_ads": {
     "ad_count": 11,
