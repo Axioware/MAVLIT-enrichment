@@ -13,6 +13,19 @@ enrich_instagram_posts(db, limit=1)
 db.close()
 "
 
+OR
+
+python3 -c "
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.instagram_posts import enrich_instagram_posts
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+db = SessionLocal()
+enrich_instagram_posts(db, brand_id=853)
+db.close()
+"
+
+
 ## to run youtube_sponsorship.py (daily limited run)
 
 python3 -c "
@@ -24,6 +37,18 @@ db = SessionLocal()
 enrich_youtube_sponsorships(db, limit=1)
 db.close()
 "
+OR
+
+python3 -c "
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.youtube_sponsorship import enrich_youtube_sponsorships
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+db = SessionLocal()
+enrich_youtube_sponsorships(db, brand_id=853)
+db.close()
+"
+
 
 ## to run tiktok_posts.py (apify)
 

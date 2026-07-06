@@ -236,6 +236,7 @@ def enrich_instagram_posts(
     db: Session,
     limit: int = 50,
     posts_newer_than: str = _POSTS_NEWER,
+    brand_id: int | None = None,
 ) -> int:
     """
     For each brand with instagram_handle set and instagram_checked=False:
@@ -244,21 +245,23 @@ def enrich_instagram_posts(
       3. Store qualifying posts in instagram_posts
       4. Mark instagram_checked=True
 
+    Pass brand_id to target one specific brand directly — this bypasses the
+    instagram_checked filter (so you can re-run/test a brand that was already
+    processed), but instagram_handle must still be set.
+
     Returns number of brands processed.
     """
     if not APIFY_TOKEN:
         logger.warning("APIFY_TOKEN not set — skipping Instagram enrichment")
         return 0
 
-    brands: list[BrandRaw] = (
-        db.query(BrandRaw)
-        .filter(
-            BrandRaw.instagram_handle.isnot(None),
-            BrandRaw.instagram_checked == False,
-        )
-        .limit(limit)
-        .all()
-    )
+    query = db.query(BrandRaw).filter(BrandRaw.instagram_handle.isnot(None))
+    if brand_id is not None:
+        query = query.filter(BrandRaw.id == brand_id)
+    else:
+        query = query.filter(BrandRaw.instagram_checked == False)
+
+    brands: list[BrandRaw] = query.limit(limit).all()
 
     if not brands:
         logger.info("Instagram: no pending brands with instagram_handle")

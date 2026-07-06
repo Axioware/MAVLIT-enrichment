@@ -340,7 +340,7 @@ def _build_queries(brand_name: str) -> list[tuple[str, str]]:
     return high + medium + low
 
 
-def enrich_youtube_sponsorships(db: Session, limit: int = 50) -> int:
+def enrich_youtube_sponsorships(db: Session, limit: int = 50, brand_id: int | None = None) -> int:
     """
     For each brand with youtube_checked=False:
       1. Run 14 tier-based YouTube searches (brand name embedded in every query)
@@ -351,18 +351,23 @@ def enrich_youtube_sponsorships(db: Session, limit: int = 50) -> int:
     Quota cost: 14 queries × 100 units = 1,400 units per brand.
     Free tier (10,000 units/day) → ~7 brands/day.
 
+    Pass brand_id to target one specific brand directly — this bypasses the
+    youtube_checked filter (so you can re-run/test a brand that was already
+    processed).
+
     Returns number of brands processed.
     """
     if not YOUTUBE_API_KEY:
         logger.warning("YOUTUBE_API_KEY not set — skipping YouTube sponsorship detection")
         return 0
 
-    brands: list[BrandRaw] = (
-        db.query(BrandRaw)
-        .filter(BrandRaw.youtube_checked == False)
-        .limit(limit)
-        .all()
-    )
+    query = db.query(BrandRaw)
+    if brand_id is not None:
+        query = query.filter(BrandRaw.id == brand_id)
+    else:
+        query = query.filter(BrandRaw.youtube_checked == False)
+
+    brands: list[BrandRaw] = query.limit(limit).all()
 
     if not brands:
         logger.info("YouTube sponsorships: no pending brands")
