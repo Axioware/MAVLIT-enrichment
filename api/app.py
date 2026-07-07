@@ -10,7 +10,7 @@ from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
 from config import IS_PRODUCTION
-from pipeline.db import Base, Brand, BrandInstagramUser, BrandRaw, Contact, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, Brand, BrandInstagramUser, BrandProfile, BrandRaw, Contact, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
 from pipeline.enrichment.instagram_posts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
@@ -633,6 +633,53 @@ class InitialBrandScoreAdmin(ModelView, model=InitialBrandScore):
     page_size = 50
 
 
+class BrandProfileAdmin(ModelView, model=BrandProfile):
+    name         = "Brand Match Profile"
+    name_plural  = "Brand Match Profiles"
+    icon         = "fa-solid fa-chart-line"
+    column_list  = [
+        BrandProfile.brand_raw,
+        BrandProfile.sponsorship_activity_score,
+        BrandProfile.meta_ads_active,
+        BrandProfile.meta_ads_recency_days,
+        BrandProfile.meta_ads_no_end_date,
+        BrandProfile.meta_ads_count,
+        BrandProfile.youtube_sponsorship_count,
+        BrandProfile.youtube_last_sponsorship,
+        BrandProfile.instagram_paid_posts_count,
+        BrandProfile.tiktok_sponsored_count,
+        BrandProfile.twitter_sponsored_count,
+        BrandProfile.avg_yt_creator_subscribers,
+        BrandProfile.avg_ig_collaborator_followers,
+        BrandProfile.typical_creator_tier,
+        BrandProfile.audience_gender_male_pct,
+        BrandProfile.audience_gender_female_pct,
+        BrandProfile.audience_top_countries,
+        BrandProfile.audience_age_groups,
+        BrandProfile.audience_sample_size,
+        BrandProfile.has_marketing_contact,
+        BrandProfile.contact_mode,
+        BrandProfile.best_contact_title_score,
+        BrandProfile.computed_at,
+    ]
+    column_labels = {BrandProfile.brand_raw: "Brand"}
+    column_sortable_list = [
+        BrandProfile.sponsorship_activity_score,
+        BrandProfile.meta_ads_active,
+        BrandProfile.meta_ads_recency_days,
+        BrandProfile.meta_ads_count,
+        BrandProfile.youtube_sponsorship_count,
+        BrandProfile.instagram_paid_posts_count,
+        BrandProfile.typical_creator_tier,
+        BrandProfile.audience_sample_size,
+        BrandProfile.has_marketing_contact,
+        BrandProfile.contact_mode,
+        BrandProfile.computed_at,
+    ]
+    column_default_sort = [(BrandProfile.sponsorship_activity_score, True)]
+    page_size = 50
+
+
 class CreatorProfileAdmin(ModelView, model=CreatorProfile):
     name         = "Creator Profile"
     name_plural  = "Creator Profiles"
@@ -670,6 +717,7 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
 admin = Admin(app, engine)
 admin.add_view(CreatorProfileAdmin)
 admin.add_view(InitialBrandScoreAdmin)
+admin.add_view(BrandProfileAdmin)
 admin.add_view(BrandRawAdmin)
 admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)

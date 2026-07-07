@@ -373,6 +373,52 @@ class InitialBrandScore(Base):
         return f"Score#{self.id} brand={self.brand_raw_id} {self.score_band}({self.total_score})"
 
 
+class BrandProfile(Base):
+    __tablename__ = "brand_match_profile"
+
+    brand_raw_id = Column(Integer, ForeignKey("brands_raw.id"), primary_key=True)
+
+    #  Sponsorship activity
+    sponsorship_activity_score = Column(Float, default=0.0)   # 0-100 composite, used in scoring
+    meta_ads_active            = Column(Boolean)              # True if any ad is currently running
+    meta_ads_recency_days      = Column(Integer)               # days since last ad started; 0 if currently running
+    meta_ads_no_end_date       = Column(Boolean)               # True if any ad has no end_date (still live)
+    meta_ads_count             = Column(Integer)
+    youtube_sponsorship_count  = Column(Integer)                # last 12 months
+    youtube_last_sponsorship   = Column(Text)
+    instagram_paid_posts_count = Column(Integer)
+    tiktok_sponsored_count     = Column(Integer)
+    twitter_sponsored_count    = Column(Integer)
+
+    #  Creator tier fit
+    avg_yt_creator_subscribers    = Column(Integer)
+    avg_ig_collaborator_followers = Column(Integer)
+    typical_creator_tier          = Column(Text)   # nano / micro / macro / mega
+
+    #  Audience demographics
+    audience_gender_male_pct   = Column(Float)
+    audience_gender_female_pct = Column(Float)
+    audience_top_countries     = Column(JSONB)   # [{"country": "US", "pct": 0.45}, ...]
+    audience_age_groups        = Column(JSONB)   # {"18-24": 0.3, "25-34": 0.5, ...}
+    audience_sample_size       = Column(Integer)  # min 20 required to trust the above
+
+    #  Contact / outreach routing signal (NOT used in scoring)
+    has_marketing_contact    = Column(Boolean)   # True if Apollo returned a marketing/partnerships title
+    contact_mode             = Column(Text)      # 'in_house' | 'outsourced_likely' | 'none'
+    best_contact_title_score = Column(Integer)
+
+    #  Embedding
+    embedding      = Column(Vector(1536))
+    embedding_text = Column(Text)
+
+    computed_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
+
+    def __str__(self) -> str:
+        return f"BrandProfile brand={self.brand_raw_id} tier={self.typical_creator_tier}"
+
+
 class CreatorProfile(Base):
     __tablename__ = "creator_profiles"
 
