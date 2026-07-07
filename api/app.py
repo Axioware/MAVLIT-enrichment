@@ -1,3 +1,4 @@
+import logging
 import uuid
 from contextlib import asynccontextmanager
 
@@ -22,9 +23,25 @@ from pipeline.enrichment.orchestrator import run_signal_enrichment
 from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 from pipeline.seed import run_seed
 
+logger = logging.getLogger(__name__)
 
 def _run_migrations() -> None:
     """Create tables and apply column migrations before accepting requests."""
+    # pgvector extension must exist before create_all() defines the
+    # embedding Vector(1536) column. Only a superuser can create it for the
+    # first time on a fresh DB (run once: `CREATE EXTENSION vector;` as
+    # postgres) — after that this is a harmless no-op for the app's own user.
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            logger.warning(
+                "Could not create pgvector extension (needs superuser once) — "
+                "continuing; embedding columns will fail if it's still missing."
+            )
+
     Base.metadata.create_all(bind=engine)
     stmts = [
         # Original columns (idempotent)
@@ -90,6 +107,7 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ALTER COLUMN content_niche DROP NOT NULL",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_profiles_email ON creator_profiles(email)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_profiles_google_id ON creator_profiles(google_id)",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS embedding vector(1536)",
     ]
     with engine.connect() as conn:
         for sql in stmts:

@@ -1,3 +1,4 @@
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import Boolean, Column, Float, ForeignKey, Integer, Text, TIMESTAMP, create_engine
 from sqlalchemy.dialects.postgresql import insert, JSONB
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker, relationship
@@ -422,7 +423,7 @@ class CreatorProfile(Base):
     #  Derived / computed fields
     creator_tier  = Column(Text)
     content_tags  = Column(JSONB)
-    # embedding: Vector(1536) — pending pgvector extension install on the DB server
+    embedding     = Column(Vector(1536))
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), onupdate=func.now())
