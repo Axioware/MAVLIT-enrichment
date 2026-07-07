@@ -20,7 +20,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from pipeline.db import SOURCE_CONFIDENCE, insert_brands_batch
-from pipeline.normalize import deduplicate, normalize
+from pipeline.helpers.normalize import deduplicate, normalize
 from pipeline.sources.google_serp import google_brand_search
 from pipeline.sources.wikidata import search_wikidata_brands
 from pipeline.sources.wikipedia import search_wikipedia_brands

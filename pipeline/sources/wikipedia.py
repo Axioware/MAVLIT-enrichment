@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
 
-from pipeline.http import fetch
+from pipeline.helpers.http import fetch
 
 logger = logging.getLogger(__name__)
 
