@@ -39,8 +39,6 @@ class BrandRaw(Base):
     # Official website (P856) resolved at seed time
     website           = Column(Text)
     domain            = Column(Text)
-    enriched          = Column(Boolean, nullable=False, server_default="false", default=False)
-    enrichment_failed = Column(Boolean, nullable=False, server_default="false", default=False)
     country           = Column(Text)
     headquarters      = Column(Text)
     location          = Column(Text)
@@ -104,44 +102,6 @@ class YoutubeSponsorship(Base):
     fetched_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
-
-
-class Brand(Base):
-    __tablename__ = "brands"
-
-    id               = Column(Integer, primary_key=True)
-    raw_id           = Column(Integer, ForeignKey("brands_raw.id"))
-    name             = Column(Text, nullable=False)
-    domain           = Column(Text, unique=True)
-    industry         = Column(Text)
-    employee_count   = Column(Integer)
-    linkedin_url     = Column(Text)
-    hq_country       = Column(Text)
-    email_pattern    = Column(Text)
-    enrichment_source= Column(Text)
-    contacts_fetched = Column(Boolean, nullable=False, server_default="false", default=False)
-    contacts_fetch_failed = Column(Boolean, nullable=False, server_default="false", default=False)
-    enriched_at      = Column(TIMESTAMP(timezone=True), server_default=func.now())
-
-
-class Contact(Base):
-    __tablename__ = "contacts"
-
-    id                  = Column(Integer, primary_key=True)
-    brand_id            = Column(Integer, ForeignKey("brands.id"))
-    full_name           = Column(Text, nullable=False)
-    title               = Column(Text)
-    title_score         = Column(Integer)
-    email               = Column(Text, unique=True)
-    linkedin_url        = Column(Text, unique=True)
-    apollo_email_status = Column(Text)
-    email_verified      = Column(Boolean, nullable=False, server_default="false", default=False)
-    email_status        = Column(Text)
-    email_score         = Column(Integer)
-    email_guessed       = Column(Boolean, nullable=False, server_default="false", default=False)
-    verified_at         = Column(TIMESTAMP(timezone=True))
-    outreach_sent       = Column(Boolean, nullable=False, server_default="false", default=False)
-    created_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
 class MetaAd(Base):

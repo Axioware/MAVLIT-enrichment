@@ -30,7 +30,6 @@ def ensure_tables():
     Base.metadata.create_all(bind=engine)
     with engine.connect() as conn:
         migrations = [
-            "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS enrichment_failed BOOLEAN NOT NULL DEFAULT false",
             "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS country TEXT",
             "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS headquarters TEXT",
             "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS location TEXT",

@@ -10,7 +10,7 @@ from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
 from config import IS_PRODUCTION
-from pipeline.db import Base, Brand, BrandInstagramUser, BrandProfile, BrandRaw, Contact, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, BrandInstagramUser, BrandProfile, BrandRaw, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
 from pipeline.enrichment.instagram_posts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
@@ -45,7 +45,6 @@ def _run_migrations() -> None:
     Base.metadata.create_all(bind=engine)
     stmts = [
         # Original columns (idempotent)
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS enrichment_failed BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS country TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS headquarters TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS location TEXT",
@@ -108,6 +107,13 @@ def _run_migrations() -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_profiles_email ON creator_profiles(email)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_profiles_google_id ON creator_profiles(google_id)",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS embedding vector(1536)",
+        # enrich.py / contacts.py / verify.py pipeline retired — each enrichment
+        # step now runs independently and is scored directly from brands_raw.
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS enriched",
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS enrichment_failed",
+        # contacts must drop before brands (contacts.brand_id -> brands.id)
+        "DROP TABLE IF EXISTS contacts",
+        "DROP TABLE IF EXISTS brands",
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -211,8 +217,6 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.tiktok_handle,
         BrandRaw.facebook_page,
         BrandRaw.facebook_page_id,
-        BrandRaw.enriched,
-        BrandRaw.enrichment_failed,
         BrandRaw.wikidata_enriched,
         BrandRaw.shopify_checked,
         BrandRaw.tranco_checked,
@@ -253,7 +257,6 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.facebook_page_id,
         BrandRaw.in_tranco_list,
         BrandRaw.tranco_rank,
-        BrandRaw.enriched,
         BrandRaw.wikidata_enriched,
         BrandRaw.shopify_checked,
         BrandRaw.tranco_checked,
@@ -265,7 +268,6 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.initial_brand_scored,
         BrandRaw.created_at,
         BrandRaw.description,
-        BrandRaw.enrichment_failed,
     ]
     column_default_sort = [(BrandRaw.id, True)]
     page_size = 50
@@ -571,36 +573,6 @@ class PromptAdmin(ModelView, model=Prompt):
     page_size = 20
 
 
-class BrandAdmin(ModelView, model=Brand):
-    name         = "Brand"
-    name_plural  = "Brands"
-    icon         = "fa-solid fa-building"
-    column_list  = [
-        Brand.id, Brand.name, Brand.domain, Brand.industry,
-        Brand.employee_count, Brand.hq_country, Brand.enrichment_source,
-        Brand.contacts_fetched, Brand.contacts_fetch_failed, Brand.enriched_at,
-    ]
-    column_searchable_list = [Brand.name, Brand.domain, Brand.industry]
-    column_sortable_list   = [Brand.id, Brand.domain, Brand.contacts_fetched, Brand.enriched_at]
-    column_default_sort    = [(Brand.id, True)]
-    page_size = 50
-
-
-class ContactAdmin(ModelView, model=Contact):
-    name         = "Contact"
-    name_plural  = "Contacts"
-    icon         = "fa-solid fa-user"
-    column_list  = [
-        Contact.id, Contact.full_name, Contact.title, Contact.title_score,
-        Contact.email, Contact.email_verified, Contact.email_status,
-        Contact.email_guessed, Contact.outreach_sent, Contact.created_at,
-    ]
-    column_searchable_list = [Contact.full_name, Contact.email, Contact.title]
-    column_sortable_list   = [Contact.id, Contact.title_score, Contact.email_verified, Contact.created_at]
-    column_default_sort    = [(Contact.id, True)]
-    page_size = 50
-
-
 class InitialBrandScoreAdmin(ModelView, model=InitialBrandScore):
     name         = "Initial Brand Score"
     name_plural  = "Initial Brand Scores"
@@ -728,8 +700,6 @@ admin.add_view(InstagramCreatorCommenterAdmin)
 admin.add_view(PromptAdmin)
 admin.add_view(TiktokPostAdmin)
 admin.add_view(TwitterPostAdmin)
-admin.add_view(BrandAdmin)
-admin.add_view(ContactAdmin)
 
 # 
 # API models
