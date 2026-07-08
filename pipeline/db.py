@@ -92,6 +92,7 @@ class YoutubeSponsorship(Base):
     channel_id       = Column(Text)
     channel_name     = Column(Text)
     subscriber_count = Column(Integer)
+    tier_fit         = Column(Text)   # nano / micro / macro / mega, bucketed from subscriber_count
     published_at     = Column(Text)
     view_count       = Column(Integer)
     like_count       = Column(Integer)
@@ -188,6 +189,7 @@ class InstagramUser(Base):
     bio                 = Column(Text)
     external_url        = Column(Text)
     followers_count     = Column(Integer)
+    tier_fit            = Column(Text)   # nano / micro / macro / mega, bucketed from followers_count
     follows_count       = Column(Integer)
     posts_count         = Column(Integer)
     is_verified         = Column(Boolean)

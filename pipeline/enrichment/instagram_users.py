@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session
 from config import APIFY_TOKEN, MISTRAL_API_KEY
 from pipeline.db import BrandInstagramUser, InstagramCreatorCommenter, InstagramPost, InstagramUser, Prompt
 from pipeline.helpers.apify import run_apify_actor
+from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.llm import call_mistral_json, fill_template
 
@@ -365,6 +366,7 @@ def _build_user_row(
         "bio":                 profile.get("biography"),
         "external_url":        profile.get("externalUrl"),
         "followers_count":     profile.get("followersCount"),
+        "tier_fit":            bucket_creator_tier(profile.get("followersCount")),
         "follows_count":       profile.get("followsCount"),
         "posts_count":         profile.get("postsCount"),
         "is_verified":         profile.get("verified"),

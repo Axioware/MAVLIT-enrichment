@@ -1,9 +1,3 @@
-"""
-pipeline/helpers/social.py
-
-Shared social-media URL and handle utilities used across enrichment steps.
-"""
-
 from urllib.parse import urlparse, urlunparse
 
 

@@ -1,10 +1,3 @@
-"""
-pipeline/helpers/llm.py
-
-Shared Mistral LLM helpers used across enrichment steps.
-Requires MISTRAL_API_KEY in config / .env.
-"""
-
 import json
 import logging
 import re

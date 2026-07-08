@@ -1,10 +1,3 @@
-"""
-pipeline/helpers/apify.py
-
-Shared Apify actor runner used across enrichment steps.
-Requires APIFY_TOKEN in config / .env.
-"""
-
 import logging
 
 from apify_client import ApifyClient

@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, MISTRAL_API_KEY, ENABLE_LLM
 from pipeline.db import BrandRaw, YoutubeSponsorship
+from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.llm import call_mistral_text
 
@@ -449,6 +450,7 @@ def enrich_youtube_sponsorships(db: Session, limit: int = 50, brand_id: int | No
                 "channel_id":         channel_id,
                 "channel_name":       snippet.get("channelTitle", ""),
                 "subscriber_count":   sub_counts.get(channel_id),
+                "tier_fit":           bucket_creator_tier(sub_counts.get(channel_id)),
                 "published_at":       snippet.get("publishedAt", ""),
                 "view_count":         int(stats.get("viewCount", 0) or 0),
                 "like_count":         int(stats.get("likeCount", 0) or 0),

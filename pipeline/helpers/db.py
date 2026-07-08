@@ -1,9 +1,3 @@
-"""
-pipeline/helpers/db.py
-
-Shared SQLAlchemy/PostgreSQL helpers used across enrichment steps.
-"""
-
 import logging
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
