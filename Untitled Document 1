@@ -1,6 +1,0 @@
-1. Enrich brand data
-2. Compute brand_signals for every enriched brand
-3. Use brand_signals to identify promising/contact-worthy brands
-4. Run Apollo/contact enrichment for high-priority brands
-5. Update brand_signals again with contactability_score
-6. Use brand_signals for creator-to-brand matching
