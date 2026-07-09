@@ -43,5 +43,3 @@ if not JWT_SECRET:
 # deploying behind HTTPS — cookies must never be sent unencrypted in prod.
 ENVIRONMENT   = os.getenv("ENVIRONMENT", "development").strip().lower()
 IS_PRODUCTION = ENVIRONMENT == "production"
-
-APOLLO_API_KEY= os.getenv("APOLLO_API_KEY", "")

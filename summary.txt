@@ -1,0 +1,92 @@
+brand_signals.py - what's in here
+
+Four functions so far, all write into brand_match_profile:
+
+1. compute_creator_tier_profile
+   Looks at how big the creators are that a brand has actually worked with.
+   YouTube side = subscriber count on every sponsorship video for that brand.
+   Instagram side = follower count of coauthor/tagged/mentioned users (NOT commenters,
+   they're not creators the brand worked with).
+   Averages both, buckets into nano/micro/macro/mega. Also saves the highest and
+   lowest follower count seen on each platform (youtube_highest/lowest, insta_highest/lowest).
+
+2. compute_audience_demographics
+   This one's about the brand's actual audience, so no filtering - every instagram
+   user linked to the brand counts (creators, tagged, mentions, commenters, all of it).
+   Pulls gender split, top 5 countries, age group breakdown from the LLM-classified
+   fields already on those users. Also saves sample_size so we know how much data
+   the numbers are based on (need 20+ for it to mean anything).
+
+3. compute_platform_presence
+   Simple one - just checks brands_raw for which handles the brand actually has
+   (instagram, youtube, facebook, tiktok, twitter) and saves True/False for each.
+   tiktok/twitter booleans get saved but aren't used in scoring since V1 doesn't
+   use those platforms.
+
+4. compute_brand_embedding
+   Builds a plain-English paragraph about the brand (name, niche, description,
+   location, activity level, audience gender skew, dominant age group, top
+   countries, creator tier, active platforms) then embeds it with
+   sentence-transformers (all-MiniLM-L6-v2, 384-dim vector). Only mentions
+   stuff that's actually known - if a signal hasn't been computed yet it just
+   leaves that sentence out instead of guessing. Saves both the vector and
+   the raw text (embedding_text) so you can see what got embedded.
+
+All four are upserts - safe to re-run, just overwrites with fresh numbers.
+
+There's also run_brand_signals() which just loops over brands scored >=50 in
+initial_brand_score and runs all four functions on them (embedding runs last
+since its text pulls from the other three).
+
+Tested against brand 1417 (Zero Lifestyle), numbers came out sane.
+
+Found and fixed a real bug along the way: sponsorship_activity_score had a
+default of 0.0 on the model, and it turns out that default gets applied even
+on the raw insert()-style upserts used here, not just normal ORM saves. So
+every brand was silently getting a fake 0.0 instead of staying unknown, and
+the embedding text was saying "limited activity" for brands where we
+actually have no idea yet. Pulled the default, wiped the bad 0.0s that were
+already saved.
+
+Still missing: the actual sponsorship_activity_score computation (exists in
+a different form in initial_brand_scoring.py, just not written into this
+table yet).
+
+---
+
+apollo_contacts.py - the new Apollo piece
+
+Separate file, new table (brand_contacts). Takes brands scored >=50, does
+one FREE Apollo search (broad marketing-title sweep + brand's own location,
+not a department filter - turns out Apollo doesn't really support filtering
+search by department, only title/seniority), then asks Mistral to rank the
+results and pick up to 5 best people for sponsorship outreach, then enriches
+each of those 5 to reveal a real email. Only email for now - phone needs a
+webhook setup Apollo requires that we don't have yet, so phone stays empty.
+
+Every brand gets at least a marker row even if nothing's found, so it's
+never re-queried - credits aren't free. Also updates brand_match_profile's
+has_marketing_contact/contact_mode/best_contact_title_score based on
+whichever contact ranked #1.
+
+Went through two revisions:
+1. After checking a reference script + real Apollo CSV output - switched
+   from my own keyword-priority scoring to actually asking Mistral to pick
+   the best candidate (falls back to keyword scoring if Mistral's not
+   configured), and added the real fields Apollo returns
+   (departments/subdepartments/functions) instead of guessing at a
+   department filter that doesn't really work as an input.
+2. User wanted options, not just one contact per brand - so now it stores
+   up to 5 ranked people instead of 1, each with their own rank/email/title.
+   Had to drop the old "one row per brand" unique constraint and replace it
+   with a unique on (brand, person) pair instead, plus add a rank column.
+   This does mean up to 5 Apollo credits spent per brand now instead of 1 -
+   a deliberate tradeoff so creators have backup contacts if the top pick
+   doesn't respond.
+
+Tested for real against BetterHelp (twice, once per revision) - final run
+got 5 verified emails: Emily McCoy, Justin L, Andrew S, Rania Benatia,
+Justin Y - 4 of 5 are the exact same people that showed up in the
+reference CSV. Also caught two real bugs along the way: Apollo deprecated
+the old search endpoint (needed /api_search instead), and requesting phone
+reveal without a webhook just breaks the whole call - both fixed.

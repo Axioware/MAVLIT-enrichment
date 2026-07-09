@@ -17,3 +17,5 @@ python-jose[cryptography]>=3.3
 apify-client>=1.7
 anthropic>=0.28
 mistralai>=1.0
+pgvector>=0.4
+sentence-transformers>=5.0

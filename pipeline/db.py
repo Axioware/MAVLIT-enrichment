@@ -1,5 +1,5 @@
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, Column, Float, ForeignKey, Integer, Text, TIMESTAMP, create_engine
+from sqlalchemy import Boolean, Column, Float, ForeignKey, Integer, Text, TIMESTAMP, UniqueConstraint, create_engine
 from sqlalchemy.dialects.postgresql import insert, JSONB
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker, relationship
 from sqlalchemy.sql import func
@@ -341,7 +341,7 @@ class BrandProfile(Base):
     brand_raw_id = Column(Integer, ForeignKey("brands_raw.id"), primary_key=True)
 
     #  Sponsorship activity
-    sponsorship_activity_score = Column(Float, default=0.0)   # 0-100 composite, used in scoring
+    sponsorship_activity_score = Column(Float)   # 0-100 composite, used in scoring — NULL until computed
     meta_ads_active            = Column(Boolean)              # True if any ad is currently running
     meta_ads_recency_days      = Column(Integer)               # days since last ad started; 0 if currently running
     meta_ads_no_end_date       = Column(Boolean)               # True if any ad has no end_date (still live)
@@ -356,6 +356,10 @@ class BrandProfile(Base):
     avg_yt_creator_subscribers    = Column(Integer)
     avg_ig_collaborator_followers = Column(Integer)
     typical_creator_tier          = Column(Text)   # nano / micro / macro / mega
+    youtube_highest = Column(Integer)   # max subscriber count among YouTube collaborators
+    youtube_lowest  = Column(Integer)   # min subscriber count among YouTube collaborators
+    insta_highest   = Column(Integer)   # max follower count among Instagram content creators
+    insta_lowest    = Column(Integer)   # min follower count among Instagram content creators
 
     #  Audience demographics
     audience_gender_male_pct   = Column(Float)
@@ -364,13 +368,20 @@ class BrandProfile(Base):
     audience_age_groups        = Column(JSONB)   # {"18-24": 0.3, "25-34": 0.5, ...}
     audience_sample_size       = Column(Integer)  # min 20 required to trust the above
 
+    #  Platform presence
+    has_instagram = Column(Boolean)
+    has_youtube   = Column(Boolean)
+    has_facebook  = Column(Boolean)
+    has_tiktok    = Column(Boolean)   # reserved — not scored in V1
+    has_twitter   = Column(Boolean)   # reserved — not scored in V1
+
     #  Contact / outreach routing signal (NOT used in scoring)
     has_marketing_contact    = Column(Boolean)   # True if Apollo returned a marketing/partnerships title
     contact_mode             = Column(Text)      # 'in_house' | 'outsourced_likely' | 'none'
     best_contact_title_score = Column(Integer)
 
-    #  Embedding
-    embedding      = Column(Vector(1536))
+    #  Embedding — all-MiniLM-L6-v2 (sentence-transformers), 384 dims
+    embedding      = Column(Vector(384))
     embedding_text = Column(Text)
 
     computed_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
@@ -379,6 +390,49 @@ class BrandProfile(Base):
 
     def __str__(self) -> str:
         return f"BrandProfile brand={self.brand_raw_id} tier={self.typical_creator_tier}"
+
+
+class BrandContact(Base):
+    """
+    Up to 5 best marketing/sponsorship contacts found via Apollo for a brand,
+    ranked by Mistral — gives a content creator multiple people to try, not
+    just one. A brand counts as "attempted" once ANY row exists for it (even
+    a single empty marker row when nothing was found), so it's never
+    re-queried on a later run (Apollo credits aren't free).
+    """
+    __tablename__ = "brand_contacts"
+    __table_args__ = (
+        UniqueConstraint("brand_raw_id", "apollo_person_id", name="uq_brand_contact_person"),
+    )
+
+    id           = Column(Integer, primary_key=True)
+    brand_raw_id = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
+
+    rank = Column(Integer)   # 1-5, Mistral's priority order among this brand's contacts (1 = best)
+
+    full_name      = Column(Text)
+    title          = Column(Text)
+    departments    = Column(Text)   # Apollo taxonomy, e.g. "master_marketing; master_sales"
+    subdepartments = Column(Text)   # e.g. "marketing; partnerships"
+    functions      = Column(Text)   # e.g. "marketing; media_and_commmunication"
+    seniority      = Column(Text)   # e.g. "manager", "director", "vp", "c_suite"
+    email          = Column(Text)
+    email_status   = Column(Text)   # Apollo's own status, e.g. "verified"
+    phone          = Column(Text)
+    linkedin_url   = Column(Text)
+    city           = Column(Text)
+    state          = Column(Text)
+    country        = Column(Text)
+
+    llm_reason       = Column(Text)   # Mistral's one-line justification for picking this person
+    apollo_person_id = Column(Text)
+
+    fetched_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
+
+    def __str__(self) -> str:
+        return f"{self.full_name or 'No contact found'} ({self.title or '-'}) — brand={self.brand_raw_id}"
 
 
 class CreatorProfile(Base):
@@ -431,7 +485,7 @@ class CreatorProfile(Base):
     #  Derived / computed fields
     creator_tier  = Column(Text)
     content_tags  = Column(JSONB)
-    embedding     = Column(Vector(1536))
+    embedding     = Column(Vector(384))   # all-MiniLM-L6-v2 (sentence-transformers), must match BrandProfile.embedding
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), onupdate=func.now())

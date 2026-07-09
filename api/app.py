@@ -10,7 +10,7 @@ from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
 from config import IS_PRODUCTION
-from pipeline.db import Base, BrandInstagramUser, BrandProfile, BrandRaw, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandProfile, BrandRaw, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
 from pipeline.enrichment.instagram_posts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
@@ -108,7 +108,11 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ALTER COLUMN content_niche DROP NOT NULL",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_profiles_email ON creator_profiles(email)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_profiles_google_id ON creator_profiles(google_id)",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS embedding vector(1536)",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS embedding vector(384)",
+        # Switched from an OpenAI-sized guess (1536) to all-MiniLM-L6-v2 (384) —
+        # both tables must match dimension to compare via cosine similarity.
+        "ALTER TABLE creator_profiles ALTER COLUMN embedding TYPE vector(384)",
+        "ALTER TABLE brand_match_profile ALTER COLUMN embedding TYPE vector(384)",
         # enrich.py / contacts.py / verify.py pipeline retired — each enrichment
         # step now runs independently and is scored directly from brands_raw.
         "ALTER TABLE brands_raw DROP COLUMN IF EXISTS enriched",
@@ -116,6 +120,31 @@ def _run_migrations() -> None:
         # contacts must drop before brands (contacts.brand_id -> brands.id)
         "DROP TABLE IF EXISTS contacts",
         "DROP TABLE IF EXISTS brands",
+        # Creator tier fit — min/max follower/subscriber range per brand
+        "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS youtube_highest INTEGER",
+        "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS youtube_lowest INTEGER",
+        "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS insta_highest INTEGER",
+        "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS insta_lowest INTEGER",
+        # Platform presence
+        "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS has_instagram BOOLEAN",
+        "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS has_youtube BOOLEAN",
+        "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS has_facebook BOOLEAN",
+        "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS has_tiktok BOOLEAN",
+        "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS has_twitter BOOLEAN",
+        # brand_contacts: switched from keyword title_score to Mistral-ranked llm_reason,
+        # and from a single `department` string to Apollo's real departments/subdepartments/functions
+        "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS departments TEXT",
+        "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS subdepartments TEXT",
+        "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS functions TEXT",
+        "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS llm_reason TEXT",
+        "ALTER TABLE brand_contacts DROP COLUMN IF EXISTS department",
+        "ALTER TABLE brand_contacts DROP COLUMN IF EXISTS title_score",
+        # brand_contacts: now stores up to 5 ranked contacts per brand instead
+        # of just 1, so brand_raw_id can no longer be unique on its own.
+        "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS rank INTEGER",
+        "DROP INDEX IF EXISTS ix_brand_contacts_brand_raw_id",
+        "CREATE INDEX IF NOT EXISTS ix_brand_contacts_brand_raw_id ON brand_contacts(brand_raw_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_brand_contact_person ON brand_contacts(brand_raw_id, apollo_person_id)",
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -630,11 +659,20 @@ class BrandProfileAdmin(ModelView, model=BrandProfile):
         BrandProfile.avg_yt_creator_subscribers,
         BrandProfile.avg_ig_collaborator_followers,
         BrandProfile.typical_creator_tier,
+        BrandProfile.youtube_highest,
+        BrandProfile.youtube_lowest,
+        BrandProfile.insta_highest,
+        BrandProfile.insta_lowest,
         BrandProfile.audience_gender_male_pct,
         BrandProfile.audience_gender_female_pct,
         BrandProfile.audience_top_countries,
         BrandProfile.audience_age_groups,
         BrandProfile.audience_sample_size,
+        BrandProfile.has_instagram,
+        BrandProfile.has_youtube,
+        BrandProfile.has_facebook,
+        BrandProfile.has_tiktok,
+        BrandProfile.has_twitter,
         BrandProfile.has_marketing_contact,
         BrandProfile.contact_mode,
         BrandProfile.best_contact_title_score,
@@ -650,11 +688,48 @@ class BrandProfileAdmin(ModelView, model=BrandProfile):
         BrandProfile.instagram_paid_posts_count,
         BrandProfile.typical_creator_tier,
         BrandProfile.audience_sample_size,
+        BrandProfile.has_instagram,
+        BrandProfile.has_youtube,
+        BrandProfile.has_facebook,
         BrandProfile.has_marketing_contact,
         BrandProfile.contact_mode,
         BrandProfile.computed_at,
     ]
     column_default_sort = [(BrandProfile.sponsorship_activity_score, True)]
+    page_size = 50
+
+
+class BrandContactAdmin(ModelView, model=BrandContact):
+    name         = "Brand Contact"
+    name_plural  = "Brand Contacts"
+    icon         = "fa-solid fa-address-card"
+    column_list  = [
+        BrandContact.id,
+        BrandContact.brand_raw,
+        BrandContact.rank,
+        BrandContact.full_name,
+        BrandContact.title,
+        BrandContact.departments,
+        BrandContact.subdepartments,
+        BrandContact.functions,
+        BrandContact.seniority,
+        BrandContact.email,
+        BrandContact.email_status,
+        BrandContact.phone,
+        BrandContact.linkedin_url,
+        BrandContact.city,
+        BrandContact.state,
+        BrandContact.country,
+        BrandContact.llm_reason,
+        BrandContact.fetched_at,
+    ]
+    column_labels = {BrandContact.brand_raw: "Brand"}
+    column_searchable_list = [BrandContact.full_name, BrandContact.title, BrandContact.email]
+    column_sortable_list = [
+        BrandContact.id, BrandContact.rank, BrandContact.full_name,
+        BrandContact.seniority, BrandContact.country, BrandContact.fetched_at,
+    ]
+    column_default_sort = [(BrandContact.rank, False)]
     page_size = 50
 
 
@@ -691,11 +766,13 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
     column_default_sort    = [(CreatorProfile.created_at, True)]
     page_size = 50
 
+# tables
 
 admin = Admin(app, engine)
 admin.add_view(CreatorProfileAdmin)
-admin.add_view(InitialBrandScoreAdmin)
 admin.add_view(BrandProfileAdmin)
+admin.add_view(BrandContactAdmin)
+admin.add_view(InitialBrandScoreAdmin)
 admin.add_view(BrandRawAdmin)
 admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
