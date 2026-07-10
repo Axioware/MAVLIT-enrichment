@@ -392,14 +392,7 @@ class BrandProfile(Base):
         return f"BrandProfile brand={self.brand_raw_id} tier={self.typical_creator_tier}"
 
 
-class BrandContact(Base):
-    """
-    Up to 5 best marketing/sponsorship contacts found via Apollo for a brand,
-    ranked by Mistral — gives a content creator multiple people to try, not
-    just one. A brand counts as "attempted" once ANY row exists for it (even
-    a single empty marker row when nothing was found), so it's never
-    re-queried on a later run (Apollo credits aren't free).
-    """
+class BrandContact(Base):  
     __tablename__ = "brand_contacts"
     __table_args__ = (
         UniqueConstraint("brand_raw_id", "apollo_person_id", name="uq_brand_contact_person"),
@@ -408,7 +401,8 @@ class BrandContact(Base):
     id           = Column(Integer, primary_key=True)
     brand_raw_id = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
 
-    rank = Column(Integer)   # 1-5, Mistral's priority order among this brand's contacts (1 = best)
+    rank = Column(Integer)   # 1-50, Mistral's priority order among this brand's contacts (1 = best)
+    is_enriched = Column(Boolean, nullable=False, server_default="false", default=False)   # True only for the paid-enriched top 5
 
     full_name      = Column(Text)
     title          = Column(Text)

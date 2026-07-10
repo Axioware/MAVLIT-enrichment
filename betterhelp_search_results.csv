@@ -1,0 +1,26 @@
+id,first_name,last_name_obfuscated,title,last_refreshed_at,has_email,has_city,has_state,has_country,has_direct_phone,organization.name,organization.has_industry,organization.has_phone,organization.has_city,organization.has_state,organization.has_country,organization.has_zip_code,organization.has_revenue,organization.has_employee_count
+611fff51bf87820001728e49,Justin,Lee,"Senior Manager, Social Media & Influencer Marketing",2026-06-28T00:51:56.000+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+675bec91d197b50001b3bc9f,Emily,Mc***y,Influencer Marketing Manager,2026-06-13T23:42:23.476+00:00,True,False,False,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+660b6eb86095460007faa327,Nina,Gr***n,"Marketing Specialist, Growth Marketing",2026-07-01T12:42:10.868+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+628f03236f2e890001509b79,Daron,Me***n,Partnerships,2026-07-05T18:12:54.851+00:00,False,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+60199fdba088680001e7b8de,Kerrie,Ngo,Social Media & Community Manager,2026-06-03T04:16:37.000+00:00,True,False,False,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+612992f335c222000141f3bf,Rania,Be***a,Associate Partnerships Marketing Manager,2026-06-12T01:54:53.000+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+658e4a5cf4f29800017d2f64,Brittany,Cl***r,Senior Director of Growth Marketing,2026-06-30T14:24:12.776+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+61d60967a01c600001a87411,Matt,Hu***n,"VP, Growth Marketing",2026-07-02T18:18:21.875+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+6476701b7be0290001664068,Kelly,Ni***n,Brand & Integrated Marketing Consultant,2026-06-11T17:44:03.000+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+61032bb5f385c30001116dc1,Andrew,Sa***e,"Senior Manager, Global Partnerships Marketing",2026-06-30T22:15:15.765+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+6116a2dd43cc330001440e24,Evelyn,Ch***g,Brand Director,2026-07-06T07:50:47.000+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+54a7c06f7468696b7f606e4f,Judi,Fi***r,Mental Health Therapist/Organic Influencer,2026-06-25T16:51:03.000+00:00,False,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+54a2225074686935be14ae0f,Sai,Gu***a,"Principal, Strategic Partnerships",2026-05-19T11:22:05.000+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+54a5fdaa7468692abf3bb0b9,Ashley,Fr***n,Content Writer,2026-06-09T09:18:19.000+00:00,False,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+5e5fd67538b1dd00018d48ce,Kellie,Be***e,Manager of Audio Partnerships,2026-06-27T11:18:32.000+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+5e5d7993e03d4900017614e4,Sam,Ho***d,Audio Partnerships Manager,2026-06-16T16:47:58.730+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+5b8cbeda324d445a442ae56f,Wayne,Sm***h,"Director, Provider Growth",2026-06-18T19:48:27.811+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+63726510021bb300011b76d0,Andrea,Ce***s,Senior Brand Designer,2026-06-01T22:03:24.000+00:00,True,False,False,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+61156c4dc998930001077b47,Olivier,Si***n,Senior Director of Partnerships Development,2026-06-12T15:58:14.000+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+5e4300cbf3d1a000d588b3a0,Justin,Yoo,Senior Partnerships Development Manager,2026-06-29T18:56:28.000+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+6219a7de73b2d300013546e5,Aishwarya,Ma***y,Marketing,2026-07-03T07:45:39.953+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+54a71aa5746869730a0f8c15,Laura,Wa***s,Therapist & Brand Ambassador,2026-05-11T01:05:44.268+00:00,False,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+66faeff6315d370001116163,Brandon,Ca***y,Director of Paid Social Growth,2026-07-04T14:29:49.000+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+66fcec27de29fe00010c2238,Dylan,Fi***k,"Product Manager, Client Growth",2026-06-28T21:33:30.000+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True
+57da4588a6da984a5cd3cb19,Micalia,Mo***n,"Onboarding Manager, International & Growth",2026-06-10T18:18:18.000+00:00,True,True,True,True,Yes,BetterHelp,True,True,True,True,True,True,True,True

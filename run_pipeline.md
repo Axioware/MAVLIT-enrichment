@@ -166,3 +166,13 @@ scored = run_brand_scoring(db, limit=1)
 print(f'Scored {scored} brands')
 db.close()
 "
+
+## run apollo_contacts.py
+python3 -c "
+from pipeline.db import SessionLocal
+from pipeline.enrichment.apollo_contacts import run_apollo_contacts
+db = SessionLocal()
+processed = run_apollo_contacts(db, limit=1)
+print('processed:', processed)
+db.close()
+"

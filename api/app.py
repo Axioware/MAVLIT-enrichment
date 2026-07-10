@@ -145,6 +145,9 @@ def _run_migrations() -> None:
         "DROP INDEX IF EXISTS ix_brand_contacts_brand_raw_id",
         "CREATE INDEX IF NOT EXISTS ix_brand_contacts_brand_raw_id ON brand_contacts(brand_raw_id)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_brand_contact_person ON brand_contacts(brand_raw_id, apollo_person_id)",
+        # brand_contacts: now stores up to 50 ranked candidates per brand,
+        # only the top 5 of which are enriched with real contact info
+        "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS is_enriched BOOLEAN NOT NULL DEFAULT FALSE",
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -707,6 +710,7 @@ class BrandContactAdmin(ModelView, model=BrandContact):
         BrandContact.id,
         BrandContact.brand_raw,
         BrandContact.rank,
+        BrandContact.is_enriched,
         BrandContact.full_name,
         BrandContact.title,
         BrandContact.departments,
@@ -726,7 +730,7 @@ class BrandContactAdmin(ModelView, model=BrandContact):
     column_labels = {BrandContact.brand_raw: "Brand"}
     column_searchable_list = [BrandContact.full_name, BrandContact.title, BrandContact.email]
     column_sortable_list = [
-        BrandContact.id, BrandContact.rank, BrandContact.full_name,
+        BrandContact.id, BrandContact.rank, BrandContact.is_enriched, BrandContact.full_name,
         BrandContact.seniority, BrandContact.country, BrandContact.fetched_at,
     ]
     column_default_sort = [(BrandContact.rank, False)]

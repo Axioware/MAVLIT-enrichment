@@ -90,3 +90,71 @@ Justin Y - 4 of 5 are the exact same people that showed up in the
 reference CSV. Also caught two real bugs along the way: Apollo deprecated
 the old search endpoint (needed /api_search instead), and requesting phone
 reveal without a webhook just breaks the whole call - both fixed.
+
+Third revision (bigger candidate pool + fallback for outsourced marketing):
+- Search now pulls 50 people instead of 25, and the title list got a lot
+  bigger - added the 20 marketing-department categories the user gave me
+  (Advertising, Brand Management, Content Marketing, Demand Generation,
+  Digital Marketing, SEO/PPC, Social Media Marketing, etc.), on top of the
+  sponsorship-specific terms (influencer, partnerships, growth) already
+  there.
+- Mistral now ranks ALL 50 candidates instead of just picking 5 - and if it
+  ever forgets to rank someone in its response, the code adds them back at
+  the end automatically so nobody found in search gets lost.
+- All 50 ranked people get stored in the database now, not just 5 - it's a
+  backup list for later. But only the top 5 still get the paid Apollo
+  enrich call (real email) - the other 45 just have the free search preview
+  data (title, obfuscated name, no email). Added an is_enriched column so
+  it's obvious which is which. This doesn't cost any more Apollo credits
+  than before - still exactly 5 enrich calls per brand max.
+- New fallback: if the marketing search comes up completely empty, that
+  usually means the brand outsources sponsorship stuff to an agency - so
+  now it does a second free search for C-suite/founder/owner people instead
+  and ranks those, so the creator still has someone to reach out to
+  directly instead of nothing.
+
+Tested against BetterHelp again after clearing the old 5-row test data -
+got 50 stored, 5 enriched with real emails (same top pick as before, Emily
+McCoy), 45 with obfuscated names and no email as expected. Full server
+smoke test passed too. Didn't get to test the C-suite fallback against a
+real brand yet since BetterHelp has an in-house team and never triggers
+it - that path is verified by reading the code carefully, not a live test.
+
+Phone numbers - got this working same day, but had to backtrack once:
+- First try assumed Apollo pushes the phone number to a webhook URL once
+  it's ready, so set up an ngrok tunnel + a receiver endpoint
+  (/webhooks/apollo/phone) to catch it. Ran a real brand (Shopify) through
+  the whole pipeline - got 5 enriched contacts with real emails, but no
+  phone numbers ever showed up.
+- Turned out my assumption was wrong. Made raw test calls straight to
+  Apollo and actually looked at the FULL response instead of just grabbing
+  the person field - Apollo doesn't push to the webhook at all in
+  practice, it wants you to POLL a separate endpoint
+  (GET /webhook_result/{request_id}) about every 10 seconds until it's
+  ready. Confirmed this works for real - got back 3 real phone numbers
+  this way. The webhook_url field still has to be present in the request
+  (Apollo 400s without it) but it doesn't actually need to work - tested
+  with a fake unreachable URL and polling still worked fine.
+- Rewrote the enrich function to poll for the phone number instead of
+  waiting on the webhook (up to ~70 seconds per person before giving up).
+  Kept the webhook receiver in place just in case Apollo does push for
+  some accounts, but it's not what the code actually relies on anymore.
+- Important thing I found: phone reveal costs 8 Apollo credits per
+  person, separate from whatever the email costs - so getting phones for
+  all top 5 people at a brand is up to 40 extra credits, not free like I
+  first assumed. Only happens if the ngrok webhook URL is configured in
+  .env - unset it to skip phone lookup entirely and save those credits.
+- Confirmed working for real: got actual phone numbers for 4 of the 5
+  Shopify contacts (Deneil Mullings, Dayna Winter, Derek Gleason, Andrew
+  Klegman). Left the last one without a phone since testing further
+  wouldn't prove anything new.
+
+Then simplified it further - asked if the webhook receiver (ngrok +
+api/webhooks.py) was actually doing anything, and realized it wasn't:
+since polling is what actually gets the phone number (not the webhook
+push), Apollo never needs to reach back to us at all. Tested it with a
+fake unreachable URL instead of the real ngrok one and it still worked
+perfectly. So removed api/webhooks.py entirely and swapped the ngrok
+URL/token setup for one simple on/off setting
+(ENABLE_APOLLO_PHONE_REVEAL=true/false in .env). No more ngrok needed,
+same phone numbers, less to maintain.

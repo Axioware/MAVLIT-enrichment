@@ -10,6 +10,13 @@ if not DATABASE_URL:
 
 APOLLO_API_KEY = os.getenv("APOLLO_API_KEY", "")
 
+# Apollo phone-number reveal costs an extra ~8 credits per person (confirmed
+# from live Apollo responses) on top of the email enrich cost — off by
+# default so it's an opt-in cost, not an automatic one. When enabled,
+# pipeline/enrichment/apollo_contacts.py polls Apollo's async result
+# endpoint for the number; no public webhook/tunnel is needed for this.
+ENABLE_APOLLO_PHONE_REVEAL = os.getenv("ENABLE_APOLLO_PHONE_REVEAL", "false").strip().lower() == "true"
+
 # Signal enrichment
 GOOGLE_API_KEY    = os.getenv("GOOGLE_API_KEY", "")
 GOOGLE_CX         = os.getenv("GOOGLE_CX", "")       # Custom Search Engine ID

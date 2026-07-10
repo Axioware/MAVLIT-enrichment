@@ -1,47 +1,82 @@
 """
 pipeline/enrichment/apollo_contacts.py
 
-Finds up to 5 best marketing/sponsorship contacts for high-scoring brands
-and stores them in brand_contacts, ranked best-first — gives a content
-creator multiple people to try, not just one. Also updates
-brand_match_profile's contact routing fields (has_marketing_contact,
-contact_mode, best_contact_title_score) per the matching design doc, based
-on the top-ranked (rank=1) contact.
+Finds up to 50 marketing/sponsorship contacts for high-scoring brands,
+ranks ALL of them best-first via Mistral, and stores the full ranked list
+in brand_contacts — gives a content creator a whole queue of people to try,
+not just one. Only the top 5 are enriched (the paid Apollo call that
+reveals a real email); the rest are stored from the free search preview
+only. Also updates brand_match_profile's contact routing fields
+(has_marketing_contact, contact_mode, best_contact_title_score) per the
+matching design doc, based on the top-ranked (rank=1) contact.
 
 Runs only for brands in initial_brand_score with total_score >= 50.
 
 Pipeline (adapted from apollo_sponsorship_finder.py, minus the CSV/testing bits):
-  1) SEARCH  -> Apollo /api/v1/mixed_people/api_search. FREE (0 credits).
-                Sweeps the whole marketing department via a broad title list
-                + include_similar_titles=True — Apollo has no confirmed
-                person_departments= input filter (department only comes back
-                as an OUTPUT field after enrichment), so a title-keyword
-                sweep is the closest equivalent to "all of marketing".
-  2) RANK    -> Mistral (pipeline.helpers.llm.call_mistral_json) ranks the
-                candidates and picks up to TOP_N people most likely to
-                personally own sponsorship/influencer-marketing budget
-                decisions, from the free search results. Costs a fraction of
-                a cent of Mistral usage, not Apollo credits. Falls back to
-                keyword title-matching if MISTRAL_API_KEY isn't set, or if
-                Mistral's picks don't match any real candidate.
-  3) ENRICH  -> Apollo /v1/people/match. Only Mistral's picks get enriched to
-                reveal a real name/email — this is the only step that costs
-                Apollo credits, and it only ever runs once per picked person
-                (up to TOP_N credits per brand, never more).
+  1) SEARCH    -> Apollo /api/v1/mixed_people/api_search. FREE (0 credits).
+                  Sweeps the whole marketing department via a broad title
+                  list + include_similar_titles=True — Apollo has no
+                  confirmed person_departments= input filter (department
+                  only comes back as an OUTPUT field after enrichment), so
+                  a title-keyword sweep is the closest equivalent to "all
+                  of marketing".
+  1b) FALLBACK -> If the marketing sweep finds nobody at all, that usually
+                  means sponsorship/influencer outreach is outsourced to an
+                  agency — there's no in-house marketing contact to route
+                  through. In that case, search company leadership instead
+                  (person_seniorities=c_suite/founder/owner, no title
+                  filter) so the creator still has someone to reach out to
+                  directly. Still free.
+  2) RANK      -> Mistral (pipeline.helpers.llm.call_mistral_json) ranks
+                  ALL of the found candidates (up to 50) best-first by how
+                  likely each is to personally own or influence
+                  sponsorship/influencer-marketing decisions. Any candidate
+                  Mistral's response omits is appended at the end (in
+                  original order) so nobody found in search is ever
+                  silently dropped. Costs a fraction of a cent of Mistral
+                  usage, not Apollo credits. Falls back to keyword/order
+                  ranking if MISTRAL_API_KEY isn't set, or if Mistral's
+                  response is unusable.
+  3) ENRICH    -> Apollo /v1/people/match. Only the top ENRICH_TOP_N-ranked
+                  candidates get enriched to reveal a real name/email —
+                  this is the only step that costs Apollo credits, and it
+                  only ever runs once per person (up to ENRICH_TOP_N
+                  credits per brand, never more, regardless of how many
+                  candidates were found/ranked/stored). Of those,
+                  only the top PHONE_TOP_N also get phone reveal (see
+                  below) — a separate, additional cost per person.
 
 Credit-conscious by design:
   - Search is free — no need to ration it.
-  - At most TOP_N Apollo enrich calls per brand (default 5), never more —
-    only for candidates Mistral (or the keyword fallback) actually picked.
+  - At most ENRICH_TOP_N Apollo email-enrich calls per brand (default 5),
+    never more, no matter how many of the up-to-50 ranked candidates get
+    stored.
   - A brand is only ever attempted once: a brand_contacts row is created
     even when nothing is found, so it's never re-queried on a later run.
+  - Phone reveal (see below) is a SEPARATE, additional cost on top of the
+    email enrich call — confirmed live at 8 Apollo credits per person.
+    Bounded independently of ENRICH_TOP_N via _PHONE_TOP_N (default 2):
+    only rank <= _PHONE_TOP_N gets phone reveal, so raising ENRICH_TOP_N
+    (more emails) never silently raises phone cost too. Only runs at all
+    when ENABLE_APOLLO_PHONE_REVEAL=true (config.py); leave it unset/false
+    to skip phone reveal entirely regardless of _PHONE_TOP_N.
 
-Phone numbers are NOT fetched: Apollo only delivers phone numbers
-asynchronously via a webhook callback (reveal_phone_number requires a
-webhook_url), which this pipeline has no infrastructure for yet. The
-`phone` column exists on brand_contacts for when that's built later.
+Phone numbers: reveal_phone_number resolves asynchronously on Apollo's
+side. The /v1/people/match response for it is never a phone number
+directly — it's {"phone_enrichment": {"status": "pending", ...},
+"request_id": ...}. The reliable way to get the actual number (confirmed
+against live Apollo responses) is polling GET /api/v1/webhook_result/
+{request_id} every _PHONE_POLL_INTERVAL seconds, up to _PHONE_POLL_ATTEMPTS
+times. Apollo's docs describe a webhook_url push callback instead, and
+requesting reveal_phone_number without a syntactically valid webhook_url
+in the payload still 400s — but in practice the push delivery isn't
+reliable (confirmed: a request to a deliberately unreachable dummy
+webhook_url still resolved successfully via polling), so a fixed
+placeholder webhook_url is sent purely to satisfy that required-field
+validation; polling is the only mechanism this code actually depends on.
+No public URL/tunnel of our own is needed for this to work.
 """
-
+    
 import json
 import logging
 import time
@@ -50,29 +85,69 @@ import httpx
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from config import APOLLO_API_KEY, MISTRAL_API_KEY
+from config import APOLLO_API_KEY, ENABLE_APOLLO_PHONE_REVEAL, MISTRAL_API_KEY
 from pipeline.db import BrandContact, BrandProfile, BrandRaw, InitialBrandScore
 from pipeline.helpers.llm import call_mistral_json
 
 logger = logging.getLogger(__name__)
 
-_SEARCH_URL = "https://api.apollo.io/api/v1/mixed_people/api_search"
-_MATCH_URL  = "https://api.apollo.io/v1/people/match"
+_SEARCH_URL        = "https://api.apollo.io/api/v1/mixed_people/api_search"
+_MATCH_URL         = "https://api.apollo.io/v1/people/match"
+_WEBHOOK_RESULT_URL = "https://api.apollo.io/api/v1/webhook_result/{}"
+# reveal_phone_number requires a syntactically valid webhook_url in the
+# payload or Apollo 400s — it doesn't need to be reachable (confirmed live),
+# since this code polls for the result instead of waiting on a push.
+_PHONE_WEBHOOK_PLACEHOLDER = "https://example.com/apollo-phone-webhook-unused"
 _HEADERS    = {"Content-Type": "application/json", "X-Api-Key": APOLLO_API_KEY}
 _TIMEOUT    = 20
-_SEARCH_PER_PAGE = 25   # search is free — no credit reason to keep this small
-_TOP_N = 5              # max contacts stored per brand — also caps enrich calls per brand
+_SEARCH_PER_PAGE = 50   # search is free — no credit reason to keep this small
+_ENRICH_TOP_N = 5       # only this many ranked candidates get the paid email enrich call
+_PHONE_TOP_N = 2        # of those, only this many (rank <= this) also get phone reveal — extra ~8 credits each
+
+# Phone reveal is async — see module docstring. Apollo's own guidance is
+# "retry after ~10 seconds"; this polls up to 7 times (~70s worst case per
+# person) before giving up and leaving phone NULL for that person.
+_PHONE_POLL_INTERVAL = 10
+_PHONE_POLL_ATTEMPTS = 7
 
 # Broad marketing-department sweep. Combined with include_similar_titles=True,
 # this is the closest equivalent to "give me the whole marketing department"
-# since Apollo's API has no confirmed department= input filter.
+# since Apollo's API has no confirmed department= input filter. The first
+# four terms are sponsorship-outreach-specific signal kept from an earlier,
+# narrower list; the rest is Apollo's own marketing sub-department taxonomy.
 _MARKETING_DEPARTMENT_TITLES = [
-    "marketing", "brand", "partnerships", "influencer",
-    "social media", "communications", "growth", "content", "PR",
+    "influencer", "partnerships", "sponsorship", "growth",
+    "advertising",
+    "brand management",
+    "content marketing",
+    "customer experience",
+    "customer marketing",
+    "demand generation",
+    "digital marketing",
+    "ecommerce marketing",
+    "event marketing",
+    "field marketing",
+    "lead generation",
+    "marketing",
+    "marketing analytics",
+    "marketing insights",
+    "marketing communications",
+    "marketing operations",
+    "product marketing",
+    "public relations",
+    "search engine optimization",
+    "pay per click",
+    "social media marketing",
+    "strategic communications",
+    "technical marketing",
 ]
 
+# Fallback search when no marketing-titled person is found at all — go
+# straight to company leadership instead of giving up.
+_C_SUITE_SENIORITIES = ["c_suite", "founder", "owner"]
+
 # Keyword fallback used only if MISTRAL_API_KEY isn't set, or Mistral's
-# picks don't match any real candidate.
+# response is unusable, for the marketing-search path.
 _TITLE_PRIORITIES: list[tuple[list[str], int]] = [
     (["partnership"], 1),
     (["sponsorship"], 1),
@@ -94,12 +169,33 @@ def _brand_location(brand: BrandRaw) -> str | None:
     return brand.headquarters or brand.location or brand.country or None
 
 
-def _search_people(brand: BrandRaw) -> list[dict] | None:
-    """Free Apollo search — no email/phone revealed, just candidate previews."""
+def _apollo_search(payload: dict, brand_name: str) -> list[dict]:
+    """Shared free-search POST with 429 retry + auth-error handling."""
+    try:
+        resp = httpx.post(_SEARCH_URL, headers=_HEADERS, json=payload, timeout=_TIMEOUT)
+        if resp.status_code in (401, 403):
+            raise _ApolloAuthError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        if resp.status_code == 429:
+            logger.warning("Apollo search: rate limited (429) — waiting 30s")
+            time.sleep(30)
+            resp = httpx.post(_SEARCH_URL, headers=_HEADERS, json=payload, timeout=_TIMEOUT)
+        if resp.status_code >= 400:
+            logger.warning("Apollo search failed for '%s': HTTP %s — %s", brand_name, resp.status_code, resp.text[:200])
+            return []
+        return resp.json().get("people", [])
+    except _ApolloAuthError:
+        raise
+    except Exception:
+        logger.exception("Apollo search request failed for '%s'", brand_name)
+        return []
+
+
+def _search_people(brand: BrandRaw) -> list[dict]:
+    """Free Apollo search across the marketing department — no email/phone revealed."""
     payload = {
-        "person_titles":           _MARKETING_DEPARTMENT_TITLES,
-        "include_similar_titles":  True,
-        "per_page":                _SEARCH_PER_PAGE,
+        "person_titles":          _MARKETING_DEPARTMENT_TITLES,
+        "include_similar_titles": True,
+        "per_page":               _SEARCH_PER_PAGE,
     }
     if brand.domain:
         payload["q_organization_domains_list"] = [brand.domain]
@@ -110,23 +206,30 @@ def _search_people(brand: BrandRaw) -> list[dict] | None:
     if location:
         payload["person_locations"] = [location]
 
-    try:
-        resp = httpx.post(_SEARCH_URL, headers=_HEADERS, json=payload, timeout=_TIMEOUT)
-        if resp.status_code in (401, 403):
-            raise _ApolloAuthError(f"HTTP {resp.status_code}: {resp.text[:200]}")
-        if resp.status_code == 429:
-            logger.warning("Apollo search: rate limited (429) — waiting 30s")
-            time.sleep(30)
-            resp = httpx.post(_SEARCH_URL, headers=_HEADERS, json=payload, timeout=_TIMEOUT)
-        if resp.status_code >= 400:
-            logger.warning("Apollo search failed for '%s': HTTP %s — %s", brand.name, resp.status_code, resp.text[:200])
-            return []
-        return resp.json().get("people", [])
-    except _ApolloAuthError:
-        raise
-    except Exception:
-        logger.exception("Apollo search request failed for '%s'", brand.name)
-        return []
+    return _apollo_search(payload, brand.name)
+
+
+def _search_c_suite(brand: BrandRaw) -> list[dict]:
+    """
+    Fallback when no marketing-department person is found at all — likely
+    means sponsorship/influencer outreach is handled by an outside agency,
+    so there's no marketing contact to route through. Goes straight to
+    company leadership instead so the creator still has someone to pitch.
+    """
+    payload = {
+        "person_seniorities": _C_SUITE_SENIORITIES,
+        "per_page":           _SEARCH_PER_PAGE,
+    }
+    if brand.domain:
+        payload["q_organization_domains_list"] = [brand.domain]
+    else:
+        payload["organization_names"] = [brand.name]
+
+    location = _brand_location(brand)
+    if location:
+        payload["person_locations"] = [location]
+
+    return _apollo_search(payload, brand.name)
 
 
 def _score_title(title: str) -> int:
@@ -137,26 +240,36 @@ def _score_title(title: str) -> int:
     return 99
 
 
-def _keyword_pick_top(people: list[dict], top_n: int = _TOP_N) -> list[tuple[dict, str]]:
-    """Fallback when Mistral isn't available (or its picks don't match) — same keyword scoring as before."""
+def _keyword_rank_all(people: list[dict], fallback_mode: bool) -> list[tuple[dict, str]]:
+    """
+    Fallback ranking used only if MISTRAL_API_KEY isn't set, or Mistral's
+    response is unusable. Marketing-title keyword scoring doesn't apply to
+    the C-suite fallback pool (everyone there is already an executive), so
+    that case just keeps Apollo's own result order.
+    """
     if not people:
         return []
-    ranked = sorted(people, key=lambda p: _score_title(p.get("title", "")))[:top_n]
+    if fallback_mode:
+        return [(p, "C-suite fallback — Apollo result order (no LLM ranking available)") for p in people]
+    ranked = sorted(people, key=lambda p: _score_title(p.get("title", "")))
     return [(p, f"keyword match on title '{p.get('title', '')}'") for p in ranked]
 
 
-def _llm_pick_top_candidates(people: list[dict], brand_name: str, top_n: int = _TOP_N) -> list[tuple[dict, str]]:
+def _rank_all_candidates(people: list[dict], brand_name: str, fallback_mode: bool = False) -> list[tuple[dict, str]]:
     """
-    Ask Mistral to rank candidates and pick up to top_n people most likely to
-    personally own sponsorship/influencer-marketing budget decisions.
-    Returns a best-first list of (person_dict, reason). Empty list if
-    Mistral judges nobody a good fit; falls back to keyword scoring if
-    Mistral is unavailable or its picks don't match any real candidate.
+    Ask Mistral to rank ALL found candidates (up to 50) best-first by how
+    likely each is to personally own or influence sponsorship/influencer-
+    marketing decisions. Returns a best-first list of (person_dict, reason)
+    covering every candidate in `people` — any candidate Mistral's response
+    doesn't explicitly rank is appended at the end (original order) so
+    nobody is ever silently dropped from storage. Falls back to keyword/
+    order ranking if MISTRAL_API_KEY isn't set or Mistral's response is
+    unusable.
     """
-    if not MISTRAL_API_KEY:
-        return _keyword_pick_top(people, top_n)
     if not people:
         return []
+    if not MISTRAL_API_KEY:
+        return _keyword_rank_all(people, fallback_mode)
 
     candidates = [
         {
@@ -169,51 +282,127 @@ def _llm_pick_top_candidates(people: list[dict], brand_name: str, top_n: int = _
         for p in people
     ]
 
-    prompt = f"""You are a sponsorship-outreach research assistant. A content creator (Instagram/YouTube) wants to find the best people at "{brand_name}" to pitch for a paid sponsorship or influencer-marketing partnership.
+    if fallback_mode:
+        intro = (
+            f'No dedicated marketing/influencer contact was found at "{brand_name}" — this usually means '
+            "sponsorship or influencer outreach is handled by an outside agency rather than in-house. "
+            "Since there is no marketing team to route through, these are COMPANY LEADERSHIP (C-suite/"
+            "founder/owner) contacts instead. Rank them by how likely each is to personally consider or "
+            "forward a content-creator sponsorship pitch — prefer marketing/growth/brand-oriented "
+            "executives (CMO, Chief Growth Officer, Chief Brand Officer, Founder/CEO of a small company) "
+            "over finance/engineering/legal-focused ones (CFO, CTO, General Counsel)."
+        )
+        title_hint = ""
+    else:
+        intro = (
+            f'A content creator (Instagram/YouTube) wants to find the best people at "{brand_name}" to pitch '
+            "for a paid sponsorship or influencer-marketing partnership."
+        )
+        title_hint = (
+            "\nStrongly prefer titles such as: Influencer Marketing Manager, Partnerships Manager, Brand "
+            "Partnerships, Social Media Manager, Brand Marketing Manager, Community Manager, Growth "
+            "Marketing. Deprioritize very senior C-suite/VP titles who rarely personally answer inbound "
+            "sponsorship pitches, unless no better option exists in the list."
+        )
 
-You will receive a JSON list of employees at the brand (id, name, job title, and whether Apollo has an email/phone on file). Rank them by how likely each person is to personally own or directly influence influencer/sponsorship/partnership budget decisions.
+    prompt = f"""You are a sponsorship-outreach research assistant. {intro}
 
-Strongly prefer titles such as: Influencer Marketing Manager, Partnerships Manager, Brand Partnerships, Social Media Manager, Brand Marketing Manager, Community Manager, Growth Marketing.
-Deprioritize unrelated departments (engineering, finance, legal, HR, sales-only roles) and very senior C-suite/VP titles who rarely personally answer inbound sponsorship pitches, unless no better option exists in the list.
+You will receive a JSON list of employees (id, name, job title, and whether Apollo has an email/phone on file). Rank ALL of them from most to least likely to personally own or influence this decision — do not omit anyone, even weak fits; just rank those lower.
+{title_hint}
 All else equal, prefer candidates with has_email=true.
 
 Candidates:
 {json.dumps(candidates, indent=2)}
 
-Pick up to {top_n} candidates, best first. Reply ONLY with this JSON object:
+Reply ONLY with this JSON object, ranking EVERY candidate above, best first, with a short one-line reason each (a few words is fine for lower-ranked ones):
 {{"picks": [{{"id": "...", "reason": "short one-line reason"}}, ...]}}
-List best match first. Include at most {top_n} picks. If fewer than that many are plausible, return fewer — do not pad with irrelevant people. If none are a reasonable fit, reply with {{"picks": []}}."""
+Every id from the candidate list above must appear exactly once in "picks"."""
 
-    result = call_mistral_json(prompt, context=f"apollo picks for {brand_name}")
+    result = call_mistral_json(prompt, context=f"apollo full ranking for {brand_name}")
     picks = result.get("picks", []) if isinstance(result, dict) else []
 
     by_id = {p.get("id"): p for p in people}
     ranked: list[tuple[dict, str]] = []
-    for pick in picks[:top_n]:
+    seen_ids: set = set()
+    for pick in picks:
         pid = pick.get("id")
+        if pid in seen_ids:
+            continue
         person = by_id.get(pid)
         if not person:
             logger.warning("Mistral picked id=%s which isn't in the candidate list — skipping", pid)
             continue
+        seen_ids.add(pid)
         ranked.append((person, pick.get("reason", "")))
 
+    # Safety net: never let a candidate found in search go unstored just
+    # because Mistral's response omitted it.
+    for p in people:
+        pid = p.get("id")
+        if pid not in seen_ids:
+            ranked.append((p, "not explicitly ranked by LLM"))
+            seen_ids.add(pid)
+
     if not ranked:
-        logger.info("Mistral returned no usable picks for '%s' — falling back to keyword scoring", brand_name)
-        return _keyword_pick_top(people, top_n)
+        logger.info("Mistral returned no usable ranking for '%s' — falling back to keyword/order ranking", brand_name)
+        return _keyword_rank_all(people, fallback_mode)
 
     return ranked
 
 
-def _enrich_person(person_id: str) -> dict | None:
-    """
-    The expensive call — reveals email for one person.
+def _extract_phone_from_person(person: dict) -> str | None:
+    numbers = person.get("phone_numbers")
+    if isinstance(numbers, list) and numbers:
+        first = numbers[0]
+        if isinstance(first, dict):
+            return first.get("sanitized_number") or first.get("raw_number")
+    return None
 
-    reveal_phone_number is deliberately NOT requested — Apollo only delivers
-    phone numbers asynchronously via a webhook callback, which this pipeline
-    doesn't have infrastructure for yet. Requesting it without a webhook_url
-    makes the whole call fail with a 400.
+
+def _poll_phone_result(request_id, person_id: str) -> str | None:
+    """
+    reveal_phone_number resolves asynchronously — see module docstring for
+    why polling, not the webhook_url push, is what this depends on. Blocks
+    up to _PHONE_POLL_ATTEMPTS * _PHONE_POLL_INTERVAL seconds; gives up
+    (returns None, phone stays NULL) if it's still not ready by then.
+    """
+    url = _WEBHOOK_RESULT_URL.format(request_id)
+    for attempt in range(_PHONE_POLL_ATTEMPTS):
+        time.sleep(_PHONE_POLL_INTERVAL)
+        try:
+            resp = httpx.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        except Exception:
+            logger.exception("Apollo phone poll request failed for person_id=%s", person_id)
+            return None
+        if resp.status_code == 404:
+            continue   # not ready yet
+        if resp.status_code >= 400:
+            logger.warning("Apollo phone poll HTTP %s for person_id=%s: %s", resp.status_code, person_id, resp.text[:200])
+            return None
+        data = resp.json()
+        people = (data.get("webhook_result") or {}).get("people") or []
+        if not people:
+            continue
+        return _extract_phone_from_person(people[0])
+    logger.info("Apollo phone poll: person_id=%s still pending after %d attempts (~%ds) — giving up, phone stays NULL",
+                person_id, _PHONE_POLL_ATTEMPTS, _PHONE_POLL_ATTEMPTS * _PHONE_POLL_INTERVAL)
+    return None
+
+
+def _enrich_person(person_id: str, reveal_phone: bool = False) -> dict | None:
+    """
+    The expensive call — reveals email for one person, and (only when both
+    `reveal_phone` is True and ENABLE_APOLLO_PHONE_REVEAL is set) polls for
+    a phone number too — an extra ~8 Apollo credits and up to ~70s of
+    blocking per person. See module docstring for why this polls rather
+    than waiting on a webhook push. Callers pass reveal_phone=True only for
+    rank <= _PHONE_TOP_N, so phone cost stays bounded independent of how
+    many people get email-enriched.
     """
     payload = {"id": person_id, "reveal_personal_emails": True}
+    if reveal_phone and ENABLE_APOLLO_PHONE_REVEAL:
+        payload["reveal_phone_number"] = True
+        payload["webhook_url"] = _PHONE_WEBHOOK_PLACEHOLDER
     try:
         resp = httpx.post(_MATCH_URL, headers=_HEADERS, json=payload, timeout=_TIMEOUT)
         if resp.status_code in (401, 403):
@@ -225,7 +414,21 @@ def _enrich_person(person_id: str) -> dict | None:
         if resp.status_code >= 400:
             logger.warning("Apollo enrich failed for person_id=%s: HTTP %s — %s", person_id, resp.status_code, resp.text[:200])
             return None
-        return resp.json().get("person")
+
+        data = resp.json()
+        person = data.get("person")
+        if not person:
+            return None
+
+        phone = _extract_phone_from_person(person)
+        phone_enrichment = data.get("phone_enrichment")
+        if not phone and phone_enrichment and phone_enrichment.get("status") == "pending":
+            request_id = data.get("request_id")
+            if request_id is not None:
+                phone = _poll_phone_result(request_id, person_id)
+        if phone:
+            person["phone"] = phone
+        return person
     except _ApolloAuthError:
         raise
     except Exception:
@@ -265,8 +468,10 @@ def _upsert_profile_contact_fields(db: Session, brand_raw_id: int, values: dict)
 
 def find_brand_contact(db: Session, brand_raw_id: int) -> list[dict]:
     """
-    Find and store up to TOP_N best marketing contacts for one brand, ranked
-    best-first. Always writes at least an empty marker row so the brand is
+    Find and store up to 50 ranked marketing/sponsorship contacts for one
+    brand, best-first. Only the top ENRICH_TOP_N get the paid Apollo enrich
+    call (real name/email); the rest are stored from free search-preview
+    data only. Always writes at least an empty marker row so the brand is
     never re-queried. Returns the list of stored contact dicts (rank 1
     first), or [] if none were found. Returns [] if the brand doesn't exist.
     """
@@ -276,69 +481,79 @@ def find_brand_contact(db: Session, brand_raw_id: int) -> list[dict]:
         return []
 
     people = _search_people(brand)
+    fallback_used = False
 
     if not people:
-        logger.info("Apollo contact: '%s' — no marketing contacts found", brand.name)
+        logger.info("Apollo contact: '%s' — no marketing contacts found, trying C-suite fallback", brand.name)
+        people = _search_c_suite(brand)
+        fallback_used = True
+
+    if not people:
+        logger.info("Apollo contact: '%s' — no contacts found at all (marketing or C-suite)", brand.name)
         _insert_empty_marker(db, brand_raw_id)
         _upsert_profile_contact_fields(db, brand_raw_id, {
             "has_marketing_contact": False,
-            "contact_mode": "outsourced_likely",
+            "contact_mode": "none",
         })
         return []
 
-    picks = _llm_pick_top_candidates(people, brand.name, top_n=_TOP_N)
+    picks = _rank_all_candidates(people, brand.name, fallback_mode=fallback_used)
     if not picks:
-        logger.info("Apollo contact: '%s' — no candidate judged a good fit", brand.name)
+        logger.info("Apollo contact: '%s' — ranking returned nothing usable", brand.name)
         _insert_empty_marker(db, brand_raw_id)
         _upsert_profile_contact_fields(db, brand_raw_id, {
             "has_marketing_contact": False,
-            "contact_mode": "outsourced_likely",
+            "contact_mode": "none",
         })
         return []
 
     rows: list[dict] = []
     for rank, (candidate, reason) in enumerate(picks, start=1):
-        enriched = _enrich_person(candidate["id"])
-        if not enriched:
-            logger.warning("Apollo contact: '%s' — enrich failed for rank %d, saving search data only", brand.name, rank)
-            enriched = candidate
+        enriched = None
+        if rank <= _ENRICH_TOP_N:
+            enriched = _enrich_person(candidate["id"], reveal_phone=(rank <= _PHONE_TOP_N))
+            if not enriched:
+                logger.warning("Apollo contact: '%s' — enrich failed for rank %d, saving search data only", brand.name, rank)
+            time.sleep(0.3)
 
-        first = enriched.get("first_name", "")
-        last  = enriched.get("last_name", "")
-        full_name = f"{first} {last}".strip() or enriched.get("name") or candidate.get("name")
+        source = enriched or candidate
+        first = source.get("first_name", "")
+        last  = source.get("last_name") or source.get("last_name_obfuscated", "")
+        full_name = f"{first} {last}".strip() or source.get("name") or candidate.get("name")
 
         rows.append({
             "brand_raw_id":     brand_raw_id,
             "rank":             rank,
+            "is_enriched":      bool(enriched),
             "full_name":        full_name,
-            "title":            enriched.get("title") or candidate.get("title"),
-            "departments":      "; ".join(enriched.get("departments") or []) or None,
-            "subdepartments":   "; ".join(enriched.get("subdepartments") or []) or None,
-            "functions":        "; ".join(enriched.get("functions") or []) or None,
-            "seniority":        enriched.get("seniority"),
-            "email":            enriched.get("email"),
-            "email_status":     enriched.get("email_status"),
-            "phone":            None,   # see module docstring — needs webhook infra
-            "linkedin_url":     enriched.get("linkedin_url") or candidate.get("linkedin_url"),
-            "city":             enriched.get("city"),
-            "state":            enriched.get("state"),
-            "country":          enriched.get("country"),
+            "title":            source.get("title") or candidate.get("title"),
+            "departments":      "; ".join(source.get("departments") or []) or None,
+            "subdepartments":   "; ".join(source.get("subdepartments") or []) or None,
+            "functions":        "; ".join(source.get("functions") or []) or None,
+            "seniority":        source.get("seniority"),
+            "email":            source.get("email"),
+            "email_status":     source.get("email_status"),
+            "phone":            source.get("phone"),   # None unless ENABLE_APOLLO_PHONE_REVEAL is set and the poll succeeded
+            "linkedin_url":     source.get("linkedin_url") or candidate.get("linkedin_url"),
+            "city":             source.get("city"),
+            "state":            source.get("state"),
+            "country":          source.get("country"),
             "llm_reason":       reason,
             "apollo_person_id": candidate.get("id"),
         })
-        time.sleep(0.3)
 
     _insert_contacts(db, rows)
     top = rows[0]
     _upsert_profile_contact_fields(db, brand_raw_id, {
-        "has_marketing_contact":    True,
-        "contact_mode":             "in_house",
+        "has_marketing_contact":    not fallback_used,   # True only for a genuine marketing-titled hit
+        "contact_mode":             "outsourced_likely" if fallback_used else "in_house",
         "best_contact_title_score": 1,   # rank of the routing-signal contact — always the top pick
     })
 
     logger.info(
-        "Apollo contact: '%s' -> %d contact(s) stored, top pick: %s (%s)",
-        brand.name, len(rows), top["full_name"], top["title"],
+        "Apollo contact: '%s' -> %d contact(s) stored (%d enriched), top pick: %s (%s)%s",
+        brand.name, len(rows), min(len(rows), _ENRICH_TOP_N), top["full_name"], top["title"],
+        " [C-suite fallback]" if fallback_used else "",
     )
     return rows
 
@@ -350,8 +565,9 @@ def run_apollo_contacts(db: Session, limit: int = 20, brand_id: int | None = Non
     to target one specific brand directly (bypasses the score filter and the
     already-attempted check, for testing).
 
-    limit defaults small (20) since each brand costs up to TOP_N Apollo
-    enrichment credits — raise it deliberately, don't crank it up by default.
+    limit defaults small (20) since each brand costs up to ENRICH_TOP_N
+    Apollo enrichment credits — raise it deliberately, don't crank it up by
+    default.
 
     Returns number of brands processed.
     """
