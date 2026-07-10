@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def _run_migrations() -> None:
     """Create tables and apply column migrations before accepting requests."""
     # pgvector extension must exist before create_all() defines the
-    # embedding Vector(1536) column. Only a superuser can create it for the
+    # embedding Vector(1024) column. Only a superuser can create it for the
     # first time on a fresh DB (run once: `CREATE EXTENSION vector;` as
     # postgres) — after that this is a harmless no-op for the app's own user.
     with engine.connect() as conn:
@@ -113,6 +113,16 @@ def _run_migrations() -> None:
         # both tables must match dimension to compare via cosine similarity.
         "ALTER TABLE creator_profiles ALTER COLUMN embedding TYPE vector(384)",
         "ALTER TABLE brand_match_profile ALTER COLUMN embedding TYPE vector(384)",
+        # Switched again: sentence-transformers (local, 384 dims) -> Mistral's
+        # mistral-embed API (1024 dims, fixed). Existing 384-dim vectors are
+        # incompatible with the new dimension and must be cleared before the
+        # type change (guarded by vector_dims() so this is a no-op on repeat
+        # runs, once already 1024/NULL) — they get recomputed by
+        # run_brand_signals() on the next pass.
+        "UPDATE brand_match_profile SET embedding = NULL WHERE embedding IS NOT NULL AND vector_dims(embedding) != 1024",
+        "ALTER TABLE brand_match_profile ALTER COLUMN embedding TYPE vector(1024)",
+        "UPDATE creator_profiles SET embedding = NULL WHERE embedding IS NOT NULL AND vector_dims(embedding) != 1024",
+        "ALTER TABLE creator_profiles ALTER COLUMN embedding TYPE vector(1024)",
         # enrich.py / contacts.py / verify.py pipeline retired — each enrichment
         # step now runs independently and is scored directly from brands_raw.
         "ALTER TABLE brands_raw DROP COLUMN IF EXISTS enriched",

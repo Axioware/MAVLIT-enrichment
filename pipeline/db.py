@@ -380,8 +380,8 @@ class BrandProfile(Base):
     contact_mode             = Column(Text)      # 'in_house' | 'outsourced_likely' | 'none'
     best_contact_title_score = Column(Integer)
 
-    #  Embedding — all-MiniLM-L6-v2 (sentence-transformers), 384 dims
-    embedding      = Column(Vector(384))
+    #  Embedding — mistral-embed (Mistral API), 1024 dims
+    embedding      = Column(Vector(1024))
     embedding_text = Column(Text)
 
     computed_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
@@ -479,7 +479,7 @@ class CreatorProfile(Base):
     #  Derived / computed fields
     creator_tier  = Column(Text)
     content_tags  = Column(JSONB)
-    embedding     = Column(Vector(384))   # all-MiniLM-L6-v2 (sentence-transformers), must match BrandProfile.embedding
+    embedding     = Column(Vector(1024))   # mistral-embed (Mistral API), must match BrandProfile.embedding
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), onupdate=func.now())

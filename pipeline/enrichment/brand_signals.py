@@ -8,16 +8,18 @@ Covers:
   compute_creator_tier_profile(db, brand_raw_id)  — avg collaborator follower/subscriber size, bucketed
   compute_audience_demographics(db, brand_raw_id) — gender/country/age aggregate + sample size
   compute_platform_presence(db, brand_raw_id)     — has_instagram/youtube/facebook/tiktok/twitter booleans
-  compute_brand_embedding(db, brand_raw_id)       — prose text + sentence-transformers embedding
+  compute_brand_embedding(db, brand_raw_id)       — prose text + Mistral embedding
 
 NOT covered here:
   sponsorship_activity_score — already computed in initial_brand_scoring.py (writes to initial_brand_score)
   contact signal              — blocked, no Apollo contact-fetch pipeline exists yet
 
-Embedding model: sentence-transformers "all-MiniLM-L6-v2" (384 dims). Both
-brand_match_profile.embedding and creator_profiles.embedding are Vector(384)
-to match — they must use the same model/dimension to be comparable via
-cosine similarity in Stage 3 matching.
+Embedding model: Mistral's "mistral-embed" (1024 dims, fixed — this model
+doesn't support a custom output_dimension). Both brand_match_profile.embedding
+and creator_profiles.embedding are Vector(1024) to match — they must use
+the same model/dimension to be comparable via cosine similarity in Stage 3
+matching. embed_text() lives in pipeline/helpers/llm.py so it can be reused
+for the creator-side embedding once that's built.
 
 Scope notes:
   Creator tier fit counts Instagram user_type IN ('coauthor_producer',
@@ -46,6 +48,7 @@ from pipeline.db import (
     YoutubeSponsorship,
 )
 from pipeline.helpers.creator_tier import bucket_creator_tier
+from pipeline.helpers.llm import embed_text
 
 logger = logging.getLogger(__name__)
 
@@ -216,25 +219,6 @@ def compute_platform_presence(db: Session, brand_raw_id: int) -> dict | None:
 
 #  Brand embedding
 
-_EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
-_embedding_model = None  # lazy singleton — loading the model is expensive
-
-
-def _get_embedding_model():
-    global _embedding_model
-    if _embedding_model is None:
-        from sentence_transformers import SentenceTransformer
-        logger.info("Loading sentence-transformers model: %s", _EMBEDDING_MODEL_NAME)
-        _embedding_model = SentenceTransformer(_EMBEDDING_MODEL_NAME)
-    return _embedding_model
-
-
-def embed_text(text: str) -> list[float]:
-    """Embed a string via sentence-transformers. Normalized so cosine similarity == dot product."""
-    model = _get_embedding_model()
-    vector = model.encode(text, normalize_embeddings=True)
-    return vector.tolist()
-
 
 def _activity_bucket(score: float | None) -> str | None:
     if score is None:
@@ -334,8 +318,11 @@ def compute_brand_embedding(db: Session, brand_raw_id: int) -> dict | None:
     """
     Build the brand's embedding_text prose from brands_raw + whatever
     brand_match_profile signals are already computed, then embed it via
-    sentence-transformers. Writes embedding + embedding_text to
-    brand_match_profile. Returns None if the brand doesn't exist.
+    Mistral (mistral-embed). Writes embedding + embedding_text to
+    brand_match_profile. Returns None if the brand doesn't exist, or if the
+    embed call fails (embedding_text is still worth having on its own, but
+    a partial/empty vector would break cosine similarity downstream, so
+    nothing is written rather than storing a bad embedding).
     """
     brand = db.query(BrandRaw).filter(BrandRaw.id == brand_raw_id).first()
     if not brand:
@@ -345,7 +332,10 @@ def compute_brand_embedding(db: Session, brand_raw_id: int) -> dict | None:
     profile = db.query(BrandProfile).filter(BrandProfile.brand_raw_id == brand_raw_id).first()
 
     text = build_brand_embedding_text(brand, profile)
-    vector = embed_text(text)
+    vector = embed_text(text, context=f"brand embedding for brand_raw_id={brand_raw_id}")
+    if not vector:
+        logger.warning("Brand embedding: brand_raw_id=%d — embed call failed, not writing", brand_raw_id)
+        return None
 
     values = {
         "embedding":      vector,
