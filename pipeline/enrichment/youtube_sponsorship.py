@@ -15,9 +15,15 @@ Sponsorship types:
 Results are stored in the youtube_sponsorships table (one row per video).
 Sets youtube_checked=True on brands_raw after processing.
 
+Also fetches up to 100 top-level comments (commentThreads.list) for each
+video that's actually stored as a sponsorship — cheap at 1 quota unit per
+call regardless of maxResults, so this only runs for genuine hits, not
+every video searched.
+
 Requires YOUTUBE_API_KEY in config.
-YouTube Data API v3 quota cost: ~200 units per brand (2 searches × 100 units).
-Free tier: 10,000 units/day → ~50 brands/day.
+YouTube Data API v3 quota cost: 14 queries × 100 units = 1,400 units per
+brand for search, plus 1 unit per stored video for its comments.
+Free tier: 10,000 units/day → ~7 brands/day (search-dominated).
 """
 
 import logging
@@ -38,7 +44,9 @@ logger = logging.getLogger(__name__)
 _SEARCH_URL   = "https://www.googleapis.com/youtube/v3/search"
 _VIDEOS_URL   = "https://www.googleapis.com/youtube/v3/videos"
 _CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
-_MAX_RESULTS  = 10   # per search query (keeps quota low)
+_COMMENTS_URL = "https://www.googleapis.com/youtube/v3/commentThreads"
+_MAX_RESULTS  = 10    # per search query (keeps quota low)
+_MAX_COMMENTS = 100   # per video — YouTube API's hard cap per page too, so one call suffices
 
 #  Sponsorship detection patterns 
 
@@ -199,7 +207,17 @@ def _yt_get(url: str, params: dict) -> dict | None:
                 logger.warning("YouTube quota exhausted — %s daily limit also reached. All keys used up.", next_name)
                 raise _QuotaExhausted("All YouTube API keys exhausted for today")
         if resp.status_code == 403:
-            logger.warning("YouTube API forbidden (403) — check API key or permissions")
+            reason = ""
+            try:
+                reason = resp.json().get("error", {}).get("errors", [{}])[0].get("reason", "")
+            except Exception:
+                pass
+            if reason == "commentsDisabled":
+                # Expected, per-video condition (uploader turned comments off) —
+                # not an API key/permissions problem, so don't warn about it.
+                logger.debug("YouTube API: comments disabled for this video — skipping")
+            else:
+                logger.warning("YouTube API forbidden (403) reason=%s — check API key or permissions", reason or "unknown")
             return None
         resp.raise_for_status()
         return resp.json()
@@ -244,22 +262,58 @@ def _fetch_video_details(video_ids: list[str]) -> list[dict]:
     return results
 
 
-def _fetch_channel_subscribers(channel_id: str) -> int | None:
-    """Return subscriber count for a channel, or None on failure."""
-    data = _yt_get(_CHANNELS_URL, {
-        "part": "statistics",
-        "id":   channel_id,
+def _fetch_channel_subscribers_batch(channel_ids: list[str]) -> dict[str, int | None]:
+    """
+    Fetch subscriber counts for up to 50 channels per request (channels.list
+    supports comma-separated IDs, same as videos.list). Replaces one call
+    per channel — that pattern (dozens of rapid sequential HTTPS connections)
+    is also the likely cause of the intermittent SSL handshake timeouts seen
+    in real runs.
+    """
+    sub_counts: dict[str, int | None] = {}
+    for i in range(0, len(channel_ids), 50):
+        chunk = channel_ids[i : i + 50]
+        data = _yt_get(_CHANNELS_URL, {
+            "part": "statistics",
+            "id":   ",".join(chunk),
+        })
+        if not data:
+            continue
+        for item in data.get("items", []):
+            count = item.get("statistics", {}).get("subscriberCount")
+            sub_counts[item["id"]] = int(count) if count else None
+    return sub_counts
+
+
+def _fetch_video_comments(video_id: str, max_results: int = _MAX_COMMENTS) -> list[dict]:
+    """
+    Fetch up to max_results top-level comments for a video via
+    commentThreads.list — 1 quota unit per call regardless of maxResults,
+    so a single request covers the full 100. Returns [] if comments are
+    disabled for the video or the call fails (never raises for that case —
+    only _QuotaExhausted propagates, same as every other _yt_get call).
+    """
+    data = _yt_get(_COMMENTS_URL, {
+        "part":       "snippet",
+        "videoId":    video_id,
+        "maxResults": min(max_results, 100),   # YouTube's own hard cap per page
+        "order":      "relevance",
+        "textFormat": "plainText",
     })
     if not data:
-        return None
-    items = data.get("items", [])
-    if not items:
-        return None
-    count = items[0].get("statistics", {}).get("subscriberCount")
-    return int(count) if count else None
+        return []
+    comments = []
+    for item in data.get("items", []):
+        top = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
+        comments.append({
+            "author": top.get("authorDisplayName", ""),
+            "text":   top.get("textDisplay", ""),
+            "likes":  top.get("likeCount", 0),
+        })
+    return comments
 
 
-#  LLM false-positive filter 
+#  LLM false-positive filter
 
 def _llm_verify_sponsorship(
     brand_name: str,
@@ -410,60 +464,77 @@ def enrich_youtube_sponsorships(db: Session, limit: int = 50, brand_id: int | No
 
         # Collect unique channel IDs to batch-fetch subscriber counts
         channel_ids = list({v.get("snippet", {}).get("channelId") for v in videos if v.get("snippet", {}).get("channelId")})
-        sub_counts: dict[str, int | None] = {}
-        for cid in channel_ids:
-            sub_counts[cid] = _fetch_channel_subscribers(cid)
-            time.sleep(0.1)
+        sub_counts = _fetch_channel_subscribers_batch(channel_ids)
 
-        for video in videos:
-            snippet    = video.get("snippet", {})
-            stats      = video.get("statistics", {})
-            title      = snippet.get("title", "")
-            description = snippet.get("description", "")
-            channel_id  = snippet.get("channelId", "")
-            video_id    = video.get("id", "")
+        quota_exhausted = False
+        try:
+            for video in videos:
+                snippet    = video.get("snippet", {})
+                stats      = video.get("statistics", {})
+                title      = snippet.get("title", "")
+                description = snippet.get("description", "")
+                channel_id  = snippet.get("channelId", "")
+                video_id    = video.get("id", "")
 
-            stype, confidence, keywords, desc_snippet = _detect_sponsorship(
-                description, title, name
-            )
-
-            if stype == "none":
-                continue  # skip videos with no sponsorship signal
-
-            #  LLM false-positive check (only when ENABLE_LLM=true) 
-            if ENABLE_LLM and MISTRAL_API_KEY:
-                is_genuine, llm_reason = _llm_verify_sponsorship(
-                    name, title, description, stype
+                stype, confidence, keywords, desc_snippet = _detect_sponsorship(
+                    description, title, name
                 )
-                if not is_genuine:
-                    logger.info(
-                        "LLM rejected '%s' for '%s' as false positive: %s",
-                        title[:60], name, llm_reason,
-                    )
-                    continue
 
-            rows_to_insert.append({
-                "brand_raw_id":       brand.id,
-                "video_id":           video_id,
-                "video_title":        title,
-                "video_url":          f"https://www.youtube.com/watch?v={video_id}",
-                "channel_id":         channel_id,
-                "channel_name":       snippet.get("channelTitle", ""),
-                "subscriber_count":   sub_counts.get(channel_id),
-                "tier_fit":           bucket_creator_tier(sub_counts.get(channel_id)),
-                "published_at":       snippet.get("publishedAt", ""),
-                "view_count":         int(stats.get("viewCount", 0) or 0),
-                "like_count":         int(stats.get("likeCount", 0) or 0),
-                "description_snippet": desc_snippet,
-                "sponsorship_type":   stype,
-                "confidence":         confidence,
-                "matched_keywords":   keywords,
-            })
+                if stype == "none":
+                    continue  # skip videos with no sponsorship signal
+
+                #  LLM false-positive check (only when ENABLE_LLM=true)
+                if ENABLE_LLM and MISTRAL_API_KEY:
+                    is_genuine, llm_reason = _llm_verify_sponsorship(
+                        name, title, description, stype
+                    )
+                    if not is_genuine:
+                        logger.info(
+                            "LLM rejected '%s' for '%s' as false positive: %s",
+                            title[:60], name, llm_reason,
+                        )
+                        continue
+
+                # Comments only fetched for videos actually kept — 1 quota
+                # unit each, cheap, but no reason to spend it on rejected videos.
+                comments = _fetch_video_comments(video_id)
+                time.sleep(0.1)
+
+                rows_to_insert.append({
+                    "brand_raw_id":       brand.id,
+                    "video_id":           video_id,
+                    "video_title":        title,
+                    "video_url":          f"https://www.youtube.com/watch?v={video_id}",
+                    "channel_id":         channel_id,
+                    "channel_name":       snippet.get("channelTitle", ""),
+                    "subscriber_count":   sub_counts.get(channel_id),
+                    "tier_fit":           bucket_creator_tier(sub_counts.get(channel_id)),
+                    "published_at":       snippet.get("publishedAt", ""),
+                    "view_count":         int(stats.get("viewCount", 0) or 0),
+                    "like_count":         int(stats.get("likeCount", 0) or 0),
+                    "description_snippet": desc_snippet,
+                    "sponsorship_type":   stype,
+                    "confidence":         confidence,
+                    "matched_keywords":   keywords,
+                    "comments":           comments or None,
+                })
+        except _QuotaExhausted:
+            quota_exhausted = True
+            logger.warning(
+                "YouTube daily quota exhausted while fetching comments for '%s' — "
+                "storing what's already been built; brand stays unchecked and the "
+                "remaining videos will be retried on the next run.",
+                name,
+            )
 
         if rows_to_insert:
             inserted = upsert_rows(db, YoutubeSponsorship, rows_to_insert, ["video_id"])
-            total_videos += inserted
+            total_videos += inserted    
             logger.info("YouTube: '%s' → %d/%d videos stored", name, inserted, len(rows_to_insert))
+
+        if quota_exhausted:
+            db.commit()
+            break  # exit brand loop; brand stays unchecked, no point trying the next one either
 
         brand.youtube_checked = True
         db.commit()
