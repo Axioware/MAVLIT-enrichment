@@ -38,10 +38,3 @@ data/seeds/*.csv
 # Logs
 *.log
 *.json
-test_branded_content.py
-test.py
-test1.py
-matching algorithm.md
-brand_signals_scoring.md
-initial scoring formula.docx
-matching_algorithm_status.txt
