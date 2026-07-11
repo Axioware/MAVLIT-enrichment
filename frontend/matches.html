@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your Matches — MAVLIT</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.5rem;
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+    }
+    .nav-brand {
+      font-weight: 700;
+      color: #38bdf8;
+      text-decoration: none;
+      font-size: 1rem;
+      letter-spacing: .03em;
+    }
+    .nav-link {
+      color: #94a3b8;
+      text-decoration: none;
+      font-size: .875rem;
+      padding: .4rem .75rem;
+      border-radius: 6px;
+    }
+    .nav-link:hover { background: #334155; color: #e2e8f0; }
+
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: .3rem;
+    }
+    .subtitle {
+      font-size: .875rem;
+      color: #64748b;
+      margin-bottom: 1.5rem;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.5rem;
+    }
+    .btn-refresh {
+      padding: .5rem 1rem;
+      background: #0284c7;
+      color: #fff;
+      font-size: .85rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .btn-refresh:hover:not(:disabled) { background: #0369a1; }
+    .btn-refresh:disabled { opacity: .6; cursor: not-allowed; }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .card-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: .6rem;
+    }
+    .brand-name {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+    .score-badge {
+      font-size: .8rem;
+      font-weight: 700;
+      color: #38bdf8;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 999px;
+      padding: .2rem .65rem;
+      white-space: nowrap;
+    }
+    .reasons { list-style: none; }
+    .reasons li {
+      font-size: .85rem;
+      color: #cbd5e1;
+      padding: .35rem 0;
+      border-top: 1px solid #334155;
+    }
+    .reasons li:first-child { border-top: none; }
+
+    .empty-msg, .error-msg {
+      font-size: .9rem;
+      color: #94a3b8;
+      text-align: center;
+      padding: 3rem 1rem;
+    }
+    .error-msg { color: #f87171; }
+
+    .loading-wrap {
+      display: flex;
+      justify-content: center;
+      padding: 3rem 0;
+    }
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 2px solid #334155;
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #resultsSection { display: none; }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <a class="nav-brand" href="/">&#9889; MAVLIT Pipeline</a>
+    <a class="nav-link" href="/creator-profile">Creator Profile</a>
+  </nav>
+
+  <div class="wrap">
+    <div class="loading-wrap" id="loadingSection">
+      <div class="spinner"></div>
+    </div>
+
+    <div id="resultsSection">
+      <h1>Your Matches</h1>
+      <p class="subtitle">Brands ranked for your profile, with the top reasons behind each match.</p>
+
+      <div class="toolbar">
+        <span class="subtitle" id="metaLine" style="margin:0;"></span>
+        <button class="btn-refresh" id="refreshBtn" onclick="refreshMatches()">Force refresh</button>
+      </div>
+
+      <div id="matchList"></div>
+    </div>
+  </div>
+
+<script>
+  function showResults() {
+    document.getElementById('loadingSection').style.display = 'none';
+    document.getElementById('resultsSection').style.display = 'block';
+  }
+
+  function pct(score) {
+    return Math.round((score || 0) * 100) + '%';
+  }
+
+  function renderMatches(data) {
+    var list = document.getElementById('matchList');
+    list.innerHTML = '';
+
+    document.getElementById('metaLine').textContent =
+      (data.cached ? 'Cached' : 'Live') + ' — computed ' + new Date(data.computed_at).toLocaleString();
+
+    if (!data.matches || !data.matches.length) {
+      list.innerHTML = '<p class="empty-msg">No matches yet — make sure your creator profile is filled out and has been saved at least once.</p>';
+      return;
+    }
+
+    data.matches.forEach(function(m) {
+      var card = document.createElement('div');
+      card.className = 'card';
+
+      var reasonsHtml = (m.reasons || []).map(function(r) {
+        return '<li>' + r.replace(/</g, '&lt;') + '</li>';
+      }).join('');
+
+      card.innerHTML =
+        '<div class="card-head">' +
+          '<span class="brand-name">' + m.brand_name.replace(/</g, '&lt;') + '</span>' +
+          '<span class="score-badge">' + pct(m.total_score) + ' match</span>' +
+        '</div>' +
+        '<ul class="reasons">' + reasonsHtml + '</ul>';
+
+      list.appendChild(card);
+    });
+  }
+
+  function showError(message) {
+    document.getElementById('matchList').innerHTML = '<p class="error-msg">' + message + '</p>';
+    showResults();
+  }
+
+  function loadMatches() {
+    fetch('/matches/me?limit=20', { credentials: 'include' })
+      .then(function(r) {
+        if (r.status === 401) {
+          window.location.href = '/auth/google?return_to=' + encodeURIComponent('/matches');
+          return null;
+        }
+        if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Failed to load matches'); });
+        return r.json();
+      })
+      .then(function(data) {
+        if (!data) return;
+        renderMatches(data);
+        showResults();
+      })
+      .catch(function(err) {
+        showError(err.message || 'Something went wrong loading your matches.');
+      });
+  }
+
+  function refreshMatches() {
+    var btn = document.getElementById('refreshBtn');
+    btn.disabled = true;
+    btn.textContent = 'Refreshing…';
+
+    fetch('/matches/me/refresh?limit=20', { method: 'POST', credentials: 'include' })
+      .then(function(r) {
+        if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Refresh failed'); });
+        return r.json();
+      })
+      .then(renderMatches)
+      .catch(function(err) {
+        alert(err.message || 'Refresh failed — you may be rate-limited (1/hour).');
+      })
+      .finally(function() {
+        btn.disabled = false;
+        btn.textContent = 'Force refresh';
+      });
+  }
+
+  loadMatches();
+</script>
+</body>
+</html>

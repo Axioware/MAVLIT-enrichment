@@ -147,6 +147,7 @@
 
   <nav>
     <a class="nav-brand" href="/">&#9889; MAVLIT Pipeline</a>
+    <a class="nav-link" href="/matches">Your Matches</a>
     <a class="nav-link" href="/dashboard">&larr; Dashboard</a>
   </nav>
 
@@ -186,7 +187,7 @@
       </div>
 
       <div class="card">
-        <h2>Content Niche</h2>
+        <h2>Content & Niche</h2>
         <div class="grid">
           <div class="field full">
             <label for="content_niche">Primary niche *</label>
@@ -196,6 +197,7 @@
               <option value="podcast_audio">Podcast / Audio</option>
               <option value="photography">Photography</option>
               <option value="gaming">Gaming</option>
+              <option value="tech">Tech</option>
               <option value="education">Education</option>
               <option value="fitness">Fitness</option>
               <option value="food_cooking">Food & Cooking</option>
@@ -204,6 +206,22 @@
             </select>
           </div>
           <div class="field full">
+            <label for="sub_niches">Sub-niches (comma-separated)</label>
+            <input id="sub_niches" name="sub_niches" type="text" placeholder="vegan cooking, meal prep" />
+          </div>
+          <div class="field full">
+            <label for="content_description">Describe your content</label>
+            <textarea id="content_description" name="content_description" placeholder="What do you actually post about? A few sentences helps us tag your content accurately."></textarea>
+          </div>
+          <div class="field full">
+            <label for="excluded_categories">Brand categories to avoid (comma-separated)</label>
+            <input id="excluded_categories" name="excluded_categories" type="text" placeholder="alcohol, gambling" />
+          </div>
+          <div class="field">
+            <label for="follower_count">Follower count (primary platform)</label>
+            <input id="follower_count" name="follower_count" type="number" min="0" placeholder="50000" />
+          </div>
+          <div class="field">
             <label for="primary_platform">Primary platform</label>
             <select id="primary_platform" name="primary_platform">
               <option value="">Select a platform…</option>
@@ -271,6 +289,14 @@
               <option value="50+">50+</option>
             </select>
           </div>
+          <div class="field">
+            <label for="audience_age_min">Audience age range — min</label>
+            <input id="audience_age_min" name="audience_age_min" type="number" min="0" placeholder="18" />
+          </div>
+          <div class="field">
+            <label for="audience_age_max">Audience age range — max</label>
+            <input id="audience_age_max" name="audience_age_max" type="number" min="0" placeholder="34" />
+          </div>
           <div class="field full">
             <label for="audience_top_country">Top audience country</label>
             <input id="audience_top_country" name="audience_top_country" type="text" placeholder="United States" />
@@ -303,9 +329,10 @@
       isLoggedIn ? 'Save profile' : 'Continue with Google to save';
   }
 
-  // profile/body objects always store percentages as 0–1 decimals and
-  // audience_top_countries as [{country, pct}, ...] — convert both back to
-  // the form's display format (0–100 number, plain text country).
+  // profile/body objects always store percentages as 0–1 decimals,
+  // audience_top_countries as [{country, pct}, ...], and sub_niches/
+  // excluded_categories as string arrays — convert all three back to the
+  // form's display format (0–100 number, plain text country, comma list).
   function applyProfileToForm(profile) {
     if (!profile) return;
     var form = document.getElementById('formSection');
@@ -314,6 +341,8 @@
       if (!input || profile[key] === null || profile[key] === undefined) return;
       if (key === 'audience_gender_male_pct' || key === 'audience_gender_female_pct') {
         input.value = profile[key] * 100;
+      } else if (key === 'sub_niches' || key === 'excluded_categories') {
+        input.value = profile[key].join(', ');
       } else {
         input.value = profile[key];
       }
@@ -326,6 +355,10 @@
   function buildProfileBody() {
     var form = document.getElementById('formSection');
     var numOrNull = function(v) { return v === '' ? null : Number(v); };
+    var listOrNull = function(v) {
+      var items = v.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+      return items.length ? items : null;
+    };
 
     var genderMale   = numOrNull(form.elements['audience_gender_male_pct'].value);
     var genderFemale = numOrNull(form.elements['audience_gender_female_pct'].value);
@@ -338,6 +371,9 @@
       location_country: form.elements['location_country'].value || null,
       bio_tagline:      form.elements['bio_tagline'].value || null,
       content_niche:    form.elements['content_niche'].value,
+      sub_niches:          listOrNull(form.elements['sub_niches'].value),
+      content_description: form.elements['content_description'].value || null,
+      excluded_categories: listOrNull(form.elements['excluded_categories'].value),
       instagram_handle: form.elements['instagram_handle'].value || null,
       tiktok_handle:    form.elements['tiktok_handle'].value || null,
       youtube_channel:  form.elements['youtube_channel'].value || null,
@@ -345,9 +381,12 @@
       substack_url:     form.elements['substack_url'].value || null,
       substack_subscribers: numOrNull(form.elements['substack_subscribers'].value),
       primary_platform: form.elements['primary_platform'].value || null,
+      follower_count:   numOrNull(form.elements['follower_count'].value),
       audience_gender_male_pct:   genderMale === null ? null : genderMale / 100,
       audience_gender_female_pct: genderFemale === null ? null : genderFemale / 100,
       audience_age_bracket:       form.elements['audience_age_bracket'].value || null,
+      audience_age_min:           numOrNull(form.elements['audience_age_min'].value),
+      audience_age_max:           numOrNull(form.elements['audience_age_max'].value),
       audience_top_countries:     topCountry ? [{ country: topCountry, pct: 1.0 }] : null,
     };
   }
