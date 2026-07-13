@@ -44,6 +44,10 @@ from pipeline.db import BrandRaw, Prompt, YoutubeSponsorship
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.llm import call_mistral_json, call_mistral_text, fill_template
+from pipeline.helpers.prompts import (
+    GENDER_PROMPT_NAME, GENDER_DEFAULT_PROMPT,
+    SPONSOR_CHECK_PROMPT_NAME, SPONSOR_CHECK_DEFAULT_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,49 +58,11 @@ _COMMENTS_URL = "https://www.googleapis.com/youtube/v3/commentThreads"
 _MAX_RESULTS  = 10    # per search query (keeps quota low)
 _MAX_COMMENTS = 200   # per video — YouTube caps each page at 100, so this paginates across 2 pages
 
-#  Prompt — commenter gender classification
-
-GENDER_PROMPT_NAME = "youtube_commenter_gender"
-GENDER_DEFAULT_PROMPT = """\
-You are classifying the likely gender of YouTube commenters based on their display names.
-
-Names (JSON array, in order):
-{names}
-
-For each name, classify as "male", "female", or "unknown". Many will be usernames/handles with no clear gender signal (e.g. "xXGamerXx123", "TechReviews99", a channel name) — use "unknown" for those rather than guessing.
-
-Reply ONLY with this JSON object, no extra text:
-{"genders": ["male", "unknown", "female", ...]}
-The genders array must have exactly as many entries as the input names, in the same order.\
-"""
-
+#  Prompt helpers
 
 def _get_gender_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == GENDER_PROMPT_NAME).first()
     return row.content if row else GENDER_DEFAULT_PROMPT
-
-
-#  Prompt — sponsorship false-positive verification
-
-SPONSOR_CHECK_PROMPT_NAME = "youtube_sponsor_check"
-SPONSOR_CHECK_DEFAULT_PROMPT = """\
-You are verifying whether a YouTube video is a genuine brand sponsorship or a false positive.
-
-Brand: {brand_name}
-Detected sponsorship type: {detected_type}
-Video title: {title}
-
-Video description (first 1500 chars):
-{description}
-
----
-
-Is this video genuinely sponsored by or affiliated with "{brand_name}"?
-
-Answer with ONLY this format:
-RESULT: YES or NO
-REASON: one short sentence explaining why\
-"""
 
 
 def _get_sponsor_check_prompt(db: Session) -> str:

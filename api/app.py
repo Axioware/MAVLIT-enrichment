@@ -14,22 +14,15 @@ from config import IS_PRODUCTION
 from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
 from pipeline.matching.matcher import get_matches
-from pipeline.enrichment.instagram_posts import (
+from pipeline.enrichment.creator_signals import compute_creator_signals
+from pipeline.helpers.prompts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
     COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT,
-)
-from pipeline.enrichment.instagram_users import (
     DEMOGRAPHICS_PROMPT_NAME, DEMOGRAPHICS_DEFAULT_PROMPT,
-)
-from pipeline.enrichment.creator_signals import (
-    TAGS_PROMPT_NAME, TAGS_DEFAULT_PROMPT, compute_creator_signals,
-)
-from pipeline.enrichment.youtube_sponsorship import (
     GENDER_PROMPT_NAME, GENDER_DEFAULT_PROMPT,
     SPONSOR_CHECK_PROMPT_NAME, SPONSOR_CHECK_DEFAULT_PROMPT,
-)
-from pipeline.enrichment.apollo_contacts import (
     APOLLO_RANK_PROMPT_NAME, APOLLO_RANK_DEFAULT_PROMPT,
+    TAGS_PROMPT_NAME, TAGS_DEFAULT_PROMPT,
 )
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.enrichment.orchestrator import run_signal_enrichment

@@ -88,6 +88,7 @@ from sqlalchemy.orm import Session
 from config import APOLLO_API_KEY, ENABLE_APOLLO_PHONE_REVEAL, MISTRAL_API_KEY
 from pipeline.db import BrandContact, BrandProfile, BrandRaw, InitialBrandScore, Prompt
 from pipeline.helpers.llm import call_mistral_json, fill_template
+from pipeline.helpers.prompts import APOLLO_RANK_PROMPT_NAME, APOLLO_RANK_DEFAULT_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -255,24 +256,7 @@ def _keyword_rank_all(people: list[dict], fallback_mode: bool) -> list[tuple[dic
     return [(p, f"keyword match on title '{p.get('title', '')}'") for p in ranked]
 
 
-#  Prompt — candidate ranking
-
-APOLLO_RANK_PROMPT_NAME = "apollo_contact_check"
-APOLLO_RANK_DEFAULT_PROMPT = """\
-You are a sponsorship-outreach research assistant. {intro}
-
-You will receive a JSON list of employees (id, name, job title, and whether Apollo has an email/phone on file). Rank ALL of them from most to least likely to personally own or influence this decision — do not omit anyone, even weak fits; just rank those lower.
-{title_hint}
-All else equal, prefer candidates with has_email=true.
-
-Candidates:
-{candidates}
-
-Reply ONLY with this JSON object, ranking EVERY candidate above, best first, with a short one-line reason each (a few words is fine for lower-ranked ones):
-{"picks": [{"id": "...", "reason": "short one-line reason"}, ...]}
-Every id from the candidate list above must appear exactly once in "picks".\
-"""
-
+#  Prompt helpers
 
 def _get_apollo_rank_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == APOLLO_RANK_PROMPT_NAME).first()

@@ -36,6 +36,10 @@ from pipeline.db import BrandRaw, InstagramPost, Prompt
 from pipeline.helpers.apify import run_apify_actor
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.llm import call_mistral_json, fill_template
+from pipeline.helpers.prompts import (
+    FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
+    COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT,
+)
 from pipeline.helpers.social import normalize_handle
 
 logger = logging.getLogger(__name__)
@@ -44,60 +48,7 @@ _ACTOR_ID     = "shu8hvrXbJbY3Eb9W"
 _POSTS_NEWER  = "1 months"
 _RESULTS_TYPE = "posts"
 
-#  Prompt registry 
-
-FULL_PROMPT_NAME = "instagram_post_full_check"
-FULL_DEFAULT_PROMPT = """\
-You are filtering an Instagram post's collaboration signals to remove false positives.
-Only keep users/accounts that are REAL paid or gifted content creators working with the brand.
-
-Brand: {brand_name}
-Post caption: {caption}
-
-Signals found in this post:
-paid_partnership: {paid_partnership}
-sponsors: {sponsors}
-tagged_users: {tagged_users}
-mentions: {mentions}
-coauthor_producers: {coauthor_producers}
-
-REMOVE from each list:
-- Regional or sister accounts of "{brand_name}" (brand_uk, brand_us, brand_official, etc.)
-- The brand's own accounts in any form
-- Automated, bot, or spam accounts
-- People tagged who are clearly not independent content creators or influencers
-
-KEEP:
-- Real influencers, bloggers, or content creators with their own audience
-- Brand ambassadors who were paid or gifted
-- Genuine paid partnership or sponsorship markers
-
-Reply ONLY with this JSON object (use empty list or false for fields with nothing left):
-{"paid_partnership": true or false, "sponsors": [], "tagged_users": [], "mentions": [], "coauthor_producers": []}\
-"""
-
-COAUTHOR_PROMPT_NAME = "instagram_coauthor_check"
-COAUTHOR_DEFAULT_PROMPT = """\
-You are evaluating Instagram co-authors of a post to identify real paid content creators.
-
-Brand: {brand_name}
-Post caption: {caption}
-Co-authors (coauthorProducers): {coauthor_producers}
-
-Keep ONLY the co-authors who are real independent content creators or influencers
-who were paid or gifted by "{brand_name}".
-
-REMOVE:
-- Regional or sister accounts of "{brand_name}" (brand_uk, brand_us, brand_official, etc.)
-- The brand's own accounts in any form
-- Any account that is clearly not an independent creator
-
-Reply ONLY with this JSON object (empty list if none confirmed):
-{"coauthor_producers": [...]}\
-"""
-
-
-#  Prompt helpers 
+#  Prompt helpers
 
 def _get_full_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == FULL_PROMPT_NAME).first()

@@ -40,36 +40,13 @@ from pipeline.helpers.apify import run_apify_actor
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.llm import call_mistral_json, fill_template
+from pipeline.helpers.prompts import DEMOGRAPHICS_PROMPT_NAME, DEMOGRAPHICS_DEFAULT_PROMPT
 
 logger = logging.getLogger(__name__)
 
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"
 
-#  Prompt 
-
-DEMOGRAPHICS_PROMPT_NAME = "instagram_user_demographics"
-DEMOGRAPHICS_DEFAULT_PROMPT = """\
-You are classifying the demographics of an Instagram user based on their profile.
-
-Username: {username}
-Full name: {full_name}
-Bio: {bio}
-External URL: {external_url}
-Business address: {business_address}
-
-Use clues from the bio language, location mentions, name origin, linked website, or business address.
-
-Classify each field:
-1. gender       — "male", "female", or "unknown"
-2. country      — most likely country (e.g. "south korea", "united states") — or "unknown"
-3. language     — primary language in bio (e.g. "english", "korean", "spanish") — or "unknown"
-4. location     — specific city or region if mentioned — or "unknown"
-5. age_group    — one of "12_16", "17_22", "23_28", "29_35", "36_45", "46_60", "60_plus", or "unknown"
-
-Reply ONLY with a JSON object, no extra text:
-{"gender": "...", "country": "...", "language": "...", "location": "...", "age_group": "..."}\
-"""
-
+#  Prompt helpers
 
 def _get_demographics_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == DEMOGRAPHICS_PROMPT_NAME).first()

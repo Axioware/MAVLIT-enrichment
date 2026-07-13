@@ -29,28 +29,11 @@ from sqlalchemy.orm import Session
 from pipeline.db import CreatorProfile, Prompt
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.llm import call_mistral_json, embed_text, fill_template
+from pipeline.helpers.prompts import TAGS_PROMPT_NAME, TAGS_DEFAULT_PROMPT
 
 logger = logging.getLogger(__name__)
 
-#  Prompt — content tags + audience-value keywords
-
-TAGS_PROMPT_NAME = "creator_content_tags"
-TAGS_DEFAULT_PROMPT = """\
-You are analyzing a content creator's profile to extract matching signal for a brand-sponsorship platform.
-
-Niche: {niche}
-Sub-niches: {sub_niches}
-Creator's own description: {content_description}
-
-Extract two things from this:
-1. content_tags — specific, concrete topics/themes this creator's content actually covers (e.g. "meal prep", "budget travel", "indie game reviews"). Avoid vague tags like "lifestyle" or "content creator" unless nothing more specific applies.
-2. audience_value_keywords — words/phrases describing what this creator's audience cares about or values (e.g. "sustainability", "affordability", "authenticity", "family-friendly").
-
-Reply ONLY with this JSON object, no extra text:
-{"content_tags": ["...", "..."], "audience_value_keywords": ["...", "..."]}
-Use empty lists if there isn't enough information to extract either one — do not invent tags not supported by the input.\
-"""
-
+#  Prompt helpers
 
 def _get_tags_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == TAGS_PROMPT_NAME).first()
