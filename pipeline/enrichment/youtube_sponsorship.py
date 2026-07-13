@@ -76,7 +76,35 @@ def _get_gender_prompt(db: Session) -> str:
     return row.content if row else GENDER_DEFAULT_PROMPT
 
 
-#  Sponsorship detection patterns 
+#  Prompt — sponsorship false-positive verification
+
+SPONSOR_CHECK_PROMPT_NAME = "youtube_sponsor_check"
+SPONSOR_CHECK_DEFAULT_PROMPT = """\
+You are verifying whether a YouTube video is a genuine brand sponsorship or a false positive.
+
+Brand: {brand_name}
+Detected sponsorship type: {detected_type}
+Video title: {title}
+
+Video description (first 1500 chars):
+{description}
+
+---
+
+Is this video genuinely sponsored by or affiliated with "{brand_name}"?
+
+Answer with ONLY this format:
+RESULT: YES or NO
+REASON: one short sentence explaining why\
+"""
+
+
+def _get_sponsor_check_prompt(db: Session) -> str:
+    row = db.query(Prompt).filter(Prompt.name == SPONSOR_CHECK_PROMPT_NAME).first()
+    return row.content if row else SPONSOR_CHECK_DEFAULT_PROMPT
+
+
+#  Sponsorship detection patterns
 
 _PAID_PATTERNS = [
     r'\bsponsored\s+by\b',
@@ -415,6 +443,7 @@ def _classify_commenter_genders(db: Session, comments: list[dict]) -> tuple[floa
 #  LLM false-positive filter
 
 def _llm_verify_sponsorship(
+    db: Session,
     brand_name: str,
     title: str,
     description: str,
@@ -428,22 +457,13 @@ def _llm_verify_sponsorship(
     Falls back to True (keep the video) on any error so no data is lost.
     Only called when ENABLE_LLM=true and MISTRAL_API_KEY is set.
     """
-    prompt = f"""You are verifying whether a YouTube video is a genuine brand sponsorship or a false positive.
-
-Brand: {brand_name}
-Detected sponsorship type: {detected_type}
-Video title: {title}
-
-Video description (first 1500 chars):
-{description[:1500]}
-
----
-
-Is this video genuinely sponsored by or affiliated with "{brand_name}"?
-
-Answer with ONLY this format:
-RESULT: YES or NO
-REASON: one short sentence explaining why"""
+    prompt = fill_template(
+        _get_sponsor_check_prompt(db),
+        brand_name=brand_name,
+        detected_type=detected_type,
+        title=title,
+        description=description[:1500],
+    )
 
     text = call_mistral_text(prompt, context=title[:60])
     if not text:
@@ -585,7 +605,7 @@ def enrich_youtube_sponsorships(db: Session, limit: int = 50, brand_id: int | No
                 #  LLM false-positive check (only when ENABLE_LLM=true)
                 if ENABLE_LLM and MISTRAL_API_KEY:
                     is_genuine, llm_reason = _llm_verify_sponsorship(
-                        name, title, description, stype
+                        db, name, title, description, stype
                     )
                     if not is_genuine:
                         logger.info(

@@ -86,8 +86,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from config import APOLLO_API_KEY, ENABLE_APOLLO_PHONE_REVEAL, MISTRAL_API_KEY
-from pipeline.db import BrandContact, BrandProfile, BrandRaw, InitialBrandScore
-from pipeline.helpers.llm import call_mistral_json
+from pipeline.db import BrandContact, BrandProfile, BrandRaw, InitialBrandScore, Prompt
+from pipeline.helpers.llm import call_mistral_json, fill_template
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +255,31 @@ def _keyword_rank_all(people: list[dict], fallback_mode: bool) -> list[tuple[dic
     return [(p, f"keyword match on title '{p.get('title', '')}'") for p in ranked]
 
 
-def _rank_all_candidates(people: list[dict], brand_name: str, fallback_mode: bool = False) -> list[tuple[dict, str]]:
+#  Prompt — candidate ranking
+
+APOLLO_RANK_PROMPT_NAME = "apollo_contact_check"
+APOLLO_RANK_DEFAULT_PROMPT = """\
+You are a sponsorship-outreach research assistant. {intro}
+
+You will receive a JSON list of employees (id, name, job title, and whether Apollo has an email/phone on file). Rank ALL of them from most to least likely to personally own or influence this decision — do not omit anyone, even weak fits; just rank those lower.
+{title_hint}
+All else equal, prefer candidates with has_email=true.
+
+Candidates:
+{candidates}
+
+Reply ONLY with this JSON object, ranking EVERY candidate above, best first, with a short one-line reason each (a few words is fine for lower-ranked ones):
+{"picks": [{"id": "...", "reason": "short one-line reason"}, ...]}
+Every id from the candidate list above must appear exactly once in "picks".\
+"""
+
+
+def _get_apollo_rank_prompt(db: Session) -> str:
+    row = db.query(Prompt).filter(Prompt.name == APOLLO_RANK_PROMPT_NAME).first()
+    return row.content if row else APOLLO_RANK_DEFAULT_PROMPT
+
+
+def _rank_all_candidates(db: Session, people: list[dict], brand_name: str, fallback_mode: bool = False) -> list[tuple[dict, str]]:
     """
     Ask Mistral to rank ALL found candidates (up to 50) best-first by how
     likely each is to personally own or influence sponsorship/influencer-
@@ -305,18 +329,12 @@ def _rank_all_candidates(people: list[dict], brand_name: str, fallback_mode: boo
             "sponsorship pitches, unless no better option exists in the list."
         )
 
-    prompt = f"""You are a sponsorship-outreach research assistant. {intro}
-
-You will receive a JSON list of employees (id, name, job title, and whether Apollo has an email/phone on file). Rank ALL of them from most to least likely to personally own or influence this decision — do not omit anyone, even weak fits; just rank those lower.
-{title_hint}
-All else equal, prefer candidates with has_email=true.
-
-Candidates:
-{json.dumps(candidates, indent=2)}
-
-Reply ONLY with this JSON object, ranking EVERY candidate above, best first, with a short one-line reason each (a few words is fine for lower-ranked ones):
-{{"picks": [{{"id": "...", "reason": "short one-line reason"}}, ...]}}
-Every id from the candidate list above must appear exactly once in "picks"."""
+    prompt = fill_template(
+        _get_apollo_rank_prompt(db),
+        intro=intro,
+        title_hint=title_hint,
+        candidates=json.dumps(candidates, indent=2),
+    )
 
     result = call_mistral_json(prompt, context=f"apollo full ranking for {brand_name}")
     picks = result.get("picks", []) if isinstance(result, dict) else []
@@ -497,7 +515,7 @@ def find_brand_contact(db: Session, brand_raw_id: int) -> list[dict]:
         })
         return []
 
-    picks = _rank_all_candidates(people, brand.name, fallback_mode=fallback_used)
+    picks = _rank_all_candidates(db, people, brand.name, fallback_mode=fallback_used)
     if not picks:
         logger.info("Apollo contact: '%s' — ranking returned nothing usable", brand.name)
         _insert_empty_marker(db, brand_raw_id)

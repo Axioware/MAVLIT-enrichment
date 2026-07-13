@@ -26,6 +26,10 @@ from pipeline.enrichment.creator_signals import (
 )
 from pipeline.enrichment.youtube_sponsorship import (
     GENDER_PROMPT_NAME, GENDER_DEFAULT_PROMPT,
+    SPONSOR_CHECK_PROMPT_NAME, SPONSOR_CHECK_DEFAULT_PROMPT,
+)
+from pipeline.enrichment.apollo_contacts import (
+    APOLLO_RANK_PROMPT_NAME, APOLLO_RANK_DEFAULT_PROMPT,
 )
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.enrichment.orchestrator import run_signal_enrichment
@@ -240,6 +244,8 @@ def _run_migrations() -> None:
             (DEMOGRAPHICS_PROMPT_NAME,  DEMOGRAPHICS_DEFAULT_PROMPT),
             (TAGS_PROMPT_NAME,          TAGS_DEFAULT_PROMPT),
             (GENDER_PROMPT_NAME,        GENDER_DEFAULT_PROMPT),
+            (SPONSOR_CHECK_PROMPT_NAME, SPONSOR_CHECK_DEFAULT_PROMPT),
+            (APOLLO_RANK_PROMPT_NAME,   APOLLO_RANK_DEFAULT_PROMPT),
         ]:
             if not db.query(Prompt).filter(Prompt.name == name).first():
                 db.add(Prompt(name=name, content=content))
@@ -966,6 +972,11 @@ def matches_page():
     return FileResponse("frontend/matches.html")
 
 
+@app.get("/prompts", include_in_schema=False)
+def prompts_page():
+    return FileResponse("frontend/prompts.html")
+
+
 class SeedJobResponse(BaseModel):
     job_id:  str
     status:  str
@@ -1147,8 +1158,13 @@ def get_prompt(name: str):
                 updated_at=str(row.updated_at) if row.updated_at else None,
             )
         _defaults = {
-            FULL_PROMPT_NAME:    FULL_DEFAULT_PROMPT,
-            COAUTHOR_PROMPT_NAME: COAUTHOR_DEFAULT_PROMPT,
+            FULL_PROMPT_NAME:           FULL_DEFAULT_PROMPT,
+            COAUTHOR_PROMPT_NAME:       COAUTHOR_DEFAULT_PROMPT,
+            DEMOGRAPHICS_PROMPT_NAME:   DEMOGRAPHICS_DEFAULT_PROMPT,
+            GENDER_PROMPT_NAME:         GENDER_DEFAULT_PROMPT,
+            SPONSOR_CHECK_PROMPT_NAME:  SPONSOR_CHECK_DEFAULT_PROMPT,
+            APOLLO_RANK_PROMPT_NAME:    APOLLO_RANK_DEFAULT_PROMPT,
+            TAGS_PROMPT_NAME:           TAGS_DEFAULT_PROMPT,
         }
         if name in _defaults:
             return PromptResponse(name=name, content=_defaults[name])
