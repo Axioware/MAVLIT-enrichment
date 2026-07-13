@@ -35,13 +35,17 @@ WEIGHTS: dict[str, float] = {
 }
 
 # instagram_users.py's LLM demographics classifier buckets ages into these —
-# approximate numeric ranges used to overlap against a creator's age_min/max.
+# the label is already the numeric range; "60_plus" is open-ended so it's
+# given an arbitrary upper bound just for overlap-fraction math against a
+# creator's age_min/max.
 _AGE_BUCKET_RANGES: dict[str, tuple[int, int]] = {
-    "teen":         (13, 17),
-    "young_adult":  (18, 25),
-    "adult":        (26, 35),
-    "middle_aged":  (36, 50),
-    "senior":       (51, 80),
+    "12_16":   (12, 16),
+    "17_22":   (17, 22),
+    "23_28":   (23, 28),
+    "29_35":   (29, 35),
+    "36_45":   (36, 45),
+    "46_60":   (46, 60),
+    "60_plus": (60, 100),
 }
 
 _TIER_ORDER = ["nano", "micro", "macro", "mega"]

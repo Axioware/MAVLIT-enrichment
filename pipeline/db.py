@@ -390,7 +390,7 @@ class BrandProfile(Base):
     audience_gender_male_pct   = Column(Float)
     audience_gender_female_pct = Column(Float)
     audience_top_countries     = Column(JSONB)   # [{"country": "US", "pct": 0.45}, ...]
-    audience_age_groups        = Column(JSONB)   # {"teen": 0.1, "young_adult": 0.3, "adult": 0.4, ...} — bucket names from instagram_users.py's LLM classifier
+    audience_age_groups        = Column(JSONB)   # {"12_16": 0.1, "17_22": 0.3, "23_28": 0.4, ...} — bucket names from instagram_users.py's LLM classifier
 
     #  Platform presence
     has_instagram = Column(Boolean)
@@ -501,7 +501,7 @@ class CreatorProfile(Base):
     # compare directly in score_audience_demographics().
     audience_gender_male_pct    = Column(Float)      # 0.0 – 1.0
     audience_gender_female_pct  = Column(Float)      # 0.0 – 1.0
-    audience_age_bracket        = Column(Text)       # e.g. "18-24", "25-30", "30-40" — legacy single-bracket field, kept for compatibility
+    audience_age_bracket        = Column(Text)       # e.g. "17_22", "23_28", "29_35" — legacy single-bracket field, kept for compatibility
     audience_age_min            = Column(Integer)    # e.g. 18 — used for range-based age overlap in Stage 3
     audience_age_max            = Column(Integer)    # e.g. 34
     audience_top_countries      = Column(JSONB)      # [{"country": "US", "pct": 0.45}, ...]

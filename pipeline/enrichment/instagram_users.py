@@ -64,7 +64,7 @@ Classify each field:
 2. country      — most likely country (e.g. "south korea", "united states") — or "unknown"
 3. language     — primary language in bio (e.g. "english", "korean", "spanish") — or "unknown"
 4. location     — specific city or region if mentioned — or "unknown"
-5. age_group    — "teen" (13-17), "young_adult" (18-25), "adult" (26-35), "middle_aged" (36-50), "senior" (50+), or "unknown"
+5. age_group    — one of "12_16", "17_22", "23_28", "29_35", "36_45", "46_60", "60_plus", or "unknown"
 
 Reply ONLY with a JSON object, no extra text:
 {"gender": "...", "country": "...", "language": "...", "location": "...", "age_group": "..."}\
