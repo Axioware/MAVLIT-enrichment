@@ -15,17 +15,23 @@ Sponsorship types:
 Results are stored in the youtube_sponsorships table (one row per video).
 Sets youtube_checked=True on brands_raw after processing.
 
-Also fetches up to 100 top-level comments (commentThreads.list) for each
-video that's actually stored as a sponsorship — cheap at 1 quota unit per
-call regardless of maxResults, so this only runs for genuine hits, not
-every video searched.
+Also fetches up to 200 top-level comments (commentThreads.list, paginated
+2×100) for each video that's actually stored as a sponsorship — cheap at 1
+quota unit per page regardless of maxResults, so this only runs for
+genuine hits, not every video searched. Commenter display names are then
+batch-classified by gender via Mistral (one call per video) and
+aggregated into male_pct/female_pct — a rough proxy for the video's
+audience gender split, same caveat as any name-based classification
+elsewhere in this codebase (usernames/handles are often ungendered, hence
+"unknown" is excluded from the percentage base rather than guessed).
 
 Requires YOUTUBE_API_KEY in config.
 YouTube Data API v3 quota cost: 14 queries × 100 units = 1,400 units per
-brand for search, plus 1 unit per stored video for its comments.
+brand for search, plus 2 units per stored video for its 200 comments.
 Free tier: 10,000 units/day → ~7 brands/day (search-dominated).
 """
 
+import json
 import logging
 import re
 import time
@@ -34,10 +40,10 @@ import httpx
 from sqlalchemy.orm import Session
 
 from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, MISTRAL_API_KEY, ENABLE_LLM
-from pipeline.db import BrandRaw, YoutubeSponsorship
+from pipeline.db import BrandRaw, Prompt, YoutubeSponsorship
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
-from pipeline.helpers.llm import call_mistral_text
+from pipeline.helpers.llm import call_mistral_json, call_mistral_text, fill_template
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +52,29 @@ _VIDEOS_URL   = "https://www.googleapis.com/youtube/v3/videos"
 _CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
 _COMMENTS_URL = "https://www.googleapis.com/youtube/v3/commentThreads"
 _MAX_RESULTS  = 10    # per search query (keeps quota low)
-_MAX_COMMENTS = 100   # per video — YouTube API's hard cap per page too, so one call suffices
+_MAX_COMMENTS = 200   # per video — YouTube caps each page at 100, so this paginates across 2 pages
+
+#  Prompt — commenter gender classification
+
+GENDER_PROMPT_NAME = "youtube_commenter_gender"
+GENDER_DEFAULT_PROMPT = """\
+You are classifying the likely gender of YouTube commenters based on their display names.
+
+Names (JSON array, in order):
+{names}
+
+For each name, classify as "male", "female", or "unknown". Many will be usernames/handles with no clear gender signal (e.g. "xXGamerXx123", "TechReviews99", a channel name) — use "unknown" for those rather than guessing.
+
+Reply ONLY with this JSON object, no extra text:
+{"genders": ["male", "unknown", "female", ...]}
+The genders array must have exactly as many entries as the input names, in the same order.\
+"""
+
+
+def _get_gender_prompt(db: Session) -> str:
+    row = db.query(Prompt).filter(Prompt.name == GENDER_PROMPT_NAME).first()
+    return row.content if row else GENDER_DEFAULT_PROMPT
+
 
 #  Sponsorship detection patterns 
 
@@ -288,29 +316,100 @@ def _fetch_channel_subscribers_batch(channel_ids: list[str]) -> dict[str, int | 
 def _fetch_video_comments(video_id: str, max_results: int = _MAX_COMMENTS) -> list[dict]:
     """
     Fetch up to max_results top-level comments for a video via
-    commentThreads.list — 1 quota unit per call regardless of maxResults,
-    so a single request covers the full 100. Returns [] if comments are
-    disabled for the video or the call fails (never raises for that case —
-    only _QuotaExhausted propagates, same as every other _yt_get call).
+    commentThreads.list — 1 quota unit per page regardless of maxResults.
+    YouTube caps each page at 100, so max_results > 100 paginates across
+    multiple calls (e.g. 200 = 2 pages = 2 quota units). Returns [] if
+    comments are disabled for the video or the first call fails (never
+    raises for that case — only _QuotaExhausted propagates, same as every
+    other _yt_get call).
     """
-    data = _yt_get(_COMMENTS_URL, {
-        "part":       "snippet",
-        "videoId":    video_id,
-        "maxResults": min(max_results, 100),   # YouTube's own hard cap per page
-        "order":      "relevance",
-        "textFormat": "plainText",
-    })
-    if not data:
-        return []
-    comments = []
-    for item in data.get("items", []):
-        top = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
-        comments.append({
-            "author": top.get("authorDisplayName", ""),
-            "text":   top.get("textDisplay", ""),
-            "likes":  top.get("likeCount", 0),
-        })
+    comments: list[dict] = []
+    page_token: str | None = None
+
+    while len(comments) < max_results:
+        params = {
+            "part":       "snippet",
+            "videoId":    video_id,
+            "maxResults": min(max_results - len(comments), 100),   # YouTube's own hard cap per page
+            "order":      "relevance",
+            "textFormat": "plainText",
+        }
+        if page_token:
+            params["pageToken"] = page_token
+
+        data = _yt_get(_COMMENTS_URL, params)
+        if not data:
+            break
+
+        for item in data.get("items", []):
+            top = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
+            comments.append({
+                "author": top.get("authorDisplayName", ""),
+                "text":   top.get("textDisplay", ""),
+                "likes":  top.get("likeCount", 0),
+            })
+
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+
     return comments
+
+
+_GENDER_BATCH_SIZE = 50   # keeps each Mistral response comfortably short — a
+                          # single call for all 200 names risked the response
+                          # getting truncated mid-array (confirmed live: a
+                          # 200-name call failed with "Unterminated string"
+                          # partway through the JSON).
+
+
+def _classify_commenter_genders(db: Session, comments: list[dict]) -> tuple[float | None, float | None]:
+    """
+    Batch-classifies all commenter display names via Mistral (in chunks of
+    _GENDER_BATCH_SIZE — see that constant's comment) and returns
+    (male_pct, female_pct) computed only over classifications that came
+    back "male"/"female" — "unknown" is excluded from the percentage base
+    rather than guessed, same pattern as demographics elsewhere in this
+    codebase. A batch that's not a usable list at all is skipped (logged),
+    not fatal — the other batches still contribute. A batch whose length
+    merely doesn't match is truncated/padded rather than discarded outright
+    (confirmed live: Mistral sometimes pads a few extra trailing "unknown"
+    entries; the entries up to the requested count still line up correctly
+    with the input in order). Returns (None, None) if there are no
+    comments, MISTRAL_API_KEY isn't set, or every batch fails outright.
+    """
+    names = [c["author"] for c in comments if c.get("author")]
+    if not names or not MISTRAL_API_KEY:
+        return None, None
+
+    prompt_template = _get_gender_prompt(db)
+    all_genders: list[str] = []
+
+    for i in range(0, len(names), _GENDER_BATCH_SIZE):
+        chunk = names[i : i + _GENDER_BATCH_SIZE]
+        prompt = fill_template(prompt_template, names=json.dumps(chunk, ensure_ascii=False))
+        result = call_mistral_json(prompt, context=f"commenter gender classification (batch {i // _GENDER_BATCH_SIZE + 1}, {len(chunk)} names)")
+        genders = result.get("genders") if isinstance(result, dict) else None
+
+        if not isinstance(genders, list) or not genders:
+            logger.warning(
+                "YouTube commenter gender classification: batch at offset %d returned no usable list — skipping this batch",
+                i,
+            )
+            continue
+
+        if len(genders) != len(chunk):
+            logger.debug(
+                "YouTube commenter gender classification: batch at offset %d returned %d genders for %d names (%s)",
+                i, len(genders), len(chunk), "truncating" if len(genders) > len(chunk) else "padding with unknown",
+            )
+            genders = genders[:len(chunk)] + ["unknown"] * max(0, len(chunk) - len(genders))
+        all_genders.extend(genders)
+
+    known = [g for g in all_genders if g in ("male", "female")]
+    if not known:
+        return None, None
+    return round(all_genders.count("male") / len(known), 3), round(all_genders.count("female") / len(known), 3)
 
 
 #  LLM false-positive filter
@@ -495,10 +594,12 @@ def enrich_youtube_sponsorships(db: Session, limit: int = 50, brand_id: int | No
                         )
                         continue
 
-                # Comments only fetched for videos actually kept — 1 quota
-                # unit each, cheap, but no reason to spend it on rejected videos.
+                # Comments only fetched for videos actually kept — cheap
+                # (1 quota unit/page), but no reason to spend it on rejected videos.
                 comments = _fetch_video_comments(video_id)
                 time.sleep(0.1)
+
+                male_pct, female_pct = _classify_commenter_genders(db, comments)
 
                 rows_to_insert.append({
                     "brand_raw_id":       brand.id,
@@ -517,6 +618,8 @@ def enrich_youtube_sponsorships(db: Session, limit: int = 50, brand_id: int | No
                     "confidence":         confidence,
                     "matched_keywords":   keywords,
                     "comments":           comments or None,
+                    "male_pct":           male_pct,
+                    "female_pct":         female_pct,
                 })
         except _QuotaExhausted:
             quota_exhausted = True

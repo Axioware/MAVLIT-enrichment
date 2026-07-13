@@ -11,7 +11,7 @@ from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
 from config import IS_PRODUCTION
-from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandProfile, BrandRaw, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
 from pipeline.matching.matcher import get_matches
 from pipeline.enrichment.instagram_posts import (
@@ -23,6 +23,9 @@ from pipeline.enrichment.instagram_users import (
 )
 from pipeline.enrichment.creator_signals import (
     TAGS_PROMPT_NAME, TAGS_DEFAULT_PROMPT, compute_creator_signals,
+)
+from pipeline.enrichment.youtube_sponsorship import (
+    GENDER_PROMPT_NAME, GENDER_DEFAULT_PROMPT,
 )
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.enrichment.orchestrator import run_signal_enrichment
@@ -103,6 +106,8 @@ def _run_migrations() -> None:
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS tier_fit TEXT",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS tier_fit TEXT",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS comments JSONB",
+        "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS male_pct FLOAT",
+        "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS female_pct FLOAT",
         "DROP TABLE IF EXISTS instagram_commenters",
         # creator_profiles absorbed the separate `users` table — auth fields
         # now live directly on creator_profiles (see backfill block below).
@@ -187,6 +192,16 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS audience_age_min INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS audience_age_max INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS embedding_text TEXT",
+        # brands_niches: many-to-many mirror of brands_raw.niche (see BrandNiche
+        # docstring). New brands get a row automatically via insert_brand()/
+        # insert_brands_batch(); this backfills every brand that already
+        # existed before this table did. Idempotent — ON CONFLICT DO NOTHING
+        # means this is a no-op on every startup after the first.
+        """
+        INSERT INTO brands_niches (brand_raw_id, niche)
+        SELECT id, niche FROM brands_raw
+        ON CONFLICT (brand_raw_id, niche) DO NOTHING
+        """,
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -224,6 +239,7 @@ def _run_migrations() -> None:
             (COAUTHOR_PROMPT_NAME,      COAUTHOR_DEFAULT_PROMPT),
             (DEMOGRAPHICS_PROMPT_NAME,  DEMOGRAPHICS_DEFAULT_PROMPT),
             (TAGS_PROMPT_NAME,          TAGS_DEFAULT_PROMPT),
+            (GENDER_PROMPT_NAME,        GENDER_DEFAULT_PROMPT),
         ]:
             if not db.query(Prompt).filter(Prompt.name == name).first():
                 db.add(Prompt(name=name, content=content))
@@ -347,6 +363,17 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
     page_size = 50
 
 
+class BrandNicheAdmin(ModelView, model=BrandNiche):
+    name         = "Brand Niche"
+    name_plural  = "Brand Niches"
+    icon         = "fa-solid fa-tags"
+    column_list  = [BrandNiche.id, BrandNiche.brand_raw, BrandNiche.niche]
+    column_labels = {BrandNiche.brand_raw: "Brand"}
+    column_searchable_list = [BrandNiche.niche]
+    column_sortable_list   = [BrandNiche.id, BrandNiche.niche]
+    page_size = 50
+
+
 class MetaAdAdmin(ModelView, model=MetaAd):
     name         = "Meta Ad"
     name_plural  = "Meta Ads"
@@ -391,6 +418,8 @@ class YoutubeSponsorshipAdmin(ModelView, model=YoutubeSponsorship):
         YoutubeSponsorship.video_url,
         YoutubeSponsorship.description_snippet,
         YoutubeSponsorship.comments,
+        YoutubeSponsorship.male_pct,
+        YoutubeSponsorship.female_pct,
         YoutubeSponsorship.fetched_at,
     ]
     column_labels      = {YoutubeSponsorship.brand_raw: "Brand"}
@@ -406,6 +435,8 @@ class YoutubeSponsorshipAdmin(ModelView, model=YoutubeSponsorship):
         YoutubeSponsorship.confidence,
         YoutubeSponsorship.matched_keywords,
         YoutubeSponsorship.comments,
+        YoutubeSponsorship.male_pct,
+        YoutubeSponsorship.female_pct,
         YoutubeSponsorship.view_count,
         YoutubeSponsorship.like_count,
         YoutubeSponsorship.published_at,
@@ -825,6 +856,7 @@ admin.add_view(BrandProfileAdmin)
 admin.add_view(BrandContactAdmin)
 admin.add_view(InitialBrandScoreAdmin)
 admin.add_view(BrandRawAdmin)
+admin.add_view(BrandNicheAdmin)
 admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
 admin.add_view(InstagramPostAdmin)

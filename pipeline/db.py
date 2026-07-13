@@ -81,6 +81,30 @@ class BrandRaw(Base):
         return self.name or f"Brand #{self.id}"
 
 
+class BrandNiche(Base):
+    """
+    Many-to-many mirror of brands_raw.niche — a relational join table so a
+    brand can eventually carry more than one niche without changing
+    brands_raw's schema. Kept in sync automatically: insert_brand() and
+    insert_brands_batch() write a matching row here every time a brand is
+    newly inserted into brands_raw. brands_raw.niche itself is untouched and
+    still the single source of truth for existing code that reads it.
+    """
+    __tablename__ = "brands_niches"
+    __table_args__ = (
+        UniqueConstraint("brand_raw_id", "niche", name="uq_brand_niche"),
+    )
+
+    id           = Column(Integer, primary_key=True)
+    brand_raw_id = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
+    niche        = Column(Text, nullable=False, index=True)
+
+    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
+
+    def __str__(self) -> str:
+        return f"{self.niche} — brand={self.brand_raw_id}"
+
+
 class YoutubeSponsorship(Base):
     __tablename__ = "youtube_sponsorships"
 
@@ -100,7 +124,9 @@ class YoutubeSponsorship(Base):
     sponsorship_type    = Column(Text)
     confidence          = Column(Float)
     matched_keywords    = Column(JSONB)
-    comments            = Column(JSONB)   # up to 100 top-level comments: [{"author":.., "text":.., "likes":..}, ...]
+    comments            = Column(JSONB)   # up to 200 top-level comments: [{"author":.., "text":.., "likes":..}, ...]
+    male_pct            = Column(Float)   # gender split of commenters, inferred via Mistral from display names — excludes "unknown"
+    female_pct          = Column(Float)
     fetched_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
@@ -541,16 +567,32 @@ def _row_values(b: dict) -> dict:
     }
 
 
+def _insert_brand_niches(db: Session, id_niche_pairs: list[tuple[int, str]]) -> None:
+    """Mirror each newly-inserted brand's niche into brands_niches."""
+    rows = [{"brand_raw_id": bid, "niche": niche} for bid, niche in id_niche_pairs if niche]
+    if not rows:
+        return
+    stmt = (
+        insert(BrandNiche)
+        .values(rows)
+        .on_conflict_do_nothing(index_elements=["brand_raw_id", "niche"])
+    )
+    db.execute(stmt)
+
+
 def insert_brand(db: Session, brand: dict) -> bool:
     stmt = (
         insert(BrandRaw)
         .values(**_row_values(brand))
         # on_conflict_do_nothing() with no args handles all unique constraints
         .on_conflict_do_nothing()
+        .returning(BrandRaw.id, BrandRaw.niche)
     )
-    result = db.execute(stmt)
+    row = db.execute(stmt).first()
+    if row:
+        _insert_brand_niches(db, [(row.id, row.niche)])
     db.commit()
-    return result.rowcount == 1
+    return row is not None
 
 
 def _dedup_by(rows: list[dict], key_fn) -> list[dict]:
@@ -587,6 +629,7 @@ def insert_brands_batch(db: Session, brands: list[dict]) -> int:
         lambda b: b["normalized"],
     )
     total = 0
+    inserted_niches: list[tuple[int, str]] = []
 
     for i in range(0, max(len(with_qid), 1), _CHUNK):
         chunk = with_qid[i : i + _CHUNK]
@@ -599,8 +642,11 @@ def insert_brands_batch(db: Session, brands: list[dict]) -> int:
             insert(BrandRaw)
             .values([_row_values(b) for b in chunk])
             .on_conflict_do_nothing()
+            .returning(BrandRaw.id, BrandRaw.niche)
         )
-        total += db.execute(stmt).rowcount
+        rows = db.execute(stmt).all()
+        inserted_niches.extend((r.id, r.niche) for r in rows)
+        total += len(rows)
 
     for i in range(0, max(len(without_qid), 1), _CHUNK):
         chunk = without_qid[i : i + _CHUNK]
@@ -610,8 +656,12 @@ def insert_brands_batch(db: Session, brands: list[dict]) -> int:
             insert(BrandRaw)
             .values([_row_values(b) for b in chunk])
             .on_conflict_do_nothing(index_elements=["name_normalized"])
+            .returning(BrandRaw.id, BrandRaw.niche)
         )
-        total += db.execute(stmt).rowcount
+        rows = db.execute(stmt).all()
+        inserted_niches.extend((r.id, r.niche) for r in rows)
+        total += len(rows)
 
+    _insert_brand_niches(db, inserted_niches)
     db.commit()
     return total

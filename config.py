@@ -26,7 +26,6 @@ YOUTUBE_API_KEY_1 = os.getenv("YOUTUBE_API_KEY_1", "")
 APIFY_TOKEN       = os.getenv("APIFY_TOKEN", "")
 
 # LLM verification (Claude) — set ENABLE_LLM=true to activate
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ENABLE_LLM        = os.getenv("ENABLE_LLM", "false").strip().lower() == "true"
 
 # Demographics classification (Mistral)
