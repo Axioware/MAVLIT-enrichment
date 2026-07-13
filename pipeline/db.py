@@ -100,6 +100,7 @@ class YoutubeSponsorship(Base):
     sponsorship_type    = Column(Text)
     confidence          = Column(Float)
     matched_keywords    = Column(JSONB)
+    comments            = Column(JSONB)   # up to 100 top-level comments: [{"author":.., "text":.., "likes":..}, ...]
     fetched_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
@@ -346,9 +347,7 @@ class BrandProfile(Base):
     meta_ads_recency_days      = Column(Integer)               # days since last ad started; 0 if currently running
     meta_ads_no_end_date       = Column(Boolean)               # True if any ad has no end_date (still live)
     meta_ads_count             = Column(Integer)
-    youtube_sponsorship_count  = Column(Integer)                # last 12 months
-    youtube_last_sponsorship   = Column(Text)
-    instagram_paid_posts_count = Column(Integer)
+    youtube_last_sponsorship   = Column(TIMESTAMP(timezone=True))   # publish date of the most recent sponsored video
     tiktok_sponsored_count     = Column(Integer)
     twitter_sponsored_count    = Column(Integer)
 
@@ -365,8 +364,7 @@ class BrandProfile(Base):
     audience_gender_male_pct   = Column(Float)
     audience_gender_female_pct = Column(Float)
     audience_top_countries     = Column(JSONB)   # [{"country": "US", "pct": 0.45}, ...]
-    audience_age_groups        = Column(JSONB)   # {"18-24": 0.3, "25-34": 0.5, ...}
-    audience_sample_size       = Column(Integer)  # min 20 required to trust the above
+    audience_age_groups        = Column(JSONB)   # {"teen": 0.1, "young_adult": 0.3, "adult": 0.4, ...} — bucket names from instagram_users.py's LLM classifier
 
     #  Platform presence
     has_instagram = Column(Boolean)
@@ -450,7 +448,10 @@ class CreatorProfile(Base):
     #  Content niche
     content_niche = Column(Text)
     # 'music', 'podcast_audio', 'photography', 'gaming', 'education',
-    # 'fitness', 'food_cooking', 'finance', 'substack_newsletter'
+    # 'fitness', 'food_cooking', 'finance', 'substack_newsletter', 'tech'
+    sub_niches           = Column(JSONB)   # e.g. ["vegan cooking", "meal prep"] — creator-provided
+    content_description  = Column(Text)    # free-text creator-written description, source text for LLM tag extraction
+    excluded_categories   = Column(JSONB)   # brand niches/categories this creator refuses to work with — Stage 3 hard filter
 
     #  Platform links
     instagram_handle = Column(Text)
@@ -467,19 +468,23 @@ class CreatorProfile(Base):
     substack_subscribers = Column(Integer)
 
     primary_platform = Column(Text)
+    follower_count   = Column(Integer)   # creator-provided; drives creator_tier bucketing
 
     #  Audience demographics
     # Same shape as BrandMatchProfile's audience fields, so the two sides
     # compare directly in score_audience_demographics().
     audience_gender_male_pct    = Column(Float)      # 0.0 – 1.0
     audience_gender_female_pct  = Column(Float)      # 0.0 – 1.0
-    audience_age_bracket        = Column(Text)       # e.g. "18-24", "25-30", "30-40"
+    audience_age_bracket        = Column(Text)       # e.g. "18-24", "25-30", "30-40" — legacy single-bracket field, kept for compatibility
+    audience_age_min            = Column(Integer)    # e.g. 18 — used for range-based age overlap in Stage 3
+    audience_age_max            = Column(Integer)    # e.g. 34
     audience_top_countries      = Column(JSONB)      # [{"country": "US", "pct": 0.45}, ...]
 
     #  Derived / computed fields
     creator_tier  = Column(Text)
-    content_tags  = Column(JSONB)
+    content_tags  = Column(JSONB)   # LLM-extracted content tags + audience-value keywords, merged into one list
     embedding     = Column(Vector(1024))   # mistral-embed (Mistral API), must match BrandProfile.embedding
+    embedding_text = Column(Text)
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), onupdate=func.now())

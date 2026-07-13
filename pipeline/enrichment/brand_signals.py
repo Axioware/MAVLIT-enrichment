@@ -175,7 +175,6 @@ def compute_audience_demographics(db: Session, brand_raw_id: int) -> dict | None
         "audience_gender_female_pct": female_pct,
         "audience_top_countries":     audience_top_countries,
         "audience_age_groups":        audience_age_groups,
-        "audience_sample_size":       sample_size,
     }
     _upsert_brand_profile(db, brand_raw_id, values)
 

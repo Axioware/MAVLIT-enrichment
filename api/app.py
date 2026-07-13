@@ -1,6 +1,7 @@
 import logging
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
@@ -12,6 +13,7 @@ from sqlalchemy import text
 from config import IS_PRODUCTION
 from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandProfile, BrandRaw, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
+from pipeline.matching.matcher import get_matches
 from pipeline.enrichment.instagram_posts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
     COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT,
@@ -19,6 +21,10 @@ from pipeline.enrichment.instagram_posts import (
 from pipeline.enrichment.instagram_users import (
     DEMOGRAPHICS_PROMPT_NAME, DEMOGRAPHICS_DEFAULT_PROMPT,
 )
+from pipeline.enrichment.creator_signals import (
+    TAGS_PROMPT_NAME, TAGS_DEFAULT_PROMPT, compute_creator_signals,
+)
+from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.enrichment.orchestrator import run_signal_enrichment
 from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 from pipeline.seed import run_seed
@@ -96,6 +102,7 @@ def _run_migrations() -> None:
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS user_type TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS tier_fit TEXT",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS tier_fit TEXT",
+        "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS comments JSONB",
         "DROP TABLE IF EXISTS instagram_commenters",
         # creator_profiles absorbed the separate `users` table — auth fields
         # now live directly on creator_profiles (see backfill block below).
@@ -108,11 +115,9 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ALTER COLUMN content_niche DROP NOT NULL",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_profiles_email ON creator_profiles(email)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_profiles_google_id ON creator_profiles(google_id)",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS embedding vector(384)",
-        # Switched from an OpenAI-sized guess (1536) to all-MiniLM-L6-v2 (384) —
-        # both tables must match dimension to compare via cosine similarity.
-        "ALTER TABLE creator_profiles ALTER COLUMN embedding TYPE vector(384)",
-        "ALTER TABLE brand_match_profile ALTER COLUMN embedding TYPE vector(384)",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS embedding vector(1024)",
+        # (Previously stepped through an OpenAI-sized guess of 1536, then
+        # sentence-transformers' 384 — both superseded, see below.)
         # Switched again: sentence-transformers (local, 384 dims) -> Mistral's
         # mistral-embed API (1024 dims, fixed). Existing 384-dim vectors are
         # incompatible with the new dimension and must be cleared before the
@@ -135,6 +140,17 @@ def _run_migrations() -> None:
         "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS youtube_lowest INTEGER",
         "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS insta_highest INTEGER",
         "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS insta_lowest INTEGER",
+        # youtube_last_sponsorship was TEXT but never actually written by any
+        # code yet (compute_sponsorship_activity doesn't exist) — safe to
+        # retype with no data-loss risk. USING NULL sidesteps needing a real
+        # text->timestamp cast in case a stray non-null value ever existed.
+        "ALTER TABLE brand_match_profile ALTER COLUMN youtube_last_sponsorship TYPE TIMESTAMPTZ USING NULL::timestamptz",
+        # youtube_sponsorship_count / instagram_paid_posts_count removed —
+        # derived on demand from youtube_sponsorships / instagram_posts instead
+        # of duplicating a count into brand_match_profile.
+        "ALTER TABLE brand_match_profile DROP COLUMN IF EXISTS youtube_sponsorship_count",
+        "ALTER TABLE brand_match_profile DROP COLUMN IF EXISTS instagram_paid_posts_count",
+        "ALTER TABLE brand_match_profile DROP COLUMN IF EXISTS audience_sample_size",
         # Platform presence
         "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS has_instagram BOOLEAN",
         "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS has_youtube BOOLEAN",
@@ -158,6 +174,19 @@ def _run_migrations() -> None:
         # brand_contacts: now stores up to 50 ranked candidates per brand,
         # only the top 5 of which are enriched with real contact info
         "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS is_enriched BOOLEAN NOT NULL DEFAULT FALSE",
+        # creator_profiles: Stage 2 creator-profile-setup fields (matching
+        # algorithm design doc) — sub-niches, free-text description for LLM
+        # tag extraction, a hard-filter exclusion list, an explicit follower
+        # count to drive tier bucketing, an age-range pair (in addition to
+        # the older single audience_age_bracket), and embedding_text to
+        # mirror brand_match_profile's embedding/embedding_text pairing.
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS sub_niches JSONB",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS content_description TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS excluded_categories JSONB",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS follower_count INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS audience_age_min INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS audience_age_max INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS embedding_text TEXT",
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -194,6 +223,7 @@ def _run_migrations() -> None:
             (FULL_PROMPT_NAME,          FULL_DEFAULT_PROMPT),
             (COAUTHOR_PROMPT_NAME,      COAUTHOR_DEFAULT_PROMPT),
             (DEMOGRAPHICS_PROMPT_NAME,  DEMOGRAPHICS_DEFAULT_PROMPT),
+            (TAGS_PROMPT_NAME,          TAGS_DEFAULT_PROMPT),
         ]:
             if not db.query(Prompt).filter(Prompt.name == name).first():
                 db.add(Prompt(name=name, content=content))
@@ -360,6 +390,7 @@ class YoutubeSponsorshipAdmin(ModelView, model=YoutubeSponsorship):
         YoutubeSponsorship.published_at,
         YoutubeSponsorship.video_url,
         YoutubeSponsorship.description_snippet,
+        YoutubeSponsorship.comments,
         YoutubeSponsorship.fetched_at,
     ]
     column_labels      = {YoutubeSponsorship.brand_raw: "Brand"}
@@ -374,6 +405,7 @@ class YoutubeSponsorshipAdmin(ModelView, model=YoutubeSponsorship):
         YoutubeSponsorship.sponsorship_type,
         YoutubeSponsorship.confidence,
         YoutubeSponsorship.matched_keywords,
+        YoutubeSponsorship.comments,
         YoutubeSponsorship.view_count,
         YoutubeSponsorship.like_count,
         YoutubeSponsorship.published_at,
@@ -405,8 +437,10 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
         InstagramPost.coauthor_producers,
         InstagramPost.followers_count,
         InstagramPost.caption,
+        InstagramPost.biography,
         InstagramPost.post_url,
         InstagramPost.fetched_at,
+        InstagramPost.business_category_name,
     ]
     column_labels          = {InstagramPost.brand_raw: "Brand"}
     column_searchable_list = [InstagramPost.instagram_handle, InstagramPost.caption, InstagramPost.post_id]
@@ -426,7 +460,9 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
         InstagramPost.coauthor_producers,
         InstagramPost.mentions,
         InstagramPost.tagged_users,
+        InstagramPost.biography,
         InstagramPost.fetched_at,
+        InstagramPost.business_category_name,
     ]
     column_default_sort    = [(InstagramPost.id, True)]
     page_size = 50
@@ -664,9 +700,7 @@ class BrandProfileAdmin(ModelView, model=BrandProfile):
         BrandProfile.meta_ads_recency_days,
         BrandProfile.meta_ads_no_end_date,
         BrandProfile.meta_ads_count,
-        BrandProfile.youtube_sponsorship_count,
         BrandProfile.youtube_last_sponsorship,
-        BrandProfile.instagram_paid_posts_count,
         BrandProfile.tiktok_sponsored_count,
         BrandProfile.twitter_sponsored_count,
         BrandProfile.avg_yt_creator_subscribers,
@@ -680,7 +714,6 @@ class BrandProfileAdmin(ModelView, model=BrandProfile):
         BrandProfile.audience_gender_female_pct,
         BrandProfile.audience_top_countries,
         BrandProfile.audience_age_groups,
-        BrandProfile.audience_sample_size,
         BrandProfile.has_instagram,
         BrandProfile.has_youtube,
         BrandProfile.has_facebook,
@@ -697,10 +730,7 @@ class BrandProfileAdmin(ModelView, model=BrandProfile):
         BrandProfile.meta_ads_active,
         BrandProfile.meta_ads_recency_days,
         BrandProfile.meta_ads_count,
-        BrandProfile.youtube_sponsorship_count,
-        BrandProfile.instagram_paid_posts_count,
         BrandProfile.typical_creator_tier,
-        BrandProfile.audience_sample_size,
         BrandProfile.has_instagram,
         BrandProfile.has_youtube,
         BrandProfile.has_facebook,
@@ -767,6 +797,13 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
         CreatorProfile.youtube_channel,
         CreatorProfile.facebook_page,
         CreatorProfile.substack_url,
+        CreatorProfile.sub_niches,
+        CreatorProfile.content_description,
+        CreatorProfile.excluded_categories,
+        CreatorProfile.follower_count,
+        CreatorProfile.audience_age_min,
+        CreatorProfile.audience_age_max,
+        CreatorProfile.content_tags,
         CreatorProfile.creator_tier,
         CreatorProfile.created_at,
         CreatorProfile.updated_at,
@@ -890,6 +927,11 @@ def dashboard_page():
 @app.get("/creator-profile", include_in_schema=False)
 def creator_profile_page():
     return FileResponse("frontend/creator-profile.html")
+
+
+@app.get("/matches", include_in_schema=False)
+def matches_page():
+    return FileResponse("frontend/matches.html")
 
 
 class SeedJobResponse(BaseModel):
@@ -1116,7 +1158,10 @@ class CreatorProfileRequest(BaseModel):
     location_country: str | None = None
     bio_tagline:      str | None = None
 
-    content_niche: str
+    content_niche:       str
+    sub_niches:          list[str] | None = None
+    content_description: str | None = None
+    excluded_categories:  list[str] | None = None
 
     instagram_handle: str | None = None
     tiktok_handle:     str | None = None
@@ -1126,10 +1171,13 @@ class CreatorProfileRequest(BaseModel):
     substack_subscribers: int | None = None
 
     primary_platform: str | None = None
+    follower_count:   int | None = None
 
     audience_gender_male_pct:   float | None = None
     audience_gender_female_pct: float | None = None
     audience_age_bracket:       str | None = None
+    audience_age_min:           int | None = None
+    audience_age_max:           int | None = None
     audience_top_countries:     list[dict] | None = None
 
 
@@ -1144,7 +1192,10 @@ class CreatorProfileResponse(BaseModel):
     location_country: str | None = None
     bio_tagline:      str | None = None
 
-    content_niche: str | None = None
+    content_niche:       str | None = None
+    sub_niches:          list[str] | None = None
+    content_description: str | None = None
+    excluded_categories:  list[str] | None = None
 
     instagram_handle: str | None = None
     tiktok_handle:     str | None = None
@@ -1154,13 +1205,17 @@ class CreatorProfileResponse(BaseModel):
     substack_subscribers: int | None = None
 
     primary_platform: str | None = None
+    follower_count:   int | None = None
 
     audience_gender_male_pct:   float | None = None
     audience_gender_female_pct: float | None = None
     audience_age_bracket:       str | None = None
+    audience_age_min:           int | None = None
+    audience_age_max:           int | None = None
     audience_top_countries:     list[dict] | None = None
 
     creator_tier: str | None = None
+    content_tags: list[str] | None = None
     created_at: str
     updated_at: str | None = None
 
@@ -1176,6 +1231,9 @@ def _profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         location_country=row.location_country,
         bio_tagline=row.bio_tagline,
         content_niche=row.content_niche,
+        sub_niches=row.sub_niches,
+        content_description=row.content_description,
+        excluded_categories=row.excluded_categories,
         instagram_handle=row.instagram_handle,
         tiktok_handle=row.tiktok_handle,
         youtube_channel=row.youtube_channel,
@@ -1183,11 +1241,15 @@ def _profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         substack_url=row.substack_url,
         substack_subscribers=row.substack_subscribers,
         primary_platform=row.primary_platform,
+        follower_count=row.follower_count,
         audience_gender_male_pct=row.audience_gender_male_pct,
         audience_gender_female_pct=row.audience_gender_female_pct,
         audience_age_bracket=row.audience_age_bracket,
+        audience_age_min=row.audience_age_min,
+        audience_age_max=row.audience_age_max,
         audience_top_countries=row.audience_top_countries,
         creator_tier=row.creator_tier,
+        content_tags=row.content_tags,
         created_at=str(row.created_at) if row.created_at else "",
         updated_at=str(row.updated_at) if row.updated_at else None,
     )
@@ -1199,20 +1261,103 @@ def get_my_creator_profile(current_user: CreatorProfile = Depends(get_current_us
     return _profile_to_response(current_user)
 
 
+def _run_creator_signals_job(creator_id: int) -> None:
+    db = SessionLocal()
+    try:
+        compute_creator_signals(db, creator_id)
+    except Exception:
+        logger.exception("Creator signals background job failed for creator_id=%d", creator_id)
+    finally:
+        db.close()
+
+
 @app.put("/creator-profile/me", response_model=CreatorProfileResponse)
 def upsert_my_creator_profile(
     body: CreatorProfileRequest,
+    background_tasks: BackgroundTasks,
     current_user: CreatorProfile = Depends(get_current_user),
 ):
-    """Update the logged-in user's creator profile fields."""
+    """
+    Update the logged-in user's creator profile fields. creator_tier is
+    bucketed synchronously (instant, no LLM call) so the response reflects
+    it immediately; content_tags and the embedding are refreshed in a
+    background task (an LLM call + a Mistral embed call — a few seconds,
+    not worth blocking the response for).
+    """
     db = SessionLocal()
     try:
         row = db.query(CreatorProfile).filter(CreatorProfile.id == current_user.id).first()
         for field, value in body.model_dump().items():
             setattr(row, field, value)
+        row.creator_tier = bucket_creator_tier(row.follower_count)
 
         db.commit()
         db.refresh(row)
+        background_tasks.add_task(_run_creator_signals_job, row.id)
         return _profile_to_response(row)
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Matches — Stage 3 real-time matching, self-service (same auth pattern as
+# /creator-profile/me — scoped to the logged-in creator, not an arbitrary
+# {creator_profile_id} path param, so one creator can't read/refresh
+# another's matches without an ownership check).
+# ---------------------------------------------------------------------------
+
+class MatchDimension(BaseModel):
+    score:  float | None = None
+    weight: float
+
+
+class MatchResult(BaseModel):
+    brand_raw_id: int
+    brand_name:   str
+    total_score:  float
+    dimensions:   dict[str, MatchDimension]
+    reasons:      list[str]
+
+
+class MatchesResponse(BaseModel):
+    matches:     list[MatchResult]
+    cached:      bool
+    computed_at: str
+
+
+@app.get("/matches/me", response_model=MatchesResponse)
+def get_my_matches(
+    limit: int = 20,
+    offset: int = 0,
+    current_user: CreatorProfile = Depends(get_current_user),
+):
+    """
+    Ranked brand matches for the logged-in creator (Stage 3). Always
+    computes live — no match_cache layer exists yet (deferred by design,
+    per the matching doc), so `cached` is always false; the field is kept
+    in the response so the contract doesn't change once caching is added.
+    """
+    db = SessionLocal()
+    try:
+        matches = get_matches(db, current_user.id, limit=limit, offset=offset)
+        return MatchesResponse(matches=matches, cached=False, computed_at=datetime.now(timezone.utc).isoformat())
+    finally:
+        db.close()
+
+
+@app.post("/matches/me/refresh", response_model=MatchesResponse)
+def refresh_my_matches(
+    limit: int = 20,
+    current_user: CreatorProfile = Depends(get_current_user),
+):
+    """
+    Force-recompute matches, bypassing any cache. There's no cache to
+    bypass yet, so this currently behaves identically to GET /matches/me —
+    the separate endpoint is kept for when caching is added.
+    """
+    db = SessionLocal()
+    try:
+        matches = get_matches(db, current_user.id, limit=limit, offset=0)
+        return MatchesResponse(matches=matches, cached=False, computed_at=datetime.now(timezone.utc).isoformat())
     finally:
         db.close()

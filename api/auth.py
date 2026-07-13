@@ -13,8 +13,6 @@ Routes:
 import hmac
 import logging
 import secrets
-import time
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
@@ -38,28 +36,6 @@ _GOOGLE_USERINFO  = "https://www.googleapis.com/oauth2/v2/userinfo"
 _ALGORITHM        = "HS256"
 _TOKEN_DAYS       = 7
 _HTTP_TIMEOUT     = 10.0
-
-
-#  Simple in-memory rate limiter (fixed window per key)
-# Single-process app (same pattern as the in-memory _jobs store in api/app.py).
-# Protects against hammering Google's token endpoint / brute-forcing the callback.
-
-_rate_limit_buckets: dict[str, list[float]] = defaultdict(list)
-
-
-def _check_rate_limit(key: str, max_requests: int, window_seconds: int) -> None:
-    now    = time.monotonic()
-    cutoff = now - window_seconds
-    bucket = _rate_limit_buckets[key]
-    while bucket and bucket[0] < cutoff:
-        bucket.pop(0)
-    if len(bucket) >= max_requests:
-        raise HTTPException(status_code=429, detail="Too many requests — please try again shortly")
-    bucket.append(now)
-
-
-def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
 
 
 def _safe_return_to(path: str | None) -> str:
@@ -108,7 +84,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> Creator
 #  Routes
 
 @router.get("/google")
-def login_google(request: Request, return_to: str | None = None):
+def login_google(return_to: str | None = None):
     """Step 1 — redirect the browser to Google's OAuth consent screen.
 
     Pass ?return_to=/some/path to send the user back to that page after
@@ -117,8 +93,6 @@ def login_google(request: Request, return_to: str | None = None):
     """
     if not GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID not configured")
-
-    _check_rate_limit(f"login:{_client_ip(request)}", max_requests=20, window_seconds=60)
 
     state = secrets.token_urlsafe(32)
     params = {
@@ -152,8 +126,6 @@ async def google_callback(
     error: str | None = None,
 ):
     """Step 2 — Google redirects here with ?code=&state= (or ?error= if user cancelled)."""
-    _check_rate_limit(f"callback:{_client_ip(request)}", max_requests=10, window_seconds=60)
-
     # User cancelled the Google consent screen
     if error or not code:
         response = RedirectResponse(url="/signin", status_code=302)
