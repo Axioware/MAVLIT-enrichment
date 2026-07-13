@@ -234,6 +234,7 @@ class InstagramUser(Base):
 
     # Top 5 posts with their top 5 comments each
     top_posts           = Column(JSONB)
+    captions            = Column(JSONB)   # flat list of caption strings from top_posts — creators only, NULL for commenters
 
     raw_profile         = Column(JSONB)
     fetched_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())

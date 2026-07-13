@@ -354,6 +354,10 @@ def _build_user_row(
         "location":            demo["location"],
         "age_group":           demo["age_group"],
         "top_posts":           top_posts,
+        # Flat list of captions from top_posts — only meaningful for actual
+        # creators (5 posts scraped); commenters only ever get 1 post
+        # scraped for profile data, so this stays NULL for them.
+        "captions":            [p.get("caption", "") for p in top_posts] if (top_posts and user_type != "commenter") else None,
         "raw_profile":         profile,
     }
 

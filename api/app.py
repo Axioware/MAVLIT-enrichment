@@ -101,6 +101,7 @@ def _run_migrations() -> None:
         "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS is_users_scraped BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS user_type TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS tier_fit TEXT",
+        "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS captions JSONB",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS tier_fit TEXT",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS comments JSONB",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS male_pct FLOAT",
@@ -521,6 +522,9 @@ class InstagramUserAdmin(ModelView, model=InstagramUser):
         InstagramUser.bio,
         InstagramUser.external_url,
         InstagramUser.profile_url,
+        InstagramUser.top_posts,
+        InstagramUser.captions,
+        InstagramUser.raw_profile,
         InstagramUser.fetched_at,
     ]
     column_searchable_list = [
@@ -543,6 +547,10 @@ class InstagramUserAdmin(ModelView, model=InstagramUser):
         InstagramUser.country,
         InstagramUser.language,
         InstagramUser.age_group,
+        InstagramUser.top_posts,
+        InstagramUser.captions,
+        InstagramUser.raw_profile,
+        InstagramUser.bio,
         InstagramUser.fetched_at,
     ]
     column_default_sort    = [(InstagramUser.followers_count, True)]
