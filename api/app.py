@@ -359,7 +359,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.description,
     ]
     column_default_sort = [(BrandRaw.id, True)]
-    page_size = 50
+    page_size = 15
 
 
 class BrandNicheAdmin(ModelView, model=BrandNiche):
@@ -370,7 +370,7 @@ class BrandNicheAdmin(ModelView, model=BrandNiche):
     column_labels = {BrandNiche.brand_raw: "Brand"}
     column_searchable_list = [BrandNiche.niche]
     column_sortable_list   = [BrandNiche.id, BrandNiche.niche]
-    page_size = 50
+    page_size = 15
 
 
 class MetaAdAdmin(ModelView, model=MetaAd):
@@ -395,7 +395,7 @@ class MetaAdAdmin(ModelView, model=MetaAd):
     column_searchable_list = [MetaAd.page_name, MetaAd.page_id, MetaAd.ad_archive_id]
     column_sortable_list   = [MetaAd.id, MetaAd.brand_raw_id, MetaAd.start_date, MetaAd.fetched_at, MetaAd.impressions, MetaAd.spend]
     column_default_sort    = [(MetaAd.id, True)]
-    page_size = 50
+    page_size = 15
 
 
 class YoutubeSponsorshipAdmin(ModelView, model=YoutubeSponsorship):
@@ -442,7 +442,7 @@ class YoutubeSponsorshipAdmin(ModelView, model=YoutubeSponsorship):
         YoutubeSponsorship.fetched_at,
     ]
     column_default_sort    = [(YoutubeSponsorship.confidence, True)]
-    page_size = 50
+    page_size = 15
 
 
 class InstagramPostAdmin(ModelView, model=InstagramPost):
@@ -495,7 +495,7 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
         InstagramPost.business_category_name,
     ]
     column_default_sort    = [(InstagramPost.id, True)]
-    page_size = 50
+    page_size = 15
 
 
 class InstagramUserAdmin(ModelView, model=InstagramUser):
@@ -546,7 +546,7 @@ class InstagramUserAdmin(ModelView, model=InstagramUser):
         InstagramUser.fetched_at,
     ]
     column_default_sort    = [(InstagramUser.followers_count, True)]
-    page_size = 50
+    page_size = 15
 
 
 class BrandInstagramUserAdmin(ModelView, model=BrandInstagramUser):
@@ -564,7 +564,7 @@ class BrandInstagramUserAdmin(ModelView, model=BrandInstagramUser):
     }
     column_sortable_list = [BrandInstagramUser.created_at]
     column_default_sort  = [(BrandInstagramUser.created_at, True)]
-    page_size = 50
+    page_size = 15
 
 
 class InstagramCreatorCommenterAdmin(ModelView, model=InstagramCreatorCommenter):
@@ -593,7 +593,7 @@ class InstagramCreatorCommenterAdmin(ModelView, model=InstagramCreatorCommenter)
         InstagramCreatorCommenter.comment_likes,
     ]
     column_default_sort  = [(InstagramCreatorCommenter.created_at, True)]
-    page_size = 50
+    page_size = 15
 
 
 class TiktokPostAdmin(ModelView, model=TiktokPost):
@@ -633,7 +633,7 @@ class TiktokPostAdmin(ModelView, model=TiktokPost):
         TiktokPost.fetched_at,
     ]
     column_default_sort    = [(TiktokPost.play_count, True)]
-    page_size = 50
+    page_size = 15
 
 
 class TwitterPostAdmin(ModelView, model=TwitterPost):
@@ -674,7 +674,7 @@ class TwitterPostAdmin(ModelView, model=TwitterPost):
         TwitterPost.fetched_at,
     ]
     column_default_sort    = [(TwitterPost.likes, True)]
-    page_size = 50
+    page_size = 15
 
 
 class PromptAdmin(ModelView, model=Prompt):
@@ -716,7 +716,7 @@ class InitialBrandScoreAdmin(ModelView, model=InitialBrandScore):
         InitialBrandScore.scored_at,
     ]
     column_default_sort = [(InitialBrandScore.total_score, True)]
-    page_size = 50
+    page_size = 15
 
 
 class BrandProfileAdmin(ModelView, model=BrandProfile):
@@ -769,7 +769,7 @@ class BrandProfileAdmin(ModelView, model=BrandProfile):
         BrandProfile.computed_at,
     ]
     column_default_sort = [(BrandProfile.sponsorship_activity_score, True)]
-    page_size = 50
+    page_size = 15
 
 
 class BrandContactAdmin(ModelView, model=BrandContact):
@@ -804,7 +804,7 @@ class BrandContactAdmin(ModelView, model=BrandContact):
         BrandContact.seniority, BrandContact.country, BrandContact.fetched_at,
     ]
     column_default_sort = [(BrandContact.rank, False)]
-    page_size = 50
+    page_size = 15
 
 
 class CreatorProfileAdmin(ModelView, model=CreatorProfile):
@@ -845,7 +845,7 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
         CreatorProfile.primary_platform, CreatorProfile.creator_tier, CreatorProfile.created_at,
     ]
     column_default_sort    = [(CreatorProfile.created_at, True)]
-    page_size = 50
+    page_size = 15
 
 # tables
 
