@@ -1241,6 +1241,23 @@ def _profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
     )
 
 
+@app.get("/brand-niches")
+def list_brand_niches():
+    """
+    Distinct niche values from brands_niches, for the creator-profile form's
+    Primary niche multi-select — lets creators pick from the same vocabulary
+    brands are actually seeded with, so niche_compatibility() can match them
+    directly instead of going through a curated keyword table.
+    """
+    db = SessionLocal()
+    try:
+        rows = db.query(BrandNiche.niche).distinct().all()
+        niches = sorted({r[0] for r in rows if r[0]}, key=str.lower)
+        return {"niches": niches}
+    finally:
+        db.close()
+
+
 @app.get("/creator-profile/me", response_model=CreatorProfileResponse)
 def get_my_creator_profile(current_user: CreatorProfile = Depends(get_current_user)):
     """Return the logged-in user's creator profile."""

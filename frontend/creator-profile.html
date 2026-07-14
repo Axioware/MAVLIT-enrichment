@@ -125,6 +125,32 @@
     .status-msg.ok { color: #4ade80; }
     .status-msg.err { color: #f87171; }
 
+    .niche-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .5rem;
+    }
+    .niche-pill {
+      padding: .4rem .8rem;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 999px;
+      font-size: .82rem;
+      color: #94a3b8;
+      cursor: pointer;
+      user-select: none;
+    }
+    .niche-pill:hover { border-color: #38bdf8; color: #e2e8f0; }
+    .niche-pill.selected {
+      background: #0284c7;
+      border-color: #0284c7;
+      color: #fff;
+    }
+    .niche-hint {
+      font-size: .78rem;
+      color: #64748b;
+    }
+
     .loading-wrap {
       display: flex;
       justify-content: center;
@@ -190,20 +216,9 @@
         <h2>Content & Niche</h2>
         <div class="grid">
           <div class="field full">
-            <label for="content_niche">Primary niche *</label>
-            <select id="content_niche" name="content_niche" required>
-              <option value="">Select a niche…</option>
-              <option value="music">Music</option>
-              <option value="podcast_audio">Podcast / Audio</option>
-              <option value="photography">Photography</option>
-              <option value="gaming">Gaming</option>
-              <option value="tech">Tech</option>
-              <option value="education">Education</option>
-              <option value="fitness">Fitness</option>
-              <option value="food_cooking">Food & Cooking</option>
-              <option value="finance">Finance</option>
-              <option value="substack_newsletter">Substack / Newsletter</option>
-            </select>
+            <label>Primary niche *</label>
+            <div class="niche-pills" id="content_niche_list"></div>
+            <p class="niche-hint">Select one or more — these are the same niches brands are matched on.</p>
           </div>
           <div class="field full">
             <label for="sub_niches">Sub-niches (comma-separated)</label>
@@ -338,6 +353,7 @@
     if (!profile) return;
     var form = document.getElementById('formSection');
     Object.keys(profile).forEach(function(key) {
+      if (key === 'content_niche') { setSelectedNiches(profile[key]); return; }
       var input = form.elements[key];
       if (!input || profile[key] === null || profile[key] === undefined) return;
       if (key === 'audience_gender_male_pct' || key === 'audience_gender_female_pct') {
@@ -351,6 +367,40 @@
     if (profile.audience_top_countries && profile.audience_top_countries.length) {
       form.elements['audience_top_country'].value = profile.audience_top_countries[0].country || '';
     }
+  }
+
+  // Primary niche is a multi-select pill list populated from GET /brand-niches
+  // (the same distinct niche vocabulary brands.niche uses) — content_niche is
+  // still stored as one comma-joined string, so niche_compatibility() can
+  // split and directly compare each selected niche against a brand's niche.
+  function loadNiches() {
+    return fetch('/brand-niches')
+      .then(function(r) { return r.ok ? r.json() : { niches: [] }; })
+      .then(function(data) {
+        var container = document.getElementById('content_niche_list');
+        (data.niches || []).forEach(function(niche) {
+          var pill = document.createElement('span');
+          pill.className = 'niche-pill';
+          pill.textContent = niche;
+          pill.dataset.value = niche;
+          pill.onclick = function() { pill.classList.toggle('selected'); };
+          container.appendChild(pill);
+        });
+      })
+      .catch(function() { /* leave list empty — form still usable */ });
+  }
+
+  function getSelectedNiches() {
+    return Array.prototype.slice.call(document.querySelectorAll('#content_niche_list .niche-pill.selected'))
+      .map(function(el) { return el.dataset.value; });
+  }
+
+  function setSelectedNiches(value) {
+    var selected = (value || '').split(',').map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
+    document.querySelectorAll('#content_niche_list .niche-pill').forEach(function(el) {
+      if (selected.indexOf(el.dataset.value.toLowerCase()) !== -1) el.classList.add('selected');
+      else el.classList.remove('selected');
+    });
   }
 
   function buildProfileBody() {
@@ -371,7 +421,7 @@
       location_city:    form.elements['location_city'].value || null,
       location_country: form.elements['location_country'].value || null,
       bio_tagline:      form.elements['bio_tagline'].value || null,
-      content_niche:    form.elements['content_niche'].value,
+      content_niche:    getSelectedNiches().join(', '),
       sub_niches:          listOrNull(form.elements['sub_niches'].value),
       content_description: form.elements['content_description'].value || null,
       excluded_categories: listOrNull(form.elements['excluded_categories'].value),
@@ -437,6 +487,10 @@
       form.reportValidity();
       return false;
     }
+    if (!getSelectedNiches().length) {
+      setStatus('Select at least one primary niche.', true);
+      return false;
+    }
 
     var body = buildProfileBody();
 
@@ -487,7 +541,7 @@
       });
   }
 
-  checkAuth();
+  loadNiches().then(checkAuth);
 </script>
 </body>
 </html>
