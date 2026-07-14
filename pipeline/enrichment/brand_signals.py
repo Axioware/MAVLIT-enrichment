@@ -8,10 +8,10 @@ Covers:
   compute_creator_tier_profile(db, brand_raw_id)  — avg collaborator follower/subscriber size, bucketed
   compute_audience_demographics(db, brand_raw_id) — gender/country/age aggregate + sample size
   compute_platform_presence(db, brand_raw_id)     — has_instagram/youtube/facebook/tiktok/twitter booleans
+  compute_sponsorship_activity(db, brand_raw_id)  — 0-100 sponsorship_activity_score + meta_ads_*/youtube_last_sponsorship (YouTube/Instagram/Meta Ads only — TikTok/Twitter not scored in V1)
   compute_brand_embedding(db, brand_raw_id)       — prose text + Mistral embedding
 
 NOT covered here:
-  sponsorship_activity_score — already computed in initial_brand_scoring.py (writes to initial_brand_score)
   contact signal              — blocked, no Apollo contact-fetch pipeline exists yet
 
 Embedding model: Mistral's "mistral-embed" (1024 dims, fixed — this model
@@ -35,6 +35,7 @@ Scope notes:
 
 import logging
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
@@ -47,6 +48,7 @@ from pipeline.db import (
     InstagramUser,
     YoutubeSponsorship,
 )
+from pipeline.enrichment.initial_brand_scoring import _score_instagram, _score_meta_ads, _score_youtube
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.llm import embed_text
 
@@ -191,8 +193,8 @@ def compute_platform_presence(db: Session, brand_raw_id: int) -> dict | None:
     Simple booleans for whether the brand has a known handle on each
     platform (from brands_raw). Denormalized onto brand_match_profile so
     matching doesn't need a join back to brands_raw for this check.
-    has_tiktok/has_twitter are stored but not scored in V1. Returns None if
-    the brand doesn't exist.
+    TikTok/Twitter are not scored in V1. Returns None if the brand doesn't
+    exist.
     """
     brand = db.query(BrandRaw).filter(BrandRaw.id == brand_raw_id).first()
     if not brand:
@@ -203,15 +205,78 @@ def compute_platform_presence(db: Session, brand_raw_id: int) -> dict | None:
         "has_instagram": bool(brand.instagram_handle),
         "has_youtube":   bool(brand.youtube_channel_id),
         "has_facebook":  bool(brand.facebook_page or brand.facebook_page_id),
-        "has_tiktok":    bool(brand.tiktok_handle),
-        "has_twitter":   bool(brand.twitter_handle),
     }
     _upsert_brand_profile(db, brand_raw_id, values)
 
     logger.info(
-        "Platform presence: brand_raw_id=%d instagram=%s youtube=%s facebook=%s tiktok=%s twitter=%s",
-        brand_raw_id, values["has_instagram"], values["has_youtube"],
-        values["has_facebook"], values["has_tiktok"], values["has_twitter"],
+        "Platform presence: brand_raw_id=%d instagram=%s youtube=%s facebook=%s",
+        brand_raw_id, values["has_instagram"], values["has_youtube"], values["has_facebook"],
+    )
+    return values
+
+
+# YouTube (0-25) + Instagram (0-25) + Meta Ads (0-15) mirror initial_brand_
+# scoring.py's "Influencer Buying Activity" + "Advertising Budget" sections
+# exactly (its Section 3/4 — legitimacy/reachability — are deliberately
+# excluded, same as the matching design doc excludes tranco rank/HQ country/
+# traffic tier from Stage 3). TikTok/Twitter are not scored in V1 (same as
+# has_tiktok/has_twitter in compute_platform_presence above).
+_ACTIVITY_MAX_POINTS = 25 + 25 + 15
+
+
+def compute_sponsorship_activity(db: Session, brand_raw_id: int) -> dict | None:
+    """
+    Composite 0-100 sponsorship_activity_score, built from the same YouTube/
+    Instagram/Meta-Ads recency+volume formulas initial_brand_scoring.py
+    already uses (imported directly rather than reimplemented). Also fills
+    meta_ads_active/meta_ads_no_end_date/meta_ads_count/meta_ads_recency_days/
+    youtube_last_sponsorship — those raw counts feed match_text.py's
+    Priority-3 "actively running paid campaigns" reason, which was
+    previously always None since nothing wrote to them. TikTok/Twitter are
+    not scored in V1. Writes to brand_match_profile. Returns None if the
+    brand doesn't exist.
+
+    A brand with zero measured activity across every platform gets a real
+    0.0 (not None) — a genuine "nothing observed" answer, not "unknown",
+    so the Stage 3 activity-floor hard filter can correctly exclude it.
+    """
+    brand = db.query(BrandRaw).filter(BrandRaw.id == brand_raw_id).first()
+    if not brand:
+        logger.warning("Sponsorship activity: brand_raw_id=%d not found", brand_raw_id)
+        return None
+
+    yt_pts, yt_details     = _score_youtube(db, brand_raw_id)
+    ig_pts, ig_details     = _score_instagram(db, brand_raw_id)
+    meta_pts, meta_details = _score_meta_ads(db, brand_raw_id)
+
+    total_pts = yt_pts + ig_pts + meta_pts
+    score = round(max(0.0, min(100.0, total_pts * 100.0 / _ACTIVITY_MAX_POINTS)), 1)
+
+    # youtube_last_sponsorship needs a real timestamp (column is TIMESTAMPTZ),
+    # not just "days ago" — rebuild one from the same recency_days
+    # initial_brand_scoring.py's _score_youtube already derived from
+    # published_at, rather than re-parsing dates a second time here.
+    yt_recency_days = yt_details.get("recency_days")
+    youtube_last_sponsorship = (
+        datetime.now(timezone.utc) - timedelta(days=yt_recency_days)
+        if yt_recency_days is not None else None
+    )
+
+    meta_still_running = meta_details.get("active_no_end_date", 0) > 0
+
+    values = {
+        "sponsorship_activity_score": score,
+        "meta_ads_count":             meta_details.get("ad_count"),
+        "meta_ads_active":            meta_still_running,
+        "meta_ads_no_end_date":       meta_still_running,
+        "meta_ads_recency_days":      meta_details.get("recency_days"),
+        "youtube_last_sponsorship":   youtube_last_sponsorship,
+    }
+    _upsert_brand_profile(db, brand_raw_id, values)
+
+    logger.info(
+        "Sponsorship activity: brand_raw_id=%d score=%.1f (yt=%d/25 ig=%d/25 meta=%d/15)",
+        brand_raw_id, score, yt_pts, ig_pts, meta_pts,
     )
     return values
 
@@ -348,9 +413,9 @@ def compute_brand_embedding(db: Session, brand_raw_id: int) -> dict | None:
 
 def run_brand_signals(db: Session, limit: int = 500, brand_id: int | None = None) -> int:
     """
-    Compute creator-tier-fit, audience-demographics, platform-presence, and
-    embedding signals for brands that have been scored (initial_brand_score)
-    with total_score >= 50.
+    Compute creator-tier-fit, audience-demographics, platform-presence,
+    sponsorship-activity, and embedding signals for brands that have been
+    scored (initial_brand_score) with total_score >= 50.
 
     NOTE: does not yet gate on Apollo contact discovery — that pipeline
     doesn't exist yet. Runs directly off the score, the same brand set the
@@ -380,8 +445,11 @@ def run_brand_signals(db: Session, limit: int = 500, brand_id: int | None = None
         compute_creator_tier_profile(db, bid)
         compute_audience_demographics(db, bid)
         compute_platform_presence(db, bid)
-        # embedding runs last — its prose pulls from the three signals above
+        compute_sponsorship_activity(db, bid)
+        # embedding runs last — its prose pulls from the signals above,
+        # including sponsorship_activity_score's "highly active"/etc. phrase
         compute_brand_embedding(db, bid)
 
     logger.info("Brand signals: %d brands processed", len(brand_ids))
     return len(brand_ids)
+    
