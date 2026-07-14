@@ -23,6 +23,7 @@ from pipeline.helpers.prompts import (
     SPONSOR_CHECK_PROMPT_NAME, SPONSOR_CHECK_DEFAULT_PROMPT,
     APOLLO_RANK_PROMPT_NAME, APOLLO_RANK_DEFAULT_PROMPT,
     TAGS_PROMPT_NAME, TAGS_DEFAULT_PROMPT,
+    BRAND_NICHE_TAGS_PROMPT_NAME, BRAND_NICHE_TAGS_DEFAULT_PROMPT,
 )
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.enrichment.orchestrator import run_signal_enrichment
@@ -200,6 +201,10 @@ def _run_migrations() -> None:
         SELECT id, niche FROM brands_raw
         ON CONFLICT (brand_raw_id, niche) DO NOTHING
         """,
+        # brands_niches: description mirrored from shopify_detect.py's scraped
+        # brands_raw.description, plus Mistral-extracted sub-niche tags.
+        "ALTER TABLE brands_niches ADD COLUMN IF NOT EXISTS description TEXT",
+        "ALTER TABLE brands_niches ADD COLUMN IF NOT EXISTS tags JSONB",
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -240,6 +245,7 @@ def _run_migrations() -> None:
             (GENDER_PROMPT_NAME,        GENDER_DEFAULT_PROMPT),
             (SPONSOR_CHECK_PROMPT_NAME, SPONSOR_CHECK_DEFAULT_PROMPT),
             (APOLLO_RANK_PROMPT_NAME,   APOLLO_RANK_DEFAULT_PROMPT),
+            (BRAND_NICHE_TAGS_PROMPT_NAME, BRAND_NICHE_TAGS_DEFAULT_PROMPT),
         ]:
             if not db.query(Prompt).filter(Prompt.name == name).first():
                 db.add(Prompt(name=name, content=content))
@@ -367,10 +373,10 @@ class BrandNicheAdmin(ModelView, model=BrandNiche):
     name         = "Brand Niche"
     name_plural  = "Brand Niches"
     icon         = "fa-solid fa-tags"
-    column_list  = [BrandNiche.id, BrandNiche.brand_raw, BrandNiche.niche]
+    column_list  = [BrandNiche.id, BrandNiche.brand_raw, BrandNiche.niche, BrandNiche.description, BrandNiche.tags]
     column_labels = {BrandNiche.brand_raw: "Brand"}
-    column_searchable_list = [BrandNiche.niche]
-    column_sortable_list   = [BrandNiche.id, BrandNiche.niche]
+    column_searchable_list = [BrandNiche.niche, BrandNiche.description]
+    column_sortable_list   = [BrandNiche.id, BrandNiche.niche, BrandNiche.description, BrandNiche.tags]
     page_size = 15
 
 
@@ -973,11 +979,6 @@ def matches_page():
     return FileResponse("frontend/matches.html")
 
 
-@app.get("/prompts", include_in_schema=False)
-def prompts_page():
-    return FileResponse("frontend/prompts.html")
-
-
 class SeedJobResponse(BaseModel):
     job_id:  str
     status:  str
@@ -1130,70 +1131,6 @@ def score_brands_status(job_id: str):
         error=job.get("error"),
     )
 
-
-
-# 
-# Prompt endpoints
-# 
-
-class PromptResponse(BaseModel):
-    name:       str
-    content:    str
-    updated_at: str | None = None
-
-
-class PromptUpdateRequest(BaseModel):
-    content: str
-
-
-@app.get("/prompts/{name}", response_model=PromptResponse)
-def get_prompt(name: str):
-    """Return a prompt by name. Returns the hardcoded default if not found in DB."""
-    db = SessionLocal()
-    try:
-        row = db.query(Prompt).filter(Prompt.name == name).first()
-        if row:
-            return PromptResponse(
-                name=row.name,
-                content=row.content,
-                updated_at=str(row.updated_at) if row.updated_at else None,
-            )
-        _defaults = {
-            FULL_PROMPT_NAME:           FULL_DEFAULT_PROMPT,
-            COAUTHOR_PROMPT_NAME:       COAUTHOR_DEFAULT_PROMPT,
-            DEMOGRAPHICS_PROMPT_NAME:   DEMOGRAPHICS_DEFAULT_PROMPT,
-            GENDER_PROMPT_NAME:         GENDER_DEFAULT_PROMPT,
-            SPONSOR_CHECK_PROMPT_NAME:  SPONSOR_CHECK_DEFAULT_PROMPT,
-            APOLLO_RANK_PROMPT_NAME:    APOLLO_RANK_DEFAULT_PROMPT,
-            TAGS_PROMPT_NAME:           TAGS_DEFAULT_PROMPT,
-        }
-        if name in _defaults:
-            return PromptResponse(name=name, content=_defaults[name])
-        raise HTTPException(status_code=404, detail=f"Prompt '{name}' not found")
-    finally:
-        db.close()
-
-
-@app.put("/prompts/{name}", response_model=PromptResponse)
-def update_prompt(name: str, body: PromptUpdateRequest):
-    """Create or update a prompt by name."""
-    db = SessionLocal()
-    try:
-        row = db.query(Prompt).filter(Prompt.name == name).first()
-        if row:
-            row.content = body.content
-        else:
-            row = Prompt(name=name, content=body.content)
-            db.add(row)
-        db.commit()
-        db.refresh(row)
-        return PromptResponse(
-            name=row.name,
-            content=row.content,
-            updated_at=str(row.updated_at) if row.updated_at else None,
-        )
-    finally:
-        db.close()
 
 
 # ---------------------------------------------------------------------------

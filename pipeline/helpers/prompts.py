@@ -9,8 +9,8 @@ row exists yet (e.g. a brand-new database before the first migration seeds
 it, or a Prompt row that got deleted). Editing these constants does NOT
 change any prompt already saved in the database — that's the whole point
 of storing them there instead of hardcoding: they're meant to be
-customized live via PUT /prompts/{name} (or the /prompts frontend page)
-without needing a code change or deploy.
+customized live via the admin view (/admin/prompt) without needing a code
+change or deploy.
 
 Prompt name -> which enrichment module actually calls it:
   instagram_post_full_check     — pipeline/enrichment/instagram_posts.py (full LLM mode)
@@ -20,6 +20,7 @@ Prompt name -> which enrichment module actually calls it:
   youtube_sponsor_check         — pipeline/enrichment/youtube_sponsorship.py
   apollo_contact_check          — pipeline/enrichment/apollo_contacts.py
   creator_content_tags          — pipeline/enrichment/creator_signals.py
+  brand_niche_tags              — pipeline/enrichment/shopify_detect.py
 """
 
 #  instagram_posts.py
@@ -174,4 +175,22 @@ Extract two things from this:
 Reply ONLY with this JSON object, no extra text:
 {"content_tags": ["...", "..."], "audience_value_keywords": ["...", "..."]}
 Use empty lists if there isn't enough information to extract either one — do not invent tags not supported by the input.\
+"""
+
+
+#  shopify_detect.py
+
+BRAND_NICHE_TAGS_PROMPT_NAME = "brand_niche_tags"
+BRAND_NICHE_TAGS_DEFAULT_PROMPT = """\
+You are analyzing a brand's own website description to extract specific sub-niche/category tags for a brand-creator sponsorship matching platform.
+
+Brand: {brand_name}
+Niche: {niche}
+Website description: {description}
+
+Extract specific, concrete sub-niche tags/keywords that describe what this brand actually does or sells, beyond its broad niche category (e.g. for a "fashion" brand: "sustainable clothing", "streetwear", "plus-size fashion"; for a "tech" brand: "smart home devices", "gaming laptops", "wireless earbuds").
+
+Reply ONLY with this JSON object, no extra text:
+{"tags": ["...", "..."]}
+Use an empty list if the description doesn't give enough information — do not invent tags not supported by the input.\
 """

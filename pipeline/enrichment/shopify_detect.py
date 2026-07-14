@@ -7,6 +7,10 @@ Fetches each brand's homepage to:
   3. Extract full social media profile URLs → instagram_handle, twitter_handle,
      facebook_page, youtube_channel_id, tiktok_handle, linkedin_id
   4. Scrape the brand's about page → description
+  5. Mirror that description into brands_niches.description (every niche row
+     for the brand — today that's just 1 row per brand, see BrandNiche) and
+     send it to Mistral to extract concrete sub-niche/category tags, stored
+     in brands_niches.tags. Skipped if MISTRAL_API_KEY isn't set.
 
 Social and description fields are only written if the column is currently NULL
 so they don't overwrite more-authoritative Wikidata data fetched earlier.
@@ -24,7 +28,10 @@ import httpx
 from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
-from pipeline.db import BrandRaw
+from config import MISTRAL_API_KEY
+from pipeline.db import BrandNiche, BrandRaw, Prompt
+from pipeline.helpers.llm import call_mistral_json, fill_template
+from pipeline.helpers.prompts import BRAND_NICHE_TAGS_PROMPT_NAME, BRAND_NICHE_TAGS_DEFAULT_PROMPT
 from pipeline.helpers.social import normalize_social_url
 
 logger = logging.getLogger(__name__)
@@ -208,6 +215,45 @@ def _fetch_about_text(website: str) -> str | None:
     return None
 
 
+def _get_brand_niche_tags_prompt(db: Session) -> str:
+    row = db.query(Prompt).filter(Prompt.name == BRAND_NICHE_TAGS_PROMPT_NAME).first()
+    return row.content if row else BRAND_NICHE_TAGS_DEFAULT_PROMPT
+
+
+def _extract_brand_niche_tags(db: Session, brand: BrandRaw, description: str) -> list[str]:
+    """
+    Ask Mistral for concrete sub-niche/category tags from a brand's scraped
+    description. Returns [] on any failure or if MISTRAL_API_KEY isn't set —
+    never raises, so a tag-extraction problem never blocks the rest of
+    enrich_shopify's per-brand processing.
+    """
+    if not MISTRAL_API_KEY:
+        return []
+    prompt = fill_template(
+        _get_brand_niche_tags_prompt(db),
+        brand_name=brand.name,
+        niche=brand.niche or "unknown",
+        description=description,
+    )
+    result = call_mistral_json(prompt, context=f"brand niche tags for {brand.name}")
+    tags = result.get("tags") if isinstance(result, dict) else None
+    return [t for t in tags if isinstance(t, str) and t.strip()] if isinstance(tags, list) else []
+
+
+def _update_brand_niche_description_and_tags(db: Session, brand: BrandRaw, description: str) -> None:
+    """
+    Mirrors `description` into every brands_niches row for this brand and
+    stores Mistral-extracted sub-niche tags alongside it. Rows already exist
+    by the time this runs (insert_brand/insert_brands_batch create them at
+    seed time) — this only ever UPDATEs, never inserts.
+    """
+    tags = _extract_brand_niche_tags(db, brand, description)
+    db.query(BrandNiche).filter(BrandNiche.brand_raw_id == brand.id).update(
+        {"description": description, "tags": tags or None},
+        synchronize_session=False,
+    )
+
+
 def enrich_shopify(db: Session, limit: int = 300) -> int:
     """
     Fetch homepage for each brand with a website URL and shopify_checked=False.
@@ -266,6 +312,7 @@ def enrich_shopify(db: Session, limit: int = 300) -> int:
                 brand.description = about_text
                 about_count += 1
                 logger.debug("  %s.description set (%d chars)", brand.name, len(about_text))
+                _update_brand_niche_description_and_tags(db, brand, about_text)
 
         updated += 1
         db.commit()

@@ -99,6 +99,16 @@ class BrandNiche(Base):
     brand_raw_id = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
     niche        = Column(Text, nullable=False, index=True)
 
+    # Mirrored from brands_raw.description whenever shopify_detect.py scrapes
+    # one (see that module) — kept here too so niche-tag extraction has a
+    # source text without needing to join back to brands_raw.
+    description  = Column(Text)
+    # LLM-extracted sub-niche/category tags derived from `description` via
+    # Mistral — e.g. ["sustainable clothing", "streetwear"] for a brand
+    # whose niche is just "fashion". NULL until shopify_detect.py finds a
+    # description to extract from.
+    tags         = Column(JSONB)
+
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
 
     def __str__(self) -> str:
