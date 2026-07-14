@@ -281,6 +281,41 @@
       </div>
 
       <div class="card">
+        <h2>Platform Stats</h2>
+        <p class="subtitle" style="margin-bottom:.75rem;">Followers/following per platform, if you're active on more than one.</p>
+        <div class="grid">
+          <div class="field">
+            <label for="instagram_followers">Instagram followers</label>
+            <input id="instagram_followers" name="instagram_followers" type="number" min="0" placeholder="0" />
+          </div>
+          <div class="field">
+            <label for="instagram_following">Instagram following</label>
+            <input id="instagram_following" name="instagram_following" type="number" min="0" placeholder="0" />
+          </div>
+          <div class="field">
+            <label for="tiktok_followers">TikTok followers</label>
+            <input id="tiktok_followers" name="tiktok_followers" type="number" min="0" placeholder="0" />
+          </div>
+          <div class="field">
+            <label for="tiktok_following">TikTok following</label>
+            <input id="tiktok_following" name="tiktok_following" type="number" min="0" placeholder="0" />
+          </div>
+          <div class="field">
+            <label for="youtube_followers">YouTube subscribers</label>
+            <input id="youtube_followers" name="youtube_followers" type="number" min="0" placeholder="0" />
+          </div>
+          <div class="field">
+            <label for="facebook_followers">Facebook followers</label>
+            <input id="facebook_followers" name="facebook_followers" type="number" min="0" placeholder="0" />
+          </div>
+          <div class="field">
+            <label for="facebook_following">Facebook following</label>
+            <input id="facebook_following" name="facebook_following" type="number" min="0" placeholder="0" />
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
         <h2>Audience Demographics</h2>
         <p class="subtitle" style="margin-bottom:.75rem;">Pull these numbers from your platform's own analytics/insights dashboard.</p>
         <div class="grid">
@@ -431,6 +466,13 @@
       facebook_page:    form.elements['facebook_page'].value || null,
       substack_url:     form.elements['substack_url'].value || null,
       substack_subscribers: numOrNull(form.elements['substack_subscribers'].value),
+      instagram_followers: numOrNull(form.elements['instagram_followers'].value),
+      instagram_following: numOrNull(form.elements['instagram_following'].value),
+      tiktok_followers:    numOrNull(form.elements['tiktok_followers'].value),
+      tiktok_following:    numOrNull(form.elements['tiktok_following'].value),
+      youtube_followers:   numOrNull(form.elements['youtube_followers'].value),
+      facebook_followers:  numOrNull(form.elements['facebook_followers'].value),
+      facebook_following:  numOrNull(form.elements['facebook_following'].value),
       primary_platform: form.elements['primary_platform'].value || null,
       follower_count:   numOrNull(form.elements['follower_count'].value),
       audience_gender_male_pct:   genderMale === null ? null : genderMale / 100,

@@ -498,10 +498,13 @@ class CreatorProfile(Base):
     substack_url      = Column(Text)
 
     #  Platform stats
-    instagram_stats = Column(JSONB)
-    tiktok_stats     = Column(JSONB)
-    youtube_stats    = Column(JSONB)
-    facebook_stats   = Column(JSONB)
+    instagram_followers = Column(Integer)
+    instagram_following = Column(Integer)
+    tiktok_followers     = Column(Integer)
+    tiktok_following      = Column(Integer)
+    youtube_followers    = Column(Integer)
+    facebook_followers   = Column(Integer)
+    facebook_following    = Column(Integer)
     substack_subscribers = Column(Integer)
 
     primary_platform = Column(Text)

@@ -10,8 +10,7 @@ Runs on every page load; designed to be cheap:
            drops brands whose niche is in the creator's excluded_categories.
 
            Instagram-specific filters, all gated on primary_platform ==
-           "instagram" (not applied for any other primary_platform, and no
-           equivalent exists for YouTube or other platforms):
+           "instagram" (not applied for any other primary_platform):
              - brand must not be CONFIRMED absent from Instagram
                (has_instagram is False; NULL/unchecked is kept)
              - brand must have CONFIRMED collaborator history on Instagram
@@ -23,6 +22,15 @@ Runs on every page load; designed to be cheap:
                range, extended by _FOLLOWER_TOLERANCE on each side (that
                range is already a min/max over every confirmed collaborator
                for the brand, however many there are)
+
+           YouTube-specific filter, gated on primary_platform == "youtube":
+             - if the creator gave youtube_followers (their subscriber
+               count), it must fall within the brand's confirmed
+               youtube_lowest/youtube_highest collaborator range, extended
+               by _FOLLOWER_TOLERANCE on each side — same shape as the
+               Instagram follower-range check above, just no equivalent of
+               the has_instagram/insta_lowest presence checks was asked for
+               on the YouTube side.
 
            Creators must also share at least one EXACT (case-insensitive)
            niche string with the brand — separate from and stricter than
@@ -100,8 +108,7 @@ def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) 
             for niche in excluded:
                 query = query.filter(~BrandRaw.niche.ilike(f"%{niche}%"))
 
-    # Instagram-specific hard filters, gated on primary_platform == "instagram"
-    # only — no equivalent applies for YouTube or any other primary_platform.
+    # Instagram-specific hard filters, gated on primary_platform == "instagram".
     if creator.primary_platform and creator.primary_platform.strip().lower() == "instagram":
         query = query.filter(or_(BrandProfile.has_instagram.is_(None), BrandProfile.has_instagram.is_(True)))
         query = query.filter(BrandProfile.insta_lowest.isnot(None), BrandProfile.insta_highest.isnot(None))
@@ -109,6 +116,17 @@ def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) 
             query = query.filter(
                 creator.follower_count >= BrandProfile.insta_lowest * (1 - _FOLLOWER_TOLERANCE),
                 creator.follower_count <= BrandProfile.insta_highest * (1 + _FOLLOWER_TOLERANCE),
+            )
+
+    # YouTube follower-range fit, gated on primary_platform == "youtube" —
+    # same shape as the Instagram check above, against youtube_lowest/
+    # youtube_highest (already a min/max over every confirmed collaborator).
+    if creator.primary_platform and creator.primary_platform.strip().lower() == "youtube":
+        if creator.youtube_followers is not None:
+            query = query.filter(
+                BrandProfile.youtube_lowest.isnot(None), BrandProfile.youtube_highest.isnot(None),
+                creator.youtube_followers >= BrandProfile.youtube_lowest * (1 - _FOLLOWER_TOLERANCE),
+                creator.youtube_followers <= BrandProfile.youtube_highest * (1 + _FOLLOWER_TOLERANCE),
             )
 
     # Creator must share at least one EXACT niche with the brand — a hard

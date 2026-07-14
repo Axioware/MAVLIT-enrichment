@@ -205,6 +205,20 @@ def _run_migrations() -> None:
         # brands_raw.description, plus Mistral-extracted sub-niche tags.
         "ALTER TABLE brands_niches ADD COLUMN IF NOT EXISTS description TEXT",
         "ALTER TABLE brands_niches ADD COLUMN IF NOT EXISTS tags JSONB",
+        # creator_profiles: per-platform follower/following counts as plain
+        # integers, replacing the old JSONB *_stats columns (never had
+        # real data — nothing to migrate).
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS instagram_stats",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS tiktok_stats",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS youtube_stats",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS facebook_stats",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_followers INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_following INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS tiktok_followers INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS tiktok_following INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_followers INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS facebook_followers INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS facebook_following INTEGER",
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -1156,6 +1170,14 @@ class CreatorProfileRequest(BaseModel):
     substack_url:      str | None = None
     substack_subscribers: int | None = None
 
+    instagram_followers: int | None = None
+    instagram_following: int | None = None
+    tiktok_followers:    int | None = None
+    tiktok_following:    int | None = None
+    youtube_followers:   int | None = None
+    facebook_followers:  int | None = None
+    facebook_following:  int | None = None
+
     primary_platform: str | None = None
     follower_count:   int | None = None
 
@@ -1189,6 +1211,14 @@ class CreatorProfileResponse(BaseModel):
     facebook_page:     str | None = None
     substack_url:      str | None = None
     substack_subscribers: int | None = None
+
+    instagram_followers: int | None = None
+    instagram_following: int | None = None
+    tiktok_followers:    int | None = None
+    tiktok_following:    int | None = None
+    youtube_followers:   int | None = None
+    facebook_followers:  int | None = None
+    facebook_following:  int | None = None
 
     primary_platform: str | None = None
     follower_count:   int | None = None
@@ -1226,6 +1256,13 @@ def _profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         facebook_page=row.facebook_page,
         substack_url=row.substack_url,
         substack_subscribers=row.substack_subscribers,
+        instagram_followers=row.instagram_followers,
+        instagram_following=row.instagram_following,
+        tiktok_followers=row.tiktok_followers,
+        tiktok_following=row.tiktok_following,
+        youtube_followers=row.youtube_followers,
+        facebook_followers=row.facebook_followers,
+        facebook_following=row.facebook_following,
         primary_platform=row.primary_platform,
         follower_count=row.follower_count,
         audience_gender_male_pct=row.audience_gender_male_pct,
