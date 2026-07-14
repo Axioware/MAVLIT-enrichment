@@ -6,10 +6,28 @@ Runs on every page load; designed to be cheap:
 
   Step A — Hard filters: drop brands with essentially zero sponsorship
            activity (a low floor, not a strict cutoff — unscored brands
-           are kept, only confirmed-zero-activity ones are dropped) and,
-           if the creator has a primary_platform set, brands confirmed
-           absent from it. Also drops brands whose niche is in the
-           creator's excluded_categories.
+           are kept, only confirmed-zero-activity ones are dropped). Also
+           drops brands whose niche is in the creator's excluded_categories.
+
+           Instagram-specific filters, all gated on primary_platform ==
+           "instagram" (not applied for any other primary_platform, and no
+           equivalent exists for YouTube or other platforms):
+             - brand must not be CONFIRMED absent from Instagram
+               (has_instagram is False; NULL/unchecked is kept)
+             - brand must have CONFIRMED collaborator history on Instagram
+               (insta_lowest/insta_highest not null, from brand_signals.py's
+               tag/mention/co-author collaborator pull) — unmeasured brands
+               are dropped here, not just confirmed-absent ones
+             - if the creator also gave a follower_count, it must fall
+               within the brand's confirmed insta_lowest/insta_highest
+               range, extended by _FOLLOWER_TOLERANCE on each side (that
+               range is already a min/max over every confirmed collaborator
+               for the brand, however many there are)
+
+           Creators must also share at least one EXACT (case-insensitive)
+           niche string with the brand — separate from and stricter than
+           the fuzzy niche_match scoring dimension in Step C, which still
+           runs on whatever niche overlap exists for ranking purposes.
   Step B — Semantic shortlist: a single indexed pgvector cosine-distance
            query against the creator's embedding narrows the (already
            hard-filtered) pool to the top _SHORTLIST_SIZE candidates —
@@ -30,7 +48,7 @@ cheap enough for a real-time page load regardless.
 
 import logging
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from pipeline.db import BrandProfile, BrandRaw, CreatorProfile
@@ -41,14 +59,7 @@ logger = logging.getLogger(__name__)
 
 _SHORTLIST_SIZE = 100
 _ACTIVITY_FLOOR = 0   # brands with a CONFIRMED score at or below this are dropped; unscored (NULL) brands are kept
-
-_PLATFORM_FLAG_ATTR = {
-    "instagram": BrandProfile.has_instagram,
-    "youtube":   BrandProfile.has_youtube,
-    "facebook":  BrandProfile.has_facebook,
-    "tiktok":    BrandProfile.has_tiktok,
-    "twitter":   BrandProfile.has_twitter,
-}
+_FOLLOWER_TOLERANCE = 0.30   # +/-30% buffer beyond the brand's confirmed collaborator follower range
 
 
 def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) -> list[dict]:
@@ -83,15 +94,30 @@ def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) 
     query = query.filter(
         or_(BrandProfile.sponsorship_activity_score.is_(None), BrandProfile.sponsorship_activity_score > _ACTIVITY_FLOOR)
     )
-    if creator.primary_platform:
-        flag_col = _PLATFORM_FLAG_ATTR.get(creator.primary_platform.strip().lower())
-        if flag_col is not None:
-            query = query.filter(or_(flag_col.is_(None), flag_col.is_(True)))
     if creator.excluded_categories:
         excluded = [c.strip().lower() for c in creator.excluded_categories if c]
         if excluded:
             for niche in excluded:
                 query = query.filter(~BrandRaw.niche.ilike(f"%{niche}%"))
+
+    # Instagram-specific hard filters, gated on primary_platform == "instagram"
+    # only — no equivalent applies for YouTube or any other primary_platform.
+    if creator.primary_platform and creator.primary_platform.strip().lower() == "instagram":
+        query = query.filter(or_(BrandProfile.has_instagram.is_(None), BrandProfile.has_instagram.is_(True)))
+        query = query.filter(BrandProfile.insta_lowest.isnot(None), BrandProfile.insta_highest.isnot(None))
+        if creator.follower_count is not None:
+            query = query.filter(
+                creator.follower_count >= BrandProfile.insta_lowest * (1 - _FOLLOWER_TOLERANCE),
+                creator.follower_count <= BrandProfile.insta_highest * (1 + _FOLLOWER_TOLERANCE),
+            )
+
+    # Creator must share at least one EXACT niche with the brand — a hard
+    # yes/no check, separate from niche_compatibility()'s fuzzy score used
+    # for ranking in Step C.
+    if creator.content_niche:
+        creator_niches = [n.strip() for n in creator.content_niche.split(",") if n.strip()]
+        if creator_niches:
+            query = query.filter(or_(*[func.lower(BrandRaw.niche) == n.lower() for n in creator_niches]))
 
     # Step B — semantic shortlist (single indexed pgvector query)
     query = query.order_by(distance_expr).limit(_SHORTLIST_SIZE)
