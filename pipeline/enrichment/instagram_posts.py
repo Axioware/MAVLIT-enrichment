@@ -29,6 +29,7 @@ import json
 import logging
 import time
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, ENABLE_INSTA_LLM, MISTRAL_API_KEY
@@ -188,6 +189,7 @@ def enrich_instagram_posts(
     limit: int = 50,
     posts_newer_than: str = _POSTS_NEWER,
     brand_id: int | None = None,
+    niche: str | None = None,
 ) -> int:
     """
     For each brand with instagram_handle set and instagram_checked=False:
@@ -200,6 +202,11 @@ def enrich_instagram_posts(
     instagram_checked filter (so you can re-run/test a brand that was already
     processed), but instagram_handle must still be set.
 
+    Pass niche to scope the run to brands.niche matching that value exactly
+    (case-insensitive) — brands_raw.niche is stored verbatim as typed at
+    seed time (see pipeline/seed.py), so this must match that same string.
+    Ignored if brand_id is also given.
+
     Returns number of brands processed.
     """
     if not APIFY_TOKEN:
@@ -211,6 +218,8 @@ def enrich_instagram_posts(
         query = query.filter(BrandRaw.id == brand_id)
     else:
         query = query.filter(BrandRaw.instagram_checked == False)
+        if niche:
+            query = query.filter(func.lower(BrandRaw.niche) == niche.strip().lower())
 
     brands: list[BrandRaw] = query.limit(limit).all()
 
