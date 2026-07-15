@@ -56,12 +56,20 @@ def run_seed(
     headquarters: str | None = None,
     location: str | None = None,
     operating_area: str | None = None,
+    niche_label: str | None = None,
 ) -> int:
     """
     Seed brands_raw for any niche keyword.
     Optional geo filters narrow both the Wikidata SPARQL query and the
     Wikipedia category search to a specific geography.
+
+    `niche` still drives every search query (Wikipedia category, Wikidata
+    SPARQL, Google SERP) exactly as typed. Pass niche_label to store a
+    DIFFERENT value in brands_raw.niche for every row this run inserts —
+    e.g. search for "k-pop groups" but file every result under the fixed
+    label "Music". Falls back to `niche` itself when not given.
     """
+    stored_niche = niche_label or niche
     geo_active = {
         k: v for k, v in {
             "country":        country,
@@ -87,7 +95,7 @@ def run_seed(
         """Build a seed row, merging geo context and entity metadata."""
         return {
             "name":             name,
-            "niche":            niche,
+            "niche":            stored_niche,
             "source":           source,
             "source_url":       source_url,
             "source_confidence": SOURCE_CONFIDENCE.get(source, 50),
@@ -228,5 +236,5 @@ def run_seed(
         deduped_rows = deduped_rows[:limit]
 
     inserted = insert_brands_batch(db, deduped_rows)
-    logger.info("Inserted %d new rows for niche '%s'", inserted, niche)
+    logger.info("Inserted %d new rows for niche '%s' (stored as '%s')", inserted, niche, stored_niche)
     return inserted
