@@ -26,6 +26,7 @@ from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from config import MISTRAL_API_KEY
@@ -254,21 +255,24 @@ def _update_brand_niche_description_and_tags(db: Session, brand: BrandRaw, descr
     )
 
 
-def enrich_shopify(db: Session, limit: int = 300) -> int:
+def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None) -> int:
     """
     Fetch homepage for each brand with a website URL and shopify_checked=False.
     Sets is_shopify / is_woocommerce and fills any NULL social URL columns from
     links found on the page. Returns number of rows updated.
+
+    Pass niche to scope the run to brands.niche matching that value exactly
+    (case-insensitive) — brands_raw.niche is stored verbatim as typed at
+    seed time (see pipeline/seed.py), so this must match that same string.
     """
-    brands: list[BrandRaw] = (
-        db.query(BrandRaw)
-        .filter(
-            BrandRaw.website.isnot(None),
-            BrandRaw.shopify_checked == False,
-        )
-        .limit(limit)
-        .all()
+    query = db.query(BrandRaw).filter(
+        BrandRaw.website.isnot(None),
+        BrandRaw.shopify_checked == False,
     )
+    if niche:
+        query = query.filter(func.lower(BrandRaw.niche) == niche.strip().lower())
+
+    brands: list[BrandRaw] = query.limit(limit).all()
 
     if not brands:
         logger.info("Shopify/socials check: no pending brands")
