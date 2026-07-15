@@ -906,6 +906,7 @@ class SeedRequest(BaseModel):
     headquarters:   str | None  = None
     location:       str | None  = None
     operating_area: str | None  = None
+    niche_label:    str | None  = None
 
 
 class EnrichRequest(BaseModel):
@@ -933,6 +934,7 @@ def _run_seed_job(job_id: str, body: SeedRequest) -> None:
             headquarters=body.headquarters,
             location=body.location,
             operating_area=body.operating_area,
+            niche_label=body.niche_label,
         )
         _jobs[job_id].update({"status": "done", "inserted": inserted})
     except Exception as exc:

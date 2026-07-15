@@ -386,6 +386,17 @@
       autocomplete="off"
     />
 
+    <label for="nicheLabel" style="margin-top:.85rem;">
+      Store as niche
+      <span style="color:#475569;text-transform:none;font-size:.7rem;margin-left:.25rem">(optional — overrides brands_raw.niche for every brand this run inserts)</span>
+    </label>
+    <select id="nicheLabel">
+      <option value="">— use the niche typed above —</option>
+      <option value="Music">Music</option>
+      <option value="Beauty">Beauty</option>
+      <option value="Health & Wellness">Health &amp; Wellness</option>
+    </select>
+
     <div class="toggle-row" style="margin-top:1.25rem">
       <label class="switch">
         <input type="checkbox" id="useGoogle" />
@@ -584,6 +595,7 @@
     const headquarters  = document.getElementById('headquarters').value.trim() || null;
     const location      = document.getElementById('location').value.trim() || null;
     const operatingArea = document.getElementById('operatingArea').value || null;
+    const nicheLabel    = document.getElementById('nicheLabel').value || null;
 
     document.getElementById('seedBtn').disabled = true;
 
@@ -597,6 +609,7 @@
         headquarters,
         location,
         operating_area: operatingArea,
+        niche_label: nicheLabel,
       }),
     })
       .then(r => r.json())
