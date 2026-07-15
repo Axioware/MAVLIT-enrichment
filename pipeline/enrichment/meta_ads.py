@@ -24,6 +24,7 @@ import time
 from urllib.parse import urlparse
 
 import httpx
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from config import META_ACCESS_TOKEN
@@ -201,7 +202,7 @@ def _insert_ads(db: Session, brand_raw_id: int, ads: list[dict]) -> int:
     return upsert_rows(db, MetaAd, rows, ["ad_archive_id"])
 
 
-def enrich_meta_ads(db: Session, limit: int = 200) -> int:
+def enrich_meta_ads(db: Session, limit: int = 200, niche: str | None = None) -> int:
     """
     For each brand with facebook_page or facebook_page_id set and meta_ads_fetched=False:
       1. Resolve the numeric facebook_page_id from the facebook_page URL via Graph API
@@ -213,24 +214,27 @@ def enrich_meta_ads(db: Session, limit: int = 200) -> int:
     Brands where BOTH facebook_page and facebook_page_id are NULL are never
     selected and meta_ads_fetched is left as-is for them.
 
+    Pass niche to scope the run to brands.niche matching that value exactly
+    (case-insensitive) — brands_raw.niche is stored verbatim as typed at
+    seed time (see pipeline/seed.py), so this must match that same string.
+
     Returns number of brand rows processed.
     """
     if not META_ACCESS_TOKEN:
         logger.warning("META_ACCESS_TOKEN not set — skipping Meta Ads enrichment")
         return 0
 
-    brands: list[BrandRaw] = (
-        db.query(BrandRaw)
-        .filter(
-            BrandRaw.meta_ads_fetched == False,
-            (
-                BrandRaw.facebook_page.isnot(None) |
-                BrandRaw.facebook_page_id.isnot(None)
-            ),
-        )
-        .limit(limit)
-        .all()
+    query = db.query(BrandRaw).filter(
+        BrandRaw.meta_ads_fetched == False,
+        (
+            BrandRaw.facebook_page.isnot(None) |
+            BrandRaw.facebook_page_id.isnot(None)
+        ),
     )
+    if niche:
+        query = query.filter(func.lower(BrandRaw.niche) == niche.strip().lower())
+
+    brands: list[BrandRaw] = query.limit(limit).all()
 
     if not brands:
         logger.info("Meta Ads: no pending brands with facebook info")
