@@ -37,6 +37,7 @@ import re
 import time
 
 import httpx
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, MISTRAL_API_KEY, ENABLE_LLM
@@ -480,7 +481,9 @@ def _build_queries(brand_name: str) -> list[tuple[str, str]]:
     return high + medium + low
 
 
-def enrich_youtube_sponsorships(db: Session, limit: int = 50, brand_id: int | None = None) -> int:
+def enrich_youtube_sponsorships(
+    db: Session, limit: int = 50, brand_id: int | None = None, niche: str | None = None
+) -> int:
     """
     For each brand with youtube_checked=False:
       1. Run 14 tier-based YouTube searches (brand name embedded in every query)
@@ -495,6 +498,11 @@ def enrich_youtube_sponsorships(db: Session, limit: int = 50, brand_id: int | No
     youtube_checked filter (so you can re-run/test a brand that was already
     processed).
 
+    Pass niche to scope the run to brands.niche matching that value exactly
+    (case-insensitive) — brands_raw.niche is stored verbatim as typed at
+    seed time (see pipeline/seed.py), so this must match that same string.
+    Ignored if brand_id is also given.
+
     Returns number of brands processed.
     """
     if not YOUTUBE_API_KEY:
@@ -506,6 +514,8 @@ def enrich_youtube_sponsorships(db: Session, limit: int = 50, brand_id: int | No
         query = query.filter(BrandRaw.id == brand_id)
     else:
         query = query.filter(BrandRaw.youtube_checked == False)
+        if niche:
+            query = query.filter(func.lower(BrandRaw.niche) == niche.strip().lower())
 
     brands: list[BrandRaw] = query.limit(limit).all()
 
