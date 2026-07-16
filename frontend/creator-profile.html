@@ -125,17 +125,47 @@
     .status-msg.ok { color: #4ade80; }
     .status-msg.err { color: #f87171; }
 
-    select[multiple] {
-      height: auto;
+    .msel { position: relative; }
+    .msel-toggle {
+      width: 100%;
+      text-align: left;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: .6rem .75rem;
+      color: #e2e8f0;
+      font-size: .9rem;
+      font-family: inherit;
+      cursor: pointer;
     }
-    select[multiple] option {
-      padding: .4rem .6rem;
-      border-radius: 4px;
+    .msel-toggle:focus { outline: none; border-color: #38bdf8; }
+    .msel-toggle .placeholder { color: #475569; }
+    .msel-panel {
+      display: none;
+      position: absolute;
+      z-index: 10;
+      top: calc(100% + .3rem);
+      left: 0;
+      right: 0;
+      max-height: 220px;
+      overflow-y: auto;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: .35rem;
     }
-    select[multiple] option:checked {
-      background: #0284c7;
-      color: #fff;
+    .msel-panel.open { display: block; }
+    .msel-option {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      padding: .45rem .5rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: .88rem;
     }
+    .msel-option:hover { background: #334155; }
+    .msel-option input { cursor: pointer; }
     .niche-hint {
       font-size: .78rem;
       color: #64748b;
@@ -206,14 +236,24 @@
         <h2>Content & Niche</h2>
         <div class="grid">
           <div class="field full">
-            <label for="content_niche_list">Primary niche *</label>
-            <select id="content_niche_list" multiple size="6"></select>
-            <p class="niche-hint">Ctrl/Cmd-click (or Shift-click) to select one or more — these are the same niches brands are matched on.</p>
+            <label>Primary niche *</label>
+            <div class="msel">
+              <button type="button" class="msel-toggle" data-panel="content_niche_list" onclick="toggleMsel('content_niche_list')">
+                <span class="placeholder">Select niche(s)…</span>
+              </button>
+              <div class="msel-panel" id="content_niche_list"></div>
+            </div>
+            <p class="niche-hint">Click to select one or more — these are the same niches brands are matched on.</p>
           </div>
           <div class="field full">
-            <label for="sub_niches_list">Sub-niches</label>
-            <select id="sub_niches_list" multiple size="6"></select>
-            <p class="niche-hint">Ctrl/Cmd-click (or Shift-click) to select one or more — same list as Primary niche above.</p>
+            <label>Sub-niches</label>
+            <div class="msel">
+              <button type="button" class="msel-toggle" data-panel="sub_niches_list" onclick="toggleMsel('sub_niches_list')">
+                <span class="placeholder">Select niche(s)…</span>
+              </button>
+              <div class="msel-panel" id="sub_niches_list"></div>
+            </div>
+            <p class="niche-hint">Click to select one or more — same list as Primary niche above.</p>
           </div>
           <div class="field full">
             <label for="content_description">Describe your content</label>
@@ -396,40 +436,74 @@
     }
   }
 
-  // Primary niche AND Sub-niches are both <select multiple> dropdowns
-  // populated from GET /brand-niches (the same distinct niche vocabulary
+  // Primary niche AND Sub-niches are both checkbox dropdowns populated
+  // from GET /brand-niches (the same distinct niche vocabulary
   // brands.niche and instagram_users.niche use) — two independent
-  // selections from the same option set. content_niche is stored as one
-  // comma-joined string (niche_compatibility() splits it), sub_niches is
-  // stored as a real array.
+  // selections from the same option set, plain click toggles a checkbox
+  // (no Ctrl/Cmd modifier needed, unlike a native <select multiple>).
+  // content_niche is stored as one comma-joined string
+  // (niche_compatibility() splits it), sub_niches is stored as a real array.
   function loadNiches() {
     return fetch('/brand-niches')
       .then(function(r) { return r.ok ? r.json() : { niches: [] }; })
       .then(function(data) {
-        ['content_niche_list', 'sub_niches_list'].forEach(function(selectId) {
-          var select = document.getElementById(selectId);
+        ['content_niche_list', 'sub_niches_list'].forEach(function(panelId) {
+          var panel = document.getElementById(panelId);
           (data.niches || []).forEach(function(niche) {
-            var option = document.createElement('option');
-            option.value = niche;
-            option.textContent = niche;
-            select.appendChild(option);
+            var label = document.createElement('label');
+            label.className = 'msel-option';
+            var checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = niche;
+            checkbox.onchange = function() { updateMselLabel(panelId); };
+            label.appendChild(checkbox);
+            label.appendChild(document.createTextNode(niche));
+            panel.appendChild(label);
           });
         });
       })
       .catch(function() { /* leave lists empty — form still usable */ });
   }
 
-  function getSelectedPills(selectId) {
-    return Array.prototype.slice.call(document.getElementById(selectId).selectedOptions)
-      .map(function(opt) { return opt.value; });
+  function toggleMsel(panelId) {
+    var panel = document.getElementById(panelId);
+    var isOpen = panel.classList.contains('open');
+    document.querySelectorAll('.msel-panel.open').forEach(function(p) { p.classList.remove('open'); });
+    if (!isOpen) panel.classList.add('open');
   }
 
-  function setSelectedPills(selectId, value) {
+  document.addEventListener('click', function(event) {
+    if (!event.target.closest('.msel')) {
+      document.querySelectorAll('.msel-panel.open').forEach(function(p) { p.classList.remove('open'); });
+    }
+  });
+
+  function updateMselLabel(panelId) {
+    var selected = getSelectedPills(panelId);
+    var toggle = document.querySelector('.msel-toggle[data-panel="' + panelId + '"]');
+    toggle.innerHTML = selected.length
+      ? selected.map(function(v) { return esc(v); }).join(', ')
+      : '<span class="placeholder">Select niche(s)…</span>';
+  }
+
+  function esc(s) {
+    var div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
+  }
+
+  function getSelectedPills(panelId) {
+    return Array.prototype.slice.call(document.querySelectorAll('#' + panelId + ' input:checked'))
+      .map(function(cb) { return cb.value; });
+  }
+
+  function setSelectedPills(panelId, value) {
     var arr = Array.isArray(value) ? value : (value || '').split(',');
     var selected = arr.map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
-    Array.prototype.forEach.call(document.getElementById(selectId).options, function(opt) {
-      opt.selected = selected.indexOf(opt.value.toLowerCase()) !== -1;
+    Array.prototype.forEach.call(document.querySelectorAll('#' + panelId + ' input'), function(cb) {
+      cb.checked = selected.indexOf(cb.value.toLowerCase()) !== -1;
     });
+    updateMselLabel(panelId);
   }
 
   function buildProfileBody() {
