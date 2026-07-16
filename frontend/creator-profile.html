@@ -125,25 +125,15 @@
     .status-msg.ok { color: #4ade80; }
     .status-msg.err { color: #f87171; }
 
-    .niche-pills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: .5rem;
+    select[multiple] {
+      height: auto;
     }
-    .niche-pill {
-      padding: .4rem .8rem;
-      background: #0f172a;
-      border: 1px solid #334155;
-      border-radius: 999px;
-      font-size: .82rem;
-      color: #94a3b8;
-      cursor: pointer;
-      user-select: none;
+    select[multiple] option {
+      padding: .4rem .6rem;
+      border-radius: 4px;
     }
-    .niche-pill:hover { border-color: #38bdf8; color: #e2e8f0; }
-    .niche-pill.selected {
+    select[multiple] option:checked {
       background: #0284c7;
-      border-color: #0284c7;
       color: #fff;
     }
     .niche-hint {
@@ -216,13 +206,14 @@
         <h2>Content & Niche</h2>
         <div class="grid">
           <div class="field full">
-            <label>Primary niche *</label>
-            <div class="niche-pills" id="content_niche_list"></div>
-            <p class="niche-hint">Select one or more — these are the same niches brands are matched on.</p>
+            <label for="content_niche_list">Primary niche *</label>
+            <select id="content_niche_list" multiple size="6"></select>
+            <p class="niche-hint">Ctrl/Cmd-click (or Shift-click) to select one or more — these are the same niches brands are matched on.</p>
           </div>
           <div class="field full">
-            <label for="sub_niches">Sub-niches (comma-separated)</label>
-            <input id="sub_niches" name="sub_niches" type="text" placeholder="vegan cooking, meal prep" />
+            <label for="sub_niches_list">Sub-niches</label>
+            <select id="sub_niches_list" multiple size="6"></select>
+            <p class="niche-hint">Ctrl/Cmd-click (or Shift-click) to select one or more — same list as Primary niche above.</p>
           </div>
           <div class="field full">
             <label for="content_description">Describe your content</label>
@@ -388,12 +379,13 @@
     if (!profile) return;
     var form = document.getElementById('formSection');
     Object.keys(profile).forEach(function(key) {
-      if (key === 'content_niche') { setSelectedNiches(profile[key]); return; }
+      if (key === 'content_niche') { setSelectedPills('content_niche_list', profile[key]); return; }
+      if (key === 'sub_niches') { setSelectedPills('sub_niches_list', profile[key]); return; }
       var input = form.elements[key];
       if (!input || profile[key] === null || profile[key] === undefined) return;
       if (key === 'audience_gender_male_pct' || key === 'audience_gender_female_pct') {
         input.value = profile[key] * 100;
-      } else if (key === 'sub_niches' || key === 'excluded_categories') {
+      } else if (key === 'excluded_categories') {
         input.value = profile[key].join(', ');
       } else {
         input.value = profile[key];
@@ -404,37 +396,39 @@
     }
   }
 
-  // Primary niche is a multi-select pill list populated from GET /brand-niches
-  // (the same distinct niche vocabulary brands.niche uses) — content_niche is
-  // still stored as one comma-joined string, so niche_compatibility() can
-  // split and directly compare each selected niche against a brand's niche.
+  // Primary niche AND Sub-niches are both <select multiple> dropdowns
+  // populated from GET /brand-niches (the same distinct niche vocabulary
+  // brands.niche and instagram_users.niche use) — two independent
+  // selections from the same option set. content_niche is stored as one
+  // comma-joined string (niche_compatibility() splits it), sub_niches is
+  // stored as a real array.
   function loadNiches() {
     return fetch('/brand-niches')
       .then(function(r) { return r.ok ? r.json() : { niches: [] }; })
       .then(function(data) {
-        var container = document.getElementById('content_niche_list');
-        (data.niches || []).forEach(function(niche) {
-          var pill = document.createElement('span');
-          pill.className = 'niche-pill';
-          pill.textContent = niche;
-          pill.dataset.value = niche;
-          pill.onclick = function() { pill.classList.toggle('selected'); };
-          container.appendChild(pill);
+        ['content_niche_list', 'sub_niches_list'].forEach(function(selectId) {
+          var select = document.getElementById(selectId);
+          (data.niches || []).forEach(function(niche) {
+            var option = document.createElement('option');
+            option.value = niche;
+            option.textContent = niche;
+            select.appendChild(option);
+          });
         });
       })
-      .catch(function() { /* leave list empty — form still usable */ });
+      .catch(function() { /* leave lists empty — form still usable */ });
   }
 
-  function getSelectedNiches() {
-    return Array.prototype.slice.call(document.querySelectorAll('#content_niche_list .niche-pill.selected'))
-      .map(function(el) { return el.dataset.value; });
+  function getSelectedPills(selectId) {
+    return Array.prototype.slice.call(document.getElementById(selectId).selectedOptions)
+      .map(function(opt) { return opt.value; });
   }
 
-  function setSelectedNiches(value) {
-    var selected = (value || '').split(',').map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
-    document.querySelectorAll('#content_niche_list .niche-pill').forEach(function(el) {
-      if (selected.indexOf(el.dataset.value.toLowerCase()) !== -1) el.classList.add('selected');
-      else el.classList.remove('selected');
+  function setSelectedPills(selectId, value) {
+    var arr = Array.isArray(value) ? value : (value || '').split(',');
+    var selected = arr.map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
+    Array.prototype.forEach.call(document.getElementById(selectId).options, function(opt) {
+      opt.selected = selected.indexOf(opt.value.toLowerCase()) !== -1;
     });
   }
 
@@ -456,8 +450,8 @@
       location_city:    form.elements['location_city'].value || null,
       location_country: form.elements['location_country'].value || null,
       bio_tagline:      form.elements['bio_tagline'].value || null,
-      content_niche:    getSelectedNiches().join(', '),
-      sub_niches:          listOrNull(form.elements['sub_niches'].value),
+      content_niche:    getSelectedPills('content_niche_list').join(', '),
+      sub_niches:          getSelectedPills('sub_niches_list').length ? getSelectedPills('sub_niches_list') : null,
       content_description: form.elements['content_description'].value || null,
       excluded_categories: listOrNull(form.elements['excluded_categories'].value),
       instagram_handle: form.elements['instagram_handle'].value || null,
@@ -529,7 +523,7 @@
       form.reportValidity();
       return false;
     }
-    if (!getSelectedNiches().length) {
+    if (!getSelectedPills('content_niche_list').length) {
       setStatus('Select at least one primary niche.', true);
       return false;
     }
