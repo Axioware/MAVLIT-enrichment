@@ -242,6 +242,9 @@ class InstagramUser(Base):
     location            = Column(Text)
     age_group           = Column(Text)
 
+    # LLM-extracted content niche, from bio + top 5 posts' captions/hashtags — creators only, NULL for commenters
+    niche               = Column(Text)
+
     # Top 5 posts with their top 5 comments each
     top_posts           = Column(JSONB)
     captions            = Column(JSONB)   # flat list of caption strings from top_posts — creators only, NULL for commenters
