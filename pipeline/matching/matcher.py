@@ -33,9 +33,15 @@ Runs on every page load; designed to be cheap:
                on the YouTube side.
 
            Creators must also share at least one EXACT (case-insensitive)
-           niche string with the brand — separate from and stricter than
-           the fuzzy niche_match scoring dimension in Step C, which still
-           runs on whatever niche overlap exists for ranking purposes.
+           niche string with EITHER the brand itself OR at least one of the
+           brand's confirmed Instagram collaborators (instagram_users.niche,
+           for coauthor_producer/tagged_user/mention rows — never
+           commenters) — e.g. a creator picking "technology" matches Bambu
+           Lab (niche "3d printing") because Bambu Lab sponsored
+           @makerworld_official, an Instagram creator classified as
+           "technology". This is a hard yes/no check, separate from and
+           stricter than the fuzzy niche_match scoring dimension in Step C,
+           which still runs on whatever niche overlap exists for ranking.
   Step B — Semantic shortlist: a single indexed pgvector cosine-distance
            query against the creator's embedding narrows the (already
            hard-filtered) pool to the top _SHORTLIST_SIZE candidates —
@@ -59,7 +65,7 @@ import logging
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from pipeline.db import BrandProfile, BrandRaw, CreatorProfile
+from pipeline.db import BrandInstagramUser, BrandProfile, BrandRaw, CreatorProfile, InstagramUser
 from pipeline.matching.match_text import generate_match_reasons
 from pipeline.matching.scoring import score_match
 
@@ -129,13 +135,23 @@ def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) 
                 creator.youtube_followers <= BrandProfile.youtube_highest * (1 + _FOLLOWER_TOLERANCE),
             )
 
-    # Creator must share at least one EXACT niche with the brand — a hard
-    # yes/no check, separate from niche_compatibility()'s fuzzy score used
-    # for ranking in Step C.
+    # Creator must share at least one EXACT niche with EITHER the brand
+    # itself OR one of the brand's confirmed Instagram collaborators — a
+    # hard yes/no check, separate from niche_compatibility()'s fuzzy score
+    # used for ranking in Step C.
     if creator.content_niche:
-        creator_niches = [n.strip() for n in creator.content_niche.split(",") if n.strip()]
+        creator_niches = [n.strip().lower() for n in creator.content_niche.split(",") if n.strip()]
         if creator_niches:
-            query = query.filter(or_(*[func.lower(BrandRaw.niche) == n.lower() for n in creator_niches]))
+            brand_niche_match = or_(*[func.lower(BrandRaw.niche) == n for n in creator_niches])
+            collaborator_niche_match = BrandRaw.id.in_(
+                db.query(BrandInstagramUser.brand_raw_id)
+                .join(InstagramUser, InstagramUser.id == BrandInstagramUser.instagram_user_id)
+                .filter(
+                    InstagramUser.user_type != "commenter",
+                    func.lower(InstagramUser.niche).in_(creator_niches),
+                )
+            )
+            query = query.filter(or_(brand_niche_match, collaborator_niche_match))
 
     # Step B — semantic shortlist (single indexed pgvector query)
     query = query.order_by(distance_expr).limit(_SHORTLIST_SIZE)
@@ -148,7 +164,7 @@ def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) 
     # Step C — weighted scoring + match text
     results = []
     for brand, profile, distance in shortlist:
-        scored = score_match(creator, brand, profile, distance)
+        scored = score_match(db, creator, brand, profile, distance)
         reasons = generate_match_reasons(creator, brand, profile, scored["dimensions"])
         results.append({
             "brand_raw_id": brand.id,
