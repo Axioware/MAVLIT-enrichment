@@ -9,7 +9,7 @@ creator just because a signal hasn't been computed yet.
 
 Weights (sum to 1.0):
   niche_match           0.25  — brands_raw.niche vs creator_profiles.content_niche
-  sponsorship_activity  0.20  — brand_match_profile.sponsorship_activity_score
+  sponsorship_activity  0.20  — live per creator-brand formula, see _score_sponsorship_activity()
   audience_demographics 0.20  — gender/age/country overlap
   creator_tier_fit      0.15  — typical_creator_tier vs creator_tier
   semantic_similarity   0.10  — cosine similarity from the Stage 3B pgvector search
@@ -18,9 +18,22 @@ Weights (sum to 1.0):
 
 Tranco rank, HQ country, and website traffic tier are deliberately excluded
 — per the design doc, they don't measure fit.
+
+sponsorship_activity is computed live per creator-brand pair (NOT read from
+the static brand_match_profile.sponsorship_activity_score column — that
+column is still computed by brand_signals.py's compute_sponsorship_activity
+and is only used by the Stage 3 activity-floor hard filter in matcher.py,
+which runs before this scoring step and is unaffected by this function).
+Its components (meta ads, most-recent-post recency window, follower/
+gender/age-group diff scores) are an uncapped sum by formula, but the
+final value is clamped to 0.0-1.0 like every other dimension, so a strong
+showing here can't push a match's overall total_score past 100%.
 """
 
-from pipeline.db import BrandProfile, BrandRaw, CreatorProfile
+from sqlalchemy.orm import Session
+
+from pipeline.db import BrandProfile, BrandRaw, CreatorProfile, InstagramPost, YoutubeSponsorship
+from pipeline.enrichment.initial_brand_scoring import _days_since
 from pipeline.matching.country_normalize import countries_match, normalize_country
 from pipeline.matching.niche_compatibility import niche_compatibility
 
@@ -63,10 +76,136 @@ def _score_niche(creator: CreatorProfile, brand: BrandRaw) -> float | None:
     return niche_compatibility(creator.content_niche, brand.niche)
 
 
-def _score_sponsorship_activity(profile: BrandProfile | None) -> float | None:
-    if profile is None or profile.sponsorship_activity_score is None:
+# --- sponsorship_activity components ---
+
+_RECENCY_BUCKETS = [(7, 1.0), (14, 0.8), (30, 0.6), (90, 0.3), (180, 0.15)]
+
+_AGE_BUCKET_ORDER = list(_AGE_BUCKET_RANGES.keys())
+
+
+def _meta_ads_component(profile: BrandProfile) -> float:
+    score = 0.0
+    if profile.meta_ads_active:
+        score += 0.1
+    if profile.meta_ads_recency_days is not None:
+        days = profile.meta_ads_recency_days or 1   # 0 days old -> treat as 1, so score is 0.3
+        score += (1.0 / days) * 0.3
+    if profile.meta_ads_no_end_date:
+        score += 0.1
+    if profile.meta_ads_count is not None and profile.meta_ads_count > 5:
+        score += 0.1
+    return score
+
+
+def _bucketed_post_score(days_list: list[int]) -> float:
+    """Score is just the matched window's weight, not multiplied by how
+    many posts/videos fall in it — only how recent the MOST RECENT one is
+    matters. Checks 7/14/30/90/180-day windows in that order and returns
+    the weight of the first window the most recent item falls into."""
+    if not days_list:
+        return 0.0
+    most_recent = min(days_list)
+    for max_days, weight in _RECENCY_BUCKETS:
+        if most_recent <= max_days:
+            return weight
+    return 0.0
+
+
+def _diff_pct_score(a: float, b: float) -> float:
+    """abs-difference-over-average ratio expressed as a percentage, then
+    inverted so a smaller gap scores higher. A perfect match (diff% == 0)
+    is floored to 1 before inverting — same zero-handling convention as
+    meta_ads_recency_days — rather than dividing by zero."""
+    denom = a + b / 2
+    if denom == 0:
+        return 0.0
+    diff_pct = abs(a - b) / denom * 100
+    diff_pct = diff_pct or 1.0
+    return (1.0 / diff_pct) * 2.0
+
+
+def _dominant_bucket(age_groups: dict | None) -> str | None:
+    if not age_groups:
         return None
-    return max(0.0, min(1.0, profile.sponsorship_activity_score / 100.0))
+    return max(age_groups.items(), key=lambda kv: kv[1])[0]
+
+
+def _age_group_hop_score(creator_bucket: str | None, brand_age_groups: dict | None) -> float | None:
+    brand_bucket = _dominant_bucket(brand_age_groups)
+    if not creator_bucket or not brand_bucket:
+        return None
+    try:
+        hop = abs(_AGE_BUCKET_ORDER.index(creator_bucket) - _AGE_BUCKET_ORDER.index(brand_bucket))
+    except ValueError:
+        return None
+    if hop == 0:
+        return 1.0
+    if hop == 1:
+        return 0.5
+    return 0.0
+
+
+def _score_sponsorship_activity(
+    db: Session, creator: CreatorProfile, brand: BrandRaw, profile: BrandProfile | None
+) -> float | None:
+    """
+    Live per creator-brand composite — see the module docstring for why
+    this doesn't just read brand_match_profile.sponsorship_activity_score.
+    Sum of:
+      - meta ads component (0-0.6): meta_ads_active +0.1, meta_ads_recency_days
+        -> (1/days)*0.3, meta_ads_no_end_date +0.1, meta_ads_count > 5 +0.1
+      - youtube_post_score + instagram_post_score: the weight of whichever
+        7/14/30/90/180-day window the MOST RECENT sponsorship/paid-
+        partnership post falls into (not multiplied by how many fall in it)
+      - instagram_tier_score: brand's avg IG collaborator followers vs the
+        creator's own instagram_followers, via _diff_pct_score
+      - gender diff score, per gender (male, female), via _diff_pct_score
+      - age-group hop score: 1.0 exact match, 0.5 one bucket apart, else 0.0
+    Returns None only if there's no brand profile at all to compare against.
+    """
+    if profile is None:
+        return None
+
+    score = _meta_ads_component(profile)
+
+    yt_days = [
+        d for (published_at,) in db.query(YoutubeSponsorship.published_at)
+        .filter(YoutubeSponsorship.brand_raw_id == brand.id)
+        .all()
+        for d in [_days_since(published_at)] if d is not None
+    ]
+    score += _bucketed_post_score(yt_days)
+
+    ig_rows = (
+        db.query(
+            InstagramPost.timestamp, InstagramPost.paid_partnership,
+            InstagramPost.sponsors, InstagramPost.tagged_users, InstagramPost.coauthor_producers,
+        )
+        .filter(InstagramPost.brand_raw_id == brand.id)
+        .all()
+    )
+    ig_days = [
+        d for (ts, paid, sponsors, tagged, coauthor) in ig_rows
+        if (paid or sponsors or tagged or coauthor)
+        for d in [_days_since(ts)] if d is not None
+    ]
+    score += _bucketed_post_score(ig_days)
+
+    if profile.avg_ig_collaborator_followers is not None and creator.instagram_followers is not None:
+        score += _diff_pct_score(profile.avg_ig_collaborator_followers, creator.instagram_followers)
+
+    if profile.audience_gender_male_pct is not None and creator.audience_gender_male_pct is not None:
+        score += _diff_pct_score(profile.audience_gender_male_pct, creator.audience_gender_male_pct)
+    if profile.audience_gender_female_pct is not None and creator.audience_gender_female_pct is not None:
+        score += _diff_pct_score(profile.audience_gender_female_pct, creator.audience_gender_female_pct)
+
+    age_score = _age_group_hop_score(creator.audience_age_bracket, profile.audience_age_groups)
+    if age_score is not None:
+        score += age_score
+
+    # Capped like every other dimension (0.0-1.0) — the components above are
+    # an uncapped sum by formula, but the overall match % can't exceed 100%.
+    return max(0.0, min(1.0, score))
 
 
 def _age_overlap_score(age_min: int | None, age_max: int | None, brand_age_groups: dict | None) -> float | None:
@@ -163,6 +302,7 @@ def _score_geo_match(creator: CreatorProfile, brand: BrandRaw) -> float | None:
 
 
 def score_match(
+    db: Session,
     creator: CreatorProfile,
     brand: BrandRaw,
     profile: BrandProfile | None,
@@ -176,7 +316,7 @@ def score_match(
     """
     raw: dict[str, float | None] = {
         "niche_match":           _score_niche(creator, brand),
-        "sponsorship_activity":  _score_sponsorship_activity(profile),
+        "sponsorship_activity":  _score_sponsorship_activity(db, creator, brand, profile),
         "audience_demographics": _score_audience_demographics(creator, profile),
         "creator_tier_fit":      _score_creator_tier_fit(creator, profile),
         "semantic_similarity":   _score_semantic_similarity(cosine_distance),
