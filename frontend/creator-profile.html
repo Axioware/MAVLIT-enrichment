@@ -359,25 +359,22 @@
             <input id="audience_gender_female_pct" name="audience_gender_female_pct" type="number" min="0" max="100" step="0.1" placeholder="55" />
           </div>
           <div class="field full">
-            <label for="audience_age_bracket">Largest audience age bracket</label>
-            <select id="audience_age_bracket" name="audience_age_bracket">
-              <option value="">Select a range…</option>
-              <option value="12_16">12_16</option>
-              <option value="17_22">17_22</option>
-              <option value="23_28">23_28</option>
-              <option value="29_35">29_35</option>
-              <option value="36_45">36_45</option>
-              <option value="46_60">46_60</option>
-              <option value="60_plus">60_plus</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="audience_age_min">Audience age range — min</label>
-            <input id="audience_age_min" name="audience_age_min" type="number" min="0" placeholder="18" />
-          </div>
-          <div class="field">
-            <label for="audience_age_max">Audience age range — max</label>
-            <input id="audience_age_max" name="audience_age_max" type="number" min="0" placeholder="34" />
+            <label>Largest audience age bracket(s)</label>
+            <div class="msel">
+              <button type="button" class="msel-toggle" data-panel="audience_age_bracket_list" onclick="toggleMsel('audience_age_bracket_list')">
+                <span class="placeholder">Select bracket(s)…</span>
+              </button>
+              <div class="msel-panel" id="audience_age_bracket_list">
+                <label class="msel-option"><input type="checkbox" value="12_16" onchange="updateMselLabel('audience_age_bracket_list')">12_16</label>
+                <label class="msel-option"><input type="checkbox" value="17_22" onchange="updateMselLabel('audience_age_bracket_list')">17_22</label>
+                <label class="msel-option"><input type="checkbox" value="23_28" onchange="updateMselLabel('audience_age_bracket_list')">23_28</label>
+                <label class="msel-option"><input type="checkbox" value="29_35" onchange="updateMselLabel('audience_age_bracket_list')">29_35</label>
+                <label class="msel-option"><input type="checkbox" value="36_45" onchange="updateMselLabel('audience_age_bracket_list')">36_45</label>
+                <label class="msel-option"><input type="checkbox" value="46_60" onchange="updateMselLabel('audience_age_bracket_list')">46_60</label>
+                <label class="msel-option"><input type="checkbox" value="60_plus" onchange="updateMselLabel('audience_age_bracket_list')">60_plus</label>
+              </div>
+            </div>
+            <p class="niche-hint">Click to select one or more — min/max are derived from your widest selection.</p>
           </div>
           <div class="field full">
             <label for="audience_top_country">Top audience country</label>
@@ -394,6 +391,20 @@
 <script>
   var PENDING_KEY = 'mavlit_pending_creator_profile';
   var isLoggedIn  = false;
+
+  // Mirrors _AGE_BUCKET_RANGES in pipeline/matching/scoring.py — the min/max
+  // range is derived from the selected bracket rather than typed separately,
+  // so audience_age_min/audience_age_max still get populated for the
+  // audience_demographics scoring dimension without a second form field.
+  var AGE_BUCKET_RANGES = {
+    '12_16':   [12, 16],
+    '17_22':   [17, 22],
+    '23_28':   [23, 28],
+    '29_35':   [29, 35],
+    '36_45':   [36, 45],
+    '46_60':   [46, 60],
+    '60_plus': [60, 100],
+  };
 
   function showForm() {
     document.getElementById('loadingSection').style.display = 'none';
@@ -421,6 +432,7 @@
     Object.keys(profile).forEach(function(key) {
       if (key === 'content_niche') { setSelectedPills('content_niche_list', profile[key]); return; }
       if (key === 'sub_niches') { setSelectedPills('sub_niches_list', profile[key]); return; }
+      if (key === 'audience_age_bracket') { setSelectedPills('audience_age_bracket_list', profile[key]); return; }
       var input = form.elements[key];
       if (!input || profile[key] === null || profile[key] === undefined) return;
       if (key === 'audience_gender_male_pct' || key === 'audience_gender_female_pct') {
@@ -518,6 +530,13 @@
     var genderFemale = numOrNull(form.elements['audience_gender_female_pct'].value);
     var topCountry   = form.elements['audience_top_country'].value.trim();
 
+    // Multiple brackets can be selected — min is the lowest bound across all
+    // of them, max is the highest bound, e.g. 12_16 + 17_22 -> min=12, max=22.
+    var ageBrackets = getSelectedPills('audience_age_bracket_list');
+    var ageRanges   = ageBrackets.map(function(b) { return AGE_BUCKET_RANGES[b]; }).filter(Boolean);
+    var ageMin = ageRanges.length ? Math.min.apply(null, ageRanges.map(function(r) { return r[0]; })) : null;
+    var ageMax = ageRanges.length ? Math.max.apply(null, ageRanges.map(function(r) { return r[1]; })) : null;
+
     return {
       full_name:        form.elements['full_name'].value,
       creator_handle:   form.elements['creator_handle'].value,
@@ -545,9 +564,9 @@
       follower_count:   numOrNull(form.elements['follower_count'].value),
       audience_gender_male_pct:   genderMale === null ? null : genderMale / 100,
       audience_gender_female_pct: genderFemale === null ? null : genderFemale / 100,
-      audience_age_bracket:       form.elements['audience_age_bracket'].value || null,
-      audience_age_min:           numOrNull(form.elements['audience_age_min'].value),
-      audience_age_max:           numOrNull(form.elements['audience_age_max'].value),
+      audience_age_bracket:       ageBrackets.length ? ageBrackets.join(', ') : null,
+      audience_age_min:           ageMin,
+      audience_age_max:           ageMax,
       audience_top_countries:     topCountry ? [{ country: topCountry, pct: 1.0 }] : null,
     };
   }

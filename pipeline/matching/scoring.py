@@ -131,18 +131,30 @@ def _dominant_bucket(age_groups: dict | None) -> str | None:
 
 
 def _age_group_hop_score(creator_bucket: str | None, brand_age_groups: dict | None) -> float | None:
+    """
+    creator_bucket may be a single bracket or a comma-separated list (a
+    creator can select more than one, e.g. "12_16, 17_22") — same
+    multi-value convention as content_niche/niche_compatibility(). Each
+    selected bracket is checked against the brand's dominant bucket and the
+    best (lowest-hop) score wins.
+    """
     brand_bucket = _dominant_bucket(brand_age_groups)
     if not creator_bucket or not brand_bucket:
         return None
-    try:
-        hop = abs(_AGE_BUCKET_ORDER.index(creator_bucket) - _AGE_BUCKET_ORDER.index(brand_bucket))
-    except ValueError:
+    if brand_bucket not in _AGE_BUCKET_ORDER:
         return None
-    if hop == 0:
-        return 1.0
-    if hop == 1:
-        return 0.5
-    return 0.0
+    brand_idx = _AGE_BUCKET_ORDER.index(brand_bucket)
+
+    best: float | None = None
+    for bucket in creator_bucket.split(","):
+        bucket = bucket.strip()
+        if bucket not in _AGE_BUCKET_ORDER:
+            continue
+        hop = abs(_AGE_BUCKET_ORDER.index(bucket) - brand_idx)
+        score = 1.0 if hop == 0 else (0.5 if hop == 1 else 0.0)
+        if best is None or score > best:
+            best = score
+    return best
 
 
 def _score_sponsorship_activity(
