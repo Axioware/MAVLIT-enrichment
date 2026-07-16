@@ -16,6 +16,7 @@ Prompt name -> which enrichment module actually calls it:
   instagram_post_full_check     — pipeline/enrichment/instagram_posts.py (full LLM mode)
   instagram_coauthor_check      — pipeline/enrichment/instagram_posts.py (always active)
   instagram_user_demographics   — pipeline/enrichment/instagram_users.py
+  instagram_creator_niche       — pipeline/enrichment/instagram_users.py (creators only, not commenters)
   youtube_commenter_gender      — pipeline/enrichment/youtube_sponsorship.py
   youtube_sponsor_check         — pipeline/enrichment/youtube_sponsorship.py
   apollo_contact_check          — pipeline/enrichment/apollo_contacts.py
@@ -99,6 +100,20 @@ Classify each field:
 
 Reply ONLY with a JSON object, no extra text:
 {"gender": "...", "country": "...", "language": "...", "location": "...", "age_group": "..."}\
+"""
+
+CREATOR_NICHE_PROMPT_NAME = "instagram_creator_niche"
+CREATOR_NICHE_DEFAULT_PROMPT = """\
+You are classifying the content niche of an Instagram creator based on their bio and recent posts. Creators only — never used for commenters.
+
+Bio: {bio}
+Recent post captions: {captions}
+Recent post hashtags: {hashtags}
+
+Based on the bio, captions, and hashtags, identify the single most likely content niche/category this creator posts about (e.g. "fashion", "gaming", "fitness", "food_cooking", "beauty", "travel", "tech", "music", "parenting", "finance"). If there isn't enough information to tell, answer "unknown".
+
+Reply ONLY with this JSON object, no extra text:
+{"niche": "..."}\
 """
 
 
