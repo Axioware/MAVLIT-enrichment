@@ -12,21 +12,24 @@ For each instagram_post where is_users_scraped=False:
   3. For each new content creator username:
      a. Scrape their top 5 posts via Apify (addParentData=True embeds profile data in every post).
      b. Extract profile data (bio, businessAddress, etc.) from the first post's parent fields.
-     c. Classify demographics via Mistral (gender, country, language, location, age_group).
+     c. Classify demographics via Mistral (gender, country, language, location, age_group), and
+        the creator's content niche via Mistral from bio + the 5 posts' captions/hashtags —
+        niche classification only ever runs for creators, never for commenters (see step f).
      d. Store in instagram_users with the appropriate user_type.
      e. Collect up to 5 commenters per post from latestComments → up to 25 unique usernames.
      f. For each commenter NOT already in instagram_users:
         - Scrape 1 post via Apify (addParentData=True) to get their profile data.
-        - Classify demographics via Mistral.
-        - Store in instagram_users with user_type="commenter".
+        - Classify demographics via Mistral (no niche classification for commenters).
+        - Store in instagram_users with user_type="commenter" and niche=NULL.
         Existing commenters are linked to the post's brand without scraping.
      g. Link each discovered commenter to the content creator in
         instagram_creator_commenters.
 
   4. Mark instagram_post.is_users_scraped=True.
 
-Prompt (editable via /admin > Prompts):
+Prompts (editable via /admin > Prompts):
   instagram_user_demographics  — used for both content creators and commenters
+  instagram_creator_niche      — creators only, NULL/skipped for commenters
 """
 
 import logging
@@ -40,7 +43,10 @@ from pipeline.helpers.apify import run_apify_actor
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.llm import call_mistral_json, fill_template
-from pipeline.helpers.prompts import DEMOGRAPHICS_PROMPT_NAME, DEMOGRAPHICS_DEFAULT_PROMPT
+from pipeline.helpers.prompts import (
+    DEMOGRAPHICS_PROMPT_NAME, DEMOGRAPHICS_DEFAULT_PROMPT,
+    CREATOR_NICHE_PROMPT_NAME, CREATOR_NICHE_DEFAULT_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +57,11 @@ _ACTOR_ID = "shu8hvrXbJbY3Eb9W"
 def _get_demographics_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == DEMOGRAPHICS_PROMPT_NAME).first()
     return row.content if row else DEMOGRAPHICS_DEFAULT_PROMPT
+
+
+def _get_niche_prompt(db: Session) -> str:
+    row = db.query(Prompt).filter(Prompt.name == CREATOR_NICHE_PROMPT_NAME).first()
+    return row.content if row else CREATOR_NICHE_DEFAULT_PROMPT
 
 
 #  Collection helpers 
@@ -326,7 +337,32 @@ def _classify_demographics(db: Session, username: str, profile: dict) -> dict:
     }
 
 
-#  Row builder 
+def _classify_niche(db: Session, username: str, profile: dict, raw_posts: list[dict]) -> str:
+    """
+    Classify a content creator's niche via Mistral, from their bio plus the
+    captions/hashtags of the (up to 5) posts just scraped. Creators only —
+    never called for commenters (see _build_user_row's gating).
+    """
+    if not MISTRAL_API_KEY:
+        return "unknown"
+
+    captions = " | ".join((p.get("caption") or "")[:300] for p in raw_posts if p.get("caption"))
+    hashtags = [tag for p in raw_posts for tag in (p.get("hashtags") or [])]
+
+    prompt = fill_template(
+        _get_niche_prompt(db),
+        bio=profile.get("biography") or "",
+        captions=captions or "none",
+        hashtags=", ".join(hashtags) if hashtags else "none",
+    )
+    result = call_mistral_json(prompt, context=f"creator niche @{username}")
+    if not isinstance(result, dict):
+        return "unknown"
+    niche = result.get("niche")
+    return niche.strip() if isinstance(niche, str) and niche.strip() else "unknown"
+
+
+#  Row builder
 
 def _build_user_row(
     username: str,
@@ -334,6 +370,7 @@ def _build_user_row(
     profile: dict,
     demo: dict,
     top_posts: list[dict] | None,
+    niche: str | None = None,
 ) -> dict:
     return {
         "username":            username,
@@ -358,6 +395,8 @@ def _build_user_row(
         # creators (5 posts scraped); commenters only ever get 1 post
         # scraped for profile data, so this stays NULL for them.
         "captions":            [p.get("caption", "") for p in top_posts] if (top_posts and user_type != "commenter") else None,
+        # LLM-classified content niche — creators only, NULL for commenters.
+        "niche":               niche if user_type != "commenter" else None,
         "raw_profile":         profile,
     }
 
@@ -501,21 +540,23 @@ def enrich_instagram_users(db: Session, limit: int = 5) -> int:
             #  b. Extract profile data from first post's parent fields 
             profile = _profile_from_posts(raw_posts)
 
-            #  c. Classify demographics via LLM 
-            demo = _classify_demographics(db, username, profile)
+            #  c. Classify demographics + niche via LLM (niche: creators only)
+            demo  = _classify_demographics(db, username, profile)
+            time.sleep(0.3)
+            niche = _classify_niche(db, username, profile, raw_posts)
             time.sleep(0.3)
 
-            #  d. Store content creator in instagram_users 
+            #  d. Store content creator in instagram_users
             top_posts = _format_top_posts(raw_posts)
             upsert_rows(db, InstagramUser, [
-                _build_user_row(username, user_type, profile, demo, top_posts)
+                _build_user_row(username, user_type, profile, demo, top_posts, niche=niche)
             ], ["username"])
             _link_to_brand(db, post.brand_raw_id, username)
 
             logger.info(
-                "Instagram users: @%s stored — type=%s gender=%s country=%s age=%s followers=%s",
+                "Instagram users: @%s stored — type=%s gender=%s country=%s age=%s niche=%s followers=%s",
                 username, user_type,
-                demo["gender"], demo["country"], demo["age_group"],
+                demo["gender"], demo["country"], demo["age_group"], niche,
                 profile.get("followersCount"),
             )
 
