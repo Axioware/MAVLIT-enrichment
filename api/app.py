@@ -19,6 +19,7 @@ from pipeline.helpers.prompts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
     COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT,
     DEMOGRAPHICS_PROMPT_NAME, DEMOGRAPHICS_DEFAULT_PROMPT,
+    CREATOR_NICHE_PROMPT_NAME, CREATOR_NICHE_DEFAULT_PROMPT,
     GENDER_PROMPT_NAME, GENDER_DEFAULT_PROMPT,
     SPONSOR_CHECK_PROMPT_NAME, SPONSOR_CHECK_DEFAULT_PROMPT,
     APOLLO_RANK_PROMPT_NAME, APOLLO_RANK_DEFAULT_PROMPT,
@@ -103,6 +104,7 @@ def _run_migrations() -> None:
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS user_type TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS tier_fit TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS captions JSONB",
+        "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS niche TEXT",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS tier_fit TEXT",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS comments JSONB",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS male_pct FLOAT",
@@ -255,6 +257,7 @@ def _run_migrations() -> None:
             (FULL_PROMPT_NAME,          FULL_DEFAULT_PROMPT),
             (COAUTHOR_PROMPT_NAME,      COAUTHOR_DEFAULT_PROMPT),
             (DEMOGRAPHICS_PROMPT_NAME,  DEMOGRAPHICS_DEFAULT_PROMPT),
+            (CREATOR_NICHE_PROMPT_NAME, CREATOR_NICHE_DEFAULT_PROMPT),
             (TAGS_PROMPT_NAME,          TAGS_DEFAULT_PROMPT),
             (GENDER_PROMPT_NAME,        GENDER_DEFAULT_PROMPT),
             (SPONSOR_CHECK_PROMPT_NAME, SPONSOR_CHECK_DEFAULT_PROMPT),
@@ -539,6 +542,7 @@ class InstagramUserAdmin(ModelView, model=InstagramUser):
         InstagramUser.language,
         InstagramUser.location,
         InstagramUser.age_group,
+        InstagramUser.niche,
         InstagramUser.bio,
         InstagramUser.external_url,
         InstagramUser.profile_url,
@@ -572,6 +576,7 @@ class InstagramUserAdmin(ModelView, model=InstagramUser):
         InstagramUser.raw_profile,
         InstagramUser.bio,
         InstagramUser.fetched_at,
+        InstagramUser.niche
     ]
     column_default_sort    = [(InstagramUser.followers_count, True)]
     page_size = 15
