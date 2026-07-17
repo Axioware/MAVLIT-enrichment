@@ -834,7 +834,7 @@ class BrandContactAdmin(ModelView, model=BrandContact):
     column_searchable_list = [BrandContact.full_name, BrandContact.title, BrandContact.email]
     column_sortable_list = [
         BrandContact.id, BrandContact.rank, BrandContact.is_enriched, BrandContact.full_name,
-        BrandContact.seniority, BrandContact.country, BrandContact.fetched_at,
+        BrandContact.seniority, BrandContact.country, BrandContact.fetched_at, BrandContact.phone,
     ]
     column_default_sort = [(BrandContact.rank, False)]
     page_size = 15
