@@ -12,8 +12,11 @@ Fetches each brand's homepage to:
      send it to Mistral to extract concrete sub-niche/category tags, stored
      in brands_niches.tags. Skipped if MISTRAL_API_KEY isn't set.
 
-Social and description fields are only written if the column is currently NULL
-so they don't overwrite more-authoritative Wikidata data fetched earlier.
+Social fields are only written if the column is currently NULL, so they
+don't overwrite more-authoritative Wikidata data fetched earlier.
+description (brands_raw AND its brands_niches mirror) is always
+overwritten with freshly scraped text on every run, regardless of any
+existing value.
 
 Sets shopify_checked=True for every processed brand.
 Only runs for brands that have a website (has_official_website=True).
@@ -298,7 +301,7 @@ def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None) -> i
 
             socials = _extract_socials(html)
             for field, url in socials.items():
-                if url:
+                if url and not getattr(brand, field):
                     setattr(brand, field, url)
                     socials_count += 1
                     logger.debug("  %s.%s = %s", brand.name, field, url)
