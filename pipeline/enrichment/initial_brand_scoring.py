@@ -1,9 +1,82 @@
 """
-pipeline/enrichment/brand_scoring.py
+pipeline/enrichment/initial_brand_scoring.py
 
-Computes the initial brand score for each brand using the formula in scoring.md.
-Scores are written to initial_brand_score (one row per brand, UPSERTed on re-run).
+Computes a single 0-100 brand-quality score, independent of any specific
+creator — the gate that decides which brands are worth running the rest of
+the pipeline on. run_brand_scoring() only scores brands that have already
+been through every enrichment step (wikidata/shopify/tranco/meta_ads/
+youtube/instagram); brand_signals.py's Stage 1 in turn only processes
+brands with total_score >= 50. Scores are written to initial_brand_score
+(one row per brand, UPSERTed on re-run — safe to call repeatedly).
 
+Formula — 4 independently-capped sections summed into total_score (0-100):
+
+Section 1 — Influencer Buying Activity (50 pts: YouTube 25 + Instagram 25)
+  YouTube (_score_youtube, from youtube_sponsorships rows for the brand):
+    Recency (0-10 pts) — days since most recent published_at:
+        <=30d: 10   <=90d: 8   <=180d: 5   <=365d: 3   else/none: 0
+    Count (0-8 pts) — number of sponsorship rows:
+        0: 0   1-2: 4   3-9: 6   10+: 8
+    Creator reach (0-7 pts) — max subscriber_count seen:
+        >=1,000,000: 7   >=100,000: 5   >=10,000: 3   else: 0
+    total = min(recency_pts + count_pts + subscriber_pts, 25)
+
+  Instagram (_score_instagram, from instagram_posts rows for the brand):
+    signal_posts = posts with paid_partnership OR sponsors OR tagged_users OR coauthor_producers
+    Recency (0-9 pts) — days since most recent signal_post.timestamp:
+        <=30d: 9   <=90d: 7   <=180d: 4   <=365d: 2   else/none: 0
+    Paid partnership posts (0-8 pts) — count where paid_partnership is true:
+        0: 0   1-2: 4   3-5: 6   6+: 8
+    Sponsors populated (0-2 pts) — any post has a non-empty sponsors field: 2 or 0
+    Creator network (0-4 pts) — count of brand_instagram_users rows:
+        0: 0   1-9: 2   10+: 4
+    Collaboration signals (0-2 pts) — any post has tagged_users OR coauthor_producers: 2 or 0
+    total = min(sum of the above, 25)
+
+Section 2 — Advertising Budget / Meta Ads (15 pts max)
+  (_score_meta_ads, from meta_ads rows for the brand)
+    Volume (0-5 pts) — ad count: 0: 0   1-4: 2   5-9: 3   10+: 5
+    Active / no end_date (0-3 pts) — count of ads with end_date IS NULL:
+        0: 0   1-5: 2   6+: 3
+    Recency (0-3 pts) — days since most recent start_date:
+        <=30d: 3   <=90d: 2   <=180d: 1   else/none: 0
+    Spend (0-2 pts) — sum of spend.lower_bound across all ads:
+        0: 0   <1000: 1   >=1000: 2
+    Impressions (0-1 pt) — sum of impressions.lower_bound >= 100,000: 1 or 0
+    Platform coverage (0-1 pt) — at least one ad runs on BOTH facebook AND
+        instagram (publisher_platforms): 1 or 0
+    total = min(sum of the above, 15)
+
+Section 3 — Brand Scale & Legitimacy (25 pts max)
+  (_score_legitimacy)
+    Tranco rank (0-10 pts): <=10,000: 10   <=50,000: 7   <=100,000: 5
+        <=500,000: 3   else: 1   none: 0
+    E-commerce platform (0-8 pts, NOT additive — higher of the two wins):
+        is_shopify: 8   is_woocommerce: 5   neither: 0
+    Social presence (0-7 pts, additive): instagram_handle +3, youtube_channel_id
+        +2, facebook_page +2 (V1 has no TikTok/Twitter here)
+    total = min(tranco_pts + ecommerce_pts + social_pts, 25)
+
+Section 4 — Contact Reachability (10 pts max)
+  (_score_reachability)
+    Has linkedin_id: 5 pts
+    Has facebook_page_id (resolved numeric ID): 3 pts
+    is_shopify: 2 pts
+    total = min(sum of the above, 10)
+
+total_score = influencer_score (Section 1) + ad_spend_score (Section 2)
+            + legitimacy_score (Section 3) + reachability_score (Section 4)
+
+Band (_band): >=70 HOT   >=50 WARM   >=30 COOL   else COLD
+
+enrichment_completeness (0-3): count of youtube_checked/instagram_checked/
+meta_ads_fetched that are True — lets callers filter before sending a
+brand to Apollo, independent of the score itself.
+
+NOTE: Sections 3 & 4 (legitimacy/reachability) measure brand quality and
+outreach-ability, not fit with any specific creator — they are NOT part of
+Stage 3 matching scoring (pipeline/matching/scoring.py), same reasoning as
+that module excluding Tranco rank/HQ country/traffic tier from match scores.
 """
 
 import logging

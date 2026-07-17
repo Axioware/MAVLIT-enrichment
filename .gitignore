@@ -38,3 +38,4 @@ data/seeds/*.csv
 # Logs
 *.log
 *.json
+test.py
