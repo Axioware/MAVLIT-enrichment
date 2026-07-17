@@ -46,7 +46,7 @@ from pipeline.helpers.social import normalize_handle
 logger = logging.getLogger(__name__)
 
 _ACTOR_ID     = "shu8hvrXbJbY3Eb9W"
-_POSTS_NEWER  = "1 months"
+_POSTS_LIMIT  = 40   # last N posts, regardless of how far back that goes
 _RESULTS_TYPE = "posts"
 
 #  Prompt helpers
@@ -187,7 +187,7 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
 def enrich_instagram_posts(
     db: Session,
     limit: int = 50,
-    posts_newer_than: str = _POSTS_NEWER,
+    posts_limit: int = _POSTS_LIMIT,
     brand_id: int | None = None,
     niche: str | None = None,
 ) -> int:
@@ -197,6 +197,9 @@ def enrich_instagram_posts(
       2. Apply LLM filtering based on ENABLE_INSTA_LLM flag
       3. Store qualifying posts in instagram_posts
       4. Mark instagram_checked=True
+
+    posts_limit caps the scrape at the brand's last N posts (resultsLimit),
+    regardless of how far back that goes — no time-window filter is applied.
 
     Pass brand_id to target one specific brand directly — this bypasses the
     instagram_checked filter (so you can re-run/test a brand that was already
@@ -235,7 +238,7 @@ def enrich_instagram_posts(
 
     for brand in brands:
         handle = normalize_handle(brand.instagram_handle)
-        items  = _scrape_handle(handle, posts_newer_than)
+        items  = _scrape_handle(handle, posts_limit)
 
         inserted          = 0
         skipped_no_signal = 0
@@ -318,13 +321,13 @@ def enrich_instagram_posts(
     return len(brands)
 
 
-def _scrape_handle(handle: str, posts_newer_than: str) -> list[dict]:
+def _scrape_handle(handle: str, posts_limit: int) -> list[dict]:
     """Run Apify actor for one Instagram handle and return raw items."""
-    logger.info("Instagram: scraping @%s (newer than %s)", handle, posts_newer_than)
+    logger.info("Instagram: scraping @%s (last %d posts)", handle, posts_limit)
     run_input = {
-        "addParentData":      True,
-        "directUrls":         [f"https://www.instagram.com/{handle}/"],
-        "onlyPostsNewerThan": posts_newer_than,
-        "resultsType":        _RESULTS_TYPE,
+        "addParentData": True,
+        "directUrls":    [f"https://www.instagram.com/{handle}/"],
+        "resultsLimit":  posts_limit,
+        "resultsType":   _RESULTS_TYPE,
     }
     return run_apify_actor(_ACTOR_ID, run_input, label=f"Instagram @{handle}")
