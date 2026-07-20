@@ -256,6 +256,23 @@ class InstagramUser(Base):
         return self.username or f"Instagram User #{self.id}"
 
 
+class ContentCreatorRE(Base):
+    """
+    Standalone table — schema only for now, not wired into any enrichment
+    code yet (population logic to be added later).
+    """
+    __tablename__ = "content_creator_re"
+
+    id          = Column(Integer, primary_key=True)
+    username    = Column(Text)
+    niche       = Column(Text)
+    url         = Column(Text)
+    currenttime = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    def __str__(self) -> str:
+        return self.username or f"Content Creator RE #{self.id}"
+
+
 class BrandInstagramUser(Base):
     __tablename__ = "brand_instagram_users"
 

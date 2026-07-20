@@ -11,7 +11,7 @@ from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
 from config import IS_PRODUCTION
-from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
 from pipeline.matching.matcher import get_matches
 from pipeline.enrichment.creator_signals import compute_creator_signals
@@ -582,6 +582,23 @@ class InstagramUserAdmin(ModelView, model=InstagramUser):
     page_size = 15
 
 
+class ContentCreatorREAdmin(ModelView, model=ContentCreatorRE):
+    name         = "Content Creator RE"
+    name_plural  = "Content Creator RE"
+    icon         = "fa-solid fa-address-card"
+    column_list  = [
+        ContentCreatorRE.id,
+        ContentCreatorRE.username,
+        ContentCreatorRE.niche,
+        ContentCreatorRE.url,
+        ContentCreatorRE.currenttime,
+    ]
+    column_searchable_list = [ContentCreatorRE.username, ContentCreatorRE.niche]
+    column_sortable_list   = [ContentCreatorRE.id, ContentCreatorRE.username, ContentCreatorRE.niche, ContentCreatorRE.currenttime]
+    column_default_sort    = [(ContentCreatorRE.currenttime, True)]
+    page_size = 15
+
+
 class BrandInstagramUserAdmin(ModelView, model=BrandInstagramUser):
     name         = "Brand ↔ Instagram User"
     name_plural  = "Brand Instagram Users"
@@ -893,6 +910,7 @@ admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
 admin.add_view(InstagramPostAdmin)
 admin.add_view(InstagramUserAdmin)
+admin.add_view(ContentCreatorREAdmin)
 admin.add_view(BrandInstagramUserAdmin)
 admin.add_view(InstagramCreatorCommenterAdmin)
 admin.add_view(PromptAdmin)
