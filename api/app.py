@@ -324,43 +324,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
     name         = "Brand Raw"
     name_plural  = "Brands Raw"
     icon         = "fa-solid fa-seedling"
-    column_list  = [
-        BrandRaw.id,
-        BrandRaw.wikidata_id,
-        BrandRaw.linkedin_id,
-        BrandRaw.youtube_channel_id,
-        BrandRaw.name,
-        BrandRaw.entity_type,
-        BrandRaw.description,
-        BrandRaw.niche,
-        BrandRaw.source,
-        BrandRaw.source_confidence,
-        BrandRaw.website,
-        BrandRaw.domain,
-        BrandRaw.wikipedia_url,
-        BrandRaw.country,
-        BrandRaw.has_official_website,
-        BrandRaw.website_source,
-        BrandRaw.is_shopify,
-        BrandRaw.is_woocommerce,
-        BrandRaw.in_tranco_list,
-        BrandRaw.tranco_rank,
-        BrandRaw.instagram_handle,
-        BrandRaw.twitter_handle,
-        BrandRaw.tiktok_handle,
-        BrandRaw.facebook_page,
-        BrandRaw.facebook_page_id,
-        BrandRaw.wikidata_enriched,
-        BrandRaw.shopify_checked,
-        BrandRaw.tranco_checked,
-        BrandRaw.meta_ads_fetched,
-        BrandRaw.youtube_checked,
-        BrandRaw.instagram_checked,
-        BrandRaw.tiktok_checked,
-        BrandRaw.twitter_checked,
-        BrandRaw.initial_brand_scored,
-        BrandRaw.created_at,
-    ]
+    column_list  = "__all__"
     column_searchable_list = [
         BrandRaw.name,
         BrandRaw.wikidata_id,
@@ -410,7 +374,7 @@ class BrandNicheAdmin(ModelView, model=BrandNiche):
     name         = "Brand Niche"
     name_plural  = "Brand Niches"
     icon         = "fa-solid fa-tags"
-    column_list  = [BrandNiche.id, BrandNiche.brand_raw, BrandNiche.niche, BrandNiche.description, BrandNiche.tags]
+    column_list  = "__all__"
     column_labels = {BrandNiche.brand_raw: "Brand"}
     column_searchable_list = [BrandNiche.niche, BrandNiche.description]
     column_sortable_list   = [BrandNiche.id, BrandNiche.niche, BrandNiche.description, BrandNiche.tags]
@@ -421,20 +385,7 @@ class MetaAdAdmin(ModelView, model=MetaAd):
     name         = "Meta Ad"
     name_plural  = "Meta Ads"
     icon         = "fa-solid fa-rectangle-ad"
-    column_list  = [
-        MetaAd.id,
-        MetaAd.brand_raw,
-        MetaAd.ad_archive_id,
-        MetaAd.page_name,
-        MetaAd.page_id,
-        MetaAd.publisher_platforms,
-        MetaAd.start_date,
-        MetaAd.end_date,
-        MetaAd.impressions,
-        MetaAd.spend,
-        MetaAd.currency,
-        MetaAd.fetched_at,
-    ]
+    column_list  = "__all__"
     column_labels      = {MetaAd.brand_raw: "Brand"}
     column_searchable_list = [MetaAd.page_name, MetaAd.page_id, MetaAd.ad_archive_id]
     column_sortable_list   = [MetaAd.id, MetaAd.brand_raw_id, MetaAd.start_date, MetaAd.fetched_at, MetaAd.impressions, MetaAd.spend]
@@ -446,25 +397,7 @@ class YoutubeSponsorshipAdmin(ModelView, model=YoutubeSponsorship):
     name         = "YouTube Sponsorship"
     name_plural  = "YouTube Sponsorships"
     icon         = "fa-brands fa-youtube"
-    column_list  = [
-        YoutubeSponsorship.id,
-        YoutubeSponsorship.brand_raw,
-        YoutubeSponsorship.video_title,
-        YoutubeSponsorship.channel_name,
-        YoutubeSponsorship.subscriber_count,
-        YoutubeSponsorship.tier_fit,
-        YoutubeSponsorship.sponsorship_type,
-        YoutubeSponsorship.confidence,
-        YoutubeSponsorship.matched_keywords,
-        YoutubeSponsorship.view_count,
-        YoutubeSponsorship.published_at,
-        YoutubeSponsorship.video_url,
-        YoutubeSponsorship.description_snippet,
-        YoutubeSponsorship.comments,
-        YoutubeSponsorship.male_pct,
-        YoutubeSponsorship.female_pct,
-        YoutubeSponsorship.fetched_at,
-    ]
+    column_list  = "__all__"
     column_labels      = {YoutubeSponsorship.brand_raw: "Brand"}
     column_searchable_list = [YoutubeSponsorship.video_title, YoutubeSponsorship.channel_name]
     column_sortable_list   = [
@@ -493,29 +426,7 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
     name         = "Instagram Post"
     name_plural  = "Instagram Posts"
     icon         = "fa-brands fa-instagram"
-    column_list  = [
-        InstagramPost.id,
-        InstagramPost.brand_raw,
-        InstagramPost.instagram_handle,
-        InstagramPost.post_type,
-        InstagramPost.timestamp,
-        InstagramPost.likes_count,
-        InstagramPost.comments_count,
-        InstagramPost.video_view_count,
-        InstagramPost.paid_partnership,
-        InstagramPost.sponsors,
-        InstagramPost.llm_checked,
-        InstagramPost.is_users_scraped,
-        InstagramPost.mentions,
-        InstagramPost.tagged_users,
-        InstagramPost.coauthor_producers,
-        InstagramPost.followers_count,
-        InstagramPost.caption,
-        InstagramPost.biography,
-        InstagramPost.post_url,
-        InstagramPost.fetched_at,
-        InstagramPost.business_category_name,
-    ]
+    column_list  = "__all__"
     column_labels          = {InstagramPost.brand_raw: "Brand"}
     column_searchable_list = [InstagramPost.instagram_handle, InstagramPost.caption, InstagramPost.post_id]
     column_sortable_list   = [
@@ -546,38 +457,7 @@ class InstagramUserAdmin(ModelView, model=InstagramUser):
     name         = "Instagram User"
     name_plural  = "Instagram Users"
     icon         = "fa-solid fa-user-circle"
-    column_list  = [
-        InstagramUser.id,
-        InstagramUser.username,
-        InstagramUser.user_type,
-        InstagramUser.full_name,
-        InstagramUser.followers_count,
-        InstagramUser.tier_fit,
-        InstagramUser.follows_count,
-        InstagramUser.posts_count,
-        InstagramUser.is_verified,
-        InstagramUser.is_business_account,
-        InstagramUser.gender,
-        InstagramUser.country,
-        InstagramUser.language,
-        InstagramUser.location,
-        InstagramUser.age_group,
-        InstagramUser.niche,
-        InstagramUser.bio,
-        InstagramUser.external_url,
-        InstagramUser.profile_url,
-        InstagramUser.post_id,
-        InstagramUser.post_url,
-        InstagramUser.caption,
-        InstagramUser.likes_count,
-        InstagramUser.comments_count,
-        InstagramUser.post_timestamp,
-        InstagramUser.is_content_creator_re,
-        InstagramUser.top_posts,
-        InstagramUser.captions,
-        InstagramUser.raw_profile,
-        InstagramUser.fetched_at,
-    ]
+    column_list  = "__all__"
     column_searchable_list = [
         InstagramUser.username,
         InstagramUser.full_name,
@@ -613,13 +493,7 @@ class ContentCreatorREAdmin(ModelView, model=ContentCreatorRE):
     name         = "Content Creator RE"
     name_plural  = "Content Creator RE"
     icon         = "fa-solid fa-address-card"
-    column_list  = [
-        ContentCreatorRE.id,
-        ContentCreatorRE.username,
-        ContentCreatorRE.niche,
-        ContentCreatorRE.url,
-        ContentCreatorRE.currenttime,
-    ]
+    column_list  = "__all__"
     column_searchable_list = [ContentCreatorRE.username, ContentCreatorRE.niche]
     column_sortable_list   = [ContentCreatorRE.id, ContentCreatorRE.username, ContentCreatorRE.niche, ContentCreatorRE.currenttime]
     column_default_sort    = [(ContentCreatorRE.currenttime, True)]
@@ -630,11 +504,7 @@ class BrandInstagramUserAdmin(ModelView, model=BrandInstagramUser):
     name         = "Brand ↔ Instagram User"
     name_plural  = "Brand Instagram Users"
     icon         = "fa-solid fa-link"
-    column_list  = [
-        BrandInstagramUser.brand_raw,
-        BrandInstagramUser.instagram_user,
-        BrandInstagramUser.created_at,
-    ]
+    column_list  = "__all__"
     column_labels = {
         BrandInstagramUser.brand_raw:      "Brand",
         BrandInstagramUser.instagram_user: "Instagram User",
@@ -648,15 +518,7 @@ class InstagramCreatorCommenterAdmin(ModelView, model=InstagramCreatorCommenter)
     name         = "Creator Commenter"
     name_plural  = "Creator Commenters"
     icon         = "fa-solid fa-comments"
-    column_list  = [
-        InstagramCreatorCommenter.brand_raw,
-        InstagramCreatorCommenter.creator_user,
-        InstagramCreatorCommenter.commenter_user,
-        InstagramCreatorCommenter.source_post_url,
-        InstagramCreatorCommenter.comment_likes,
-        InstagramCreatorCommenter.comment_text,
-        InstagramCreatorCommenter.created_at,
-    ]
+    column_list  = "__all__"
     column_labels = {
         InstagramCreatorCommenter.brand_raw:      "Brand",
         InstagramCreatorCommenter.creator_user:   "Content Creator",
@@ -677,23 +539,7 @@ class TiktokPostAdmin(ModelView, model=TiktokPost):
     name         = "TikTok Post"
     name_plural  = "TikTok Posts"
     icon         = "fa-brands fa-tiktok"
-    column_list  = [
-        TiktokPost.id,
-        TiktokPost.brand_raw,
-        TiktokPost.tiktok_handle,
-        TiktokPost.create_time,
-        TiktokPost.play_count,
-        TiktokPost.like_count,
-        TiktokPost.comment_count,
-        TiktokPost.share_count,
-        TiktokPost.collect_count,
-        TiktokPost.is_sponsored,
-        TiktokPost.is_ad,
-        TiktokPost.mentions,
-        TiktokPost.hashtags,
-        TiktokPost.video_url,
-        TiktokPost.fetched_at,
-    ]
+    column_list  = "__all__"
     column_labels          = {TiktokPost.brand_raw: "Brand"}
     column_searchable_list = [TiktokPost.tiktok_handle, TiktokPost.video_id]
     column_sortable_list   = [
@@ -717,26 +563,7 @@ class TwitterPostAdmin(ModelView, model=TwitterPost):
     name         = "Twitter Post"
     name_plural  = "Twitter Posts"
     icon         = "fa-brands fa-x-twitter"
-    column_list  = [
-        TwitterPost.id,
-        TwitterPost.brand_raw,
-        TwitterPost.twitter_handle,
-        TwitterPost.created_at,
-        TwitterPost.likes,
-        TwitterPost.retweets,
-        TwitterPost.comments,
-        TwitterPost.quotes,
-        TwitterPost.is_sponsored,
-        TwitterPost.sponsor_signals,
-        TwitterPost.hashtags,
-        TwitterPost.mentions,
-        TwitterPost.has_media,
-        TwitterPost.username,
-        TwitterPost.verified,
-        TwitterPost.text,
-        TwitterPost.permalink,
-        TwitterPost.fetched_at,
-    ]
+    column_list  = "__all__"
     column_labels          = {TwitterPost.brand_raw: "Brand"}
     column_searchable_list = [TwitterPost.twitter_handle, TwitterPost.username, TwitterPost.tweet_id, TwitterPost.text]
     column_sortable_list   = [
@@ -758,7 +585,7 @@ class PromptAdmin(ModelView, model=Prompt):
     name         = "Prompt"
     name_plural  = "Prompts"
     icon         = "fa-solid fa-wand-magic-sparkles"
-    column_list  = [Prompt.id, Prompt.name, Prompt.content, Prompt.updated_at]
+    column_list  = "__all__"
     column_searchable_list = [Prompt.name]
     column_default_sort    = [(Prompt.id, True)]
     page_size = 20
@@ -768,18 +595,7 @@ class InitialBrandScoreAdmin(ModelView, model=InitialBrandScore):
     name         = "Initial Brand Score"
     name_plural  = "Initial Brand Scores"
     icon         = "fa-solid fa-star"
-    column_list  = [
-        InitialBrandScore.id,
-        InitialBrandScore.brand_raw,
-        InitialBrandScore.total_score,
-        InitialBrandScore.score_band,
-        InitialBrandScore.influencer_score,
-        InitialBrandScore.ad_spend_score,
-        InitialBrandScore.legitimacy_score,
-        InitialBrandScore.reachability_score,
-        InitialBrandScore.enrichment_completeness,
-        InitialBrandScore.scored_at,
-    ]
+    column_list  = "__all__"
     column_labels = {InitialBrandScore.brand_raw: "Brand"}
     column_sortable_list = [
         InitialBrandScore.id,
@@ -800,37 +616,7 @@ class BrandProfileAdmin(ModelView, model=BrandProfile):
     name         = "Brand Match Profile"
     name_plural  = "Brand Match Profiles"
     icon         = "fa-solid fa-chart-line"
-    column_list  = [
-        BrandProfile.brand_raw,
-        BrandProfile.sponsorship_activity_score,
-        BrandProfile.meta_ads_active,
-        BrandProfile.meta_ads_recency_days,
-        BrandProfile.meta_ads_no_end_date,
-        BrandProfile.meta_ads_count,
-        BrandProfile.youtube_last_sponsorship,
-        BrandProfile.tiktok_sponsored_count,
-        BrandProfile.twitter_sponsored_count,
-        BrandProfile.avg_yt_creator_subscribers,
-        BrandProfile.avg_ig_collaborator_followers,
-        BrandProfile.typical_creator_tier,
-        BrandProfile.youtube_highest,
-        BrandProfile.youtube_lowest,
-        BrandProfile.insta_highest,
-        BrandProfile.insta_lowest,
-        BrandProfile.audience_gender_male_pct,
-        BrandProfile.audience_gender_female_pct,
-        BrandProfile.audience_top_countries,
-        BrandProfile.audience_age_groups,
-        BrandProfile.has_instagram,
-        BrandProfile.has_youtube,
-        BrandProfile.has_facebook,
-        BrandProfile.has_tiktok,
-        BrandProfile.has_twitter,
-        BrandProfile.has_marketing_contact,
-        BrandProfile.contact_mode,
-        BrandProfile.best_contact_title_score,
-        BrandProfile.computed_at,
-    ]
+    column_list  = "__all__"
     column_labels = {BrandProfile.brand_raw: "Brand"}
     column_sortable_list = [
         BrandProfile.sponsorship_activity_score,
@@ -853,27 +639,7 @@ class BrandContactAdmin(ModelView, model=BrandContact):
     name         = "Brand Contact"
     name_plural  = "Brand Contacts"
     icon         = "fa-solid fa-address-card"
-    column_list  = [
-        BrandContact.id,
-        BrandContact.brand_raw,
-        BrandContact.rank,
-        BrandContact.is_enriched,
-        BrandContact.full_name,
-        BrandContact.title,
-        BrandContact.departments,
-        BrandContact.subdepartments,
-        BrandContact.functions,
-        BrandContact.seniority,
-        BrandContact.email,
-        BrandContact.email_status,
-        BrandContact.phone,
-        BrandContact.linkedin_url,
-        BrandContact.city,
-        BrandContact.state,
-        BrandContact.country,
-        BrandContact.llm_reason,
-        BrandContact.fetched_at,
-    ]
+    column_list  = "__all__"
     column_labels = {BrandContact.brand_raw: "Brand"}
     column_searchable_list = [BrandContact.full_name, BrandContact.title, BrandContact.email]
     column_sortable_list = [
@@ -888,33 +654,7 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
     name         = "Creator Profile"
     name_plural  = "Creator Profiles"
     icon         = "fa-solid fa-id-badge"
-    column_list  = [
-        CreatorProfile.id,
-        CreatorProfile.email,
-        CreatorProfile.google_id,
-        CreatorProfile.is_active,
-        CreatorProfile.full_name,
-        CreatorProfile.creator_handle,
-        CreatorProfile.content_niche,
-        CreatorProfile.primary_platform,
-        CreatorProfile.location_city,
-        CreatorProfile.location_country,
-        CreatorProfile.instagram_handle,
-        CreatorProfile.tiktok_handle,
-        CreatorProfile.youtube_channel,
-        CreatorProfile.facebook_page,
-        CreatorProfile.substack_url,
-        CreatorProfile.sub_niches,
-        CreatorProfile.content_description,
-        CreatorProfile.excluded_categories,
-        CreatorProfile.follower_count,
-        CreatorProfile.audience_age_min,
-        CreatorProfile.audience_age_max,
-        CreatorProfile.content_tags,
-        CreatorProfile.creator_tier,
-        CreatorProfile.created_at,
-        CreatorProfile.updated_at,
-    ]
+    column_list  = "__all__"
     column_searchable_list = [CreatorProfile.email, CreatorProfile.full_name, CreatorProfile.creator_handle, CreatorProfile.content_niche]
     column_sortable_list    = [
         CreatorProfile.id, CreatorProfile.email, CreatorProfile.is_active,
