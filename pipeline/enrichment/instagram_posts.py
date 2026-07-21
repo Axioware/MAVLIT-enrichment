@@ -75,6 +75,14 @@ def _strip_pic(items) -> list[dict] | None:
     return [{k: v for k, v in entry.items() if k != "profile_pic_url"} for entry in items]
 
 
+def _usernames_only(items) -> list[str] | None:
+    """Reduce a list of user dicts down to just their usernames."""
+    if not items or not isinstance(items, list):
+        return None
+    usernames = [entry.get("username") for entry in items if isinstance(entry, dict) and entry.get("username")]
+    return usernames or None
+
+
 #  LLM functions 
 
 def _llm_filter_all(db: Session, item: dict, brand_name: str) -> dict | None:
@@ -155,14 +163,13 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
         "brand_raw_id":           brand_raw_id,
         "instagram_handle":       handle,
         "post_id":                str(post_id),
-        "short_code":             item.get("shortCode"),
         "post_url":               item.get("url"),
         "post_type":              item.get("type"),
         "timestamp":              item.get("timestamp"),
         "caption":                item.get("caption"),
         "hashtags":               item.get("hashtags"),
         "mentions":               item.get("mentions"),
-        "tagged_users":           _strip_pic(item.get("taggedUsers")),
+        "tagged_users":           _usernames_only(item.get("taggedUsers")),
         "coauthor_producers":     _strip_pic(item.get("coauthorProducers")),
         "paid_partnership":       item.get("paidPartnership"),
         "sponsors":               item.get("sponsors"),
