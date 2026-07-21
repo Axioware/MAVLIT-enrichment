@@ -220,7 +220,7 @@ def enrich_instagram_posts(
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:
-        query = query.filter(BrandRaw.instagram_checked == False)
+        query = query.filter(BrandRaw.instagram_checked.is_(False))
         if niche:
             query = query.filter(func.lower(BrandRaw.niche) == niche.strip().lower())
 
