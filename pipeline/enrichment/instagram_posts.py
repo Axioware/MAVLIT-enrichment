@@ -68,13 +68,6 @@ def _fmt(value) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _strip_pic(items) -> list[dict] | None:
-    """Remove profile_pic_url from each entry in a list of user dicts."""
-    if not items or not isinstance(items, list):
-        return items
-    return [{k: v for k, v in entry.items() if k != "profile_pic_url"} for entry in items]
-
-
 def _usernames_only(items) -> list[str] | None:
     """Reduce a list of user dicts down to just their usernames."""
     if not items or not isinstance(items, list):
@@ -159,6 +152,10 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
     post_id = item.get("id")
     if not post_id:
         return None
+    # Profile-level fields (followers, bio, etc.) are nested under metaData —
+    # they belong to the post's author profile, not the post itself.
+    meta = item.get("metaData") or {}
+
     return {
         "brand_raw_id":           brand_raw_id,
         "instagram_handle":       handle,
@@ -170,21 +167,21 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
         "hashtags":               item.get("hashtags"),
         "mentions":               item.get("mentions"),
         "tagged_users":           _usernames_only(item.get("taggedUsers")),
-        "coauthor_producers":     _strip_pic(item.get("coauthorProducers")),
+        "coauthor_producers":     _usernames_only(item.get("coauthorProducers")),
         "paid_partnership":       item.get("paidPartnership"),
         "sponsors":               item.get("sponsors"),
         "likes_count":            item.get("likesCount"),
         "comments_count":         item.get("commentsCount"),
         "video_view_count":       item.get("videoViewCount"),
         "video_play_count":       item.get("videoPlayCount"),
-        "followers_count":        item.get("followersCount"),
-        "follows_count":          item.get("followsCount"),
-        "posts_count":            item.get("postsCount"),
-        "is_business_account":    item.get("isBusinessAccount"),
-        "verified":               item.get("verified"),
-        "biography":              item.get("biography"),
-        "external_url":           item.get("externalUrl"),
-        "business_category_name": item.get("businessCategoryName"),
+        "followers_count":        meta.get("followersCount"),
+        "follows_count":          meta.get("followsCount"),
+        "posts_count":            meta.get("postsCount"),
+        "is_business_account":    meta.get("isBusinessAccount"),
+        "verified":               meta.get("verified"),
+        "biography":              meta.get("biography"),
+        "external_url":           meta.get("externalUrl"),
+        "business_category_name": meta.get("businessCategoryName"),
         "llm_checked":            False,
     }
 
@@ -297,7 +294,7 @@ def enrich_instagram_posts(
 
                 filtered_coauthors: list | None = None
                 if has_coauth:
-                    filtered_coauthors = _llm_filter_coauthors(db, item, brand.name)
+                    filtered_coauthors = _usernames_only(_llm_filter_coauthors(db, item, brand.name))
                     time.sleep(0.3)
 
                 if not has_direct and not filtered_coauthors:
