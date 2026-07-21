@@ -171,7 +171,6 @@ class InstagramPost(Base):
 
     # Post identity
     post_id                = Column(Text, unique=True, nullable=False)
-    short_code             = Column(Text)
     post_url               = Column(Text)
     post_type              = Column(Text)   # Image, Video, Sidecar, etc.
     timestamp              = Column(Text)
