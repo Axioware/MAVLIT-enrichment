@@ -105,6 +105,26 @@ def _run_migrations() -> None:
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS tier_fit TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS captions JSONB",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS niche TEXT",
+        # Per-post row storage for creators (coauthor_producer/tagged_user/
+        # mention/contentcreatorRE) — one row per post instead of one row
+        # per profile, so username can no longer be globally unique.
+        # commenters still get exactly 1 row each (unique-by-username
+        # preserved for them via this partial index).
+        "ALTER TABLE instagram_users DROP CONSTRAINT IF EXISTS instagram_users_username_key",
+        "DROP INDEX IF EXISTS uq_instagram_users_username_default",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_instagram_users_username_commenter
+        ON instagram_users(username)
+        WHERE user_type = 'commenter'
+        """,
+        "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS post_id TEXT",
+        "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS post_url TEXT",
+        "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS caption TEXT",
+        "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS likes_count INTEGER",
+        "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS comments_count INTEGER",
+        "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS post_timestamp TEXT",
+        "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS is_content_creator_re BOOLEAN NOT NULL DEFAULT false",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_instagram_users_post_id ON instagram_users(post_id)",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS tier_fit TEXT",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS comments JSONB",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS male_pct FLOAT",
@@ -546,6 +566,13 @@ class InstagramUserAdmin(ModelView, model=InstagramUser):
         InstagramUser.bio,
         InstagramUser.external_url,
         InstagramUser.profile_url,
+        InstagramUser.post_id,
+        InstagramUser.post_url,
+        InstagramUser.caption,
+        InstagramUser.likes_count,
+        InstagramUser.comments_count,
+        InstagramUser.post_timestamp,
+        InstagramUser.is_content_creator_re,
         InstagramUser.top_posts,
         InstagramUser.captions,
         InstagramUser.raw_profile,

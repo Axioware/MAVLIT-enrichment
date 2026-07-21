@@ -15,12 +15,19 @@ For each instagram_post where is_users_scraped=False:
      c. Classify demographics via Mistral (gender, country, language, location, age_group), and
         the creator's content niche via Mistral from bio + the 5 posts' captions/hashtags —
         niche classification only ever runs for creators, never for commenters (see step f).
-     d. Store in instagram_users with the appropriate user_type.
+        Both are classified ONCE per creator and duplicated identically across every one
+        of that creator's post rows (see step d).
+     d. Store ONE ROW PER POST in instagram_users (up to 5 rows for this creator), with
+        the appropriate user_type — not nested into a single top_posts JSONB snapshot
+        (that field is legacy-only now, still present on old rows, no longer written).
+        Upserted on post_id, since one username can now own multiple rows.
      e. Collect up to 5 commenters per post from latestComments → up to 25 unique usernames.
      f. For each commenter NOT already in instagram_users:
         - Scrape 1 post via Apify (addParentData=True) to get their profile data.
         - Classify demographics via Mistral (no niche classification for commenters).
-        - Store in instagram_users with user_type="commenter" and niche=NULL.
+        - Store ONE row (commenters only ever get 1 post) with user_type="commenter"
+          and niche=NULL. Upserted on username — commenters are the only user_type
+          still unique-by-username (see InstagramUser's docstring in pipeline/db.py).
         Existing commenters are linked to the post's brand without scraping.
      g. Link each discovered commenter to the content creator in
         instagram_creator_commenters.
@@ -35,6 +42,7 @@ Prompts (editable via /admin > Prompts):
 import logging
 import time
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, MISTRAL_API_KEY
@@ -51,6 +59,12 @@ from pipeline.helpers.prompts import (
 logger = logging.getLogger(__name__)
 
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"
+
+# username is only unique for user_type="commenter" (see InstagramUser's
+# docstring in pipeline/db.py) — the commenter upsert_rows(..., ["username"])
+# call must pass this same predicate or Postgres can't infer which index
+# the ON CONFLICT targets.
+_COMMENTER_USERNAME_INDEX_WHERE = text("user_type = 'commenter'")
 
 #  Prompt helpers
 
@@ -215,24 +229,6 @@ def _collect_commenter_records(posts: list[dict], n_per_post: int = 5) -> list[d
     return result
 
 
-def _commenter_records_from_top_posts(top_posts: list[dict] | None) -> list[dict]:
-    """Rebuild commenter records from the top_posts snapshot stored for a creator."""
-    records: list[dict] = []
-    for post in top_posts or []:
-        post_url = post.get("post_url") or ""
-        for comment in post.get("top_comments") or []:
-            username = (comment.get("username") or "").strip()
-            if not username:
-                continue
-            records.append({
-                "username": username,
-                "source_post_url": post_url,
-                "comment_text": comment.get("text"),
-                "comment_likes": comment.get("likes"),
-            })
-    return records
-
-
 #  Apify helpers 
 
 def _scrape_posts(username: str, n: int = 5) -> list[dict]:
@@ -255,53 +251,31 @@ def _scrape_posts(username: str, n: int = 5) -> list[dict]:
 
 
 def _profile_from_posts(posts: list[dict]) -> dict:
-    """Extract profile fields embedded by addParentData from the first post item."""
+    """
+    Extract profile fields embedded by addParentData from the first post item.
+    The actor nests the whole profile snapshot under item["metaData"] rather
+    than flattening it onto the post item's top level.
+    """
     if not posts:
         return {}
     p = posts[0]
+    md = p.get("metaData") or {}
     return {
-        "fullName":          p.get("fullName"),
-        "biography":         p.get("biography"),
-        "externalUrl":       p.get("externalUrl"),
-        "businessAddress":   p.get("businessAddress"),
-        "followersCount":    p.get("followersCount"),
-        "followsCount":      p.get("followsCount"),
-        "postsCount":        p.get("postsCount"),
-        "verified":          p.get("verified") or p.get("isVerified"),
-        "isBusinessAccount": p.get("isBusinessAccount"),
+        "fullName":          md.get("fullName") or p.get("ownerFullName"),
+        "biography":         md.get("biography"),
+        "externalUrl":       md.get("externalUrl"),
+        "businessAddress":   md.get("businessAddress"),
+        "followersCount":    md.get("followersCount"),
+        "followsCount":      md.get("followsCount"),
+        "postsCount":        md.get("postsCount"),
+        # md.get("verified") or md.get("isVerified") would be wrong here — if
+        # "verified" is explicitly False (the normal case for almost every
+        # account), `or` treats it as falsy and falls through to
+        # isVerified, which this actor never sends, silently turning a
+        # confirmed False into an unknown None.
+        "verified":          md.get("verified") if md.get("verified") is not None else md.get("isVerified"),
+        "isBusinessAccount": md.get("isBusinessAccount"),
     }
-
-
-def _top_comments(post_item: dict, n: int = 5) -> list[dict]:
-    """Top n comments from a post item, sorted by likes descending."""
-    comments = post_item.get("latestComments") or []
-    by_likes = sorted(comments, key=lambda c: c.get("likesCount") or 0, reverse=True)
-    return [
-        {
-            "username": c.get("ownerUsername", ""),
-            "text":     c.get("text", ""),
-            "likes":    c.get("likesCount", 0),
-        }
-        for c in by_likes[:n]
-    ]
-
-
-def _format_top_posts(raw_posts: list[dict]) -> list[dict] | None:
-    """Convert raw Apify post items to the structure stored in top_posts JSONB."""
-    if not raw_posts:
-        return None
-    return [
-        {
-            "post_id":        str(p.get("id", "")),
-            "post_url":       p.get("url") or p.get("displayUrl", ""),
-            "caption":        (p.get("caption") or "")[:300],
-            "likes_count":    p.get("likesCount", 0),
-            "comments_count": p.get("commentsCount", 0),
-            "timestamp":      p.get("timestamp", ""),
-            "top_comments":   _top_comments(p, n=5),
-        }
-        for p in raw_posts
-    ]
 
 
 #  LLM helper 
@@ -341,7 +315,7 @@ def _classify_niche(db: Session, username: str, profile: dict, raw_posts: list[d
     """
     Classify a content creator's niche via Mistral, from their bio plus the
     captions/hashtags of the (up to 5) posts just scraped. Creators only —
-    never called for commenters (see _build_user_row's gating).
+    never called for commenters (see _build_post_row's niche gating).
     """
     if not MISTRAL_API_KEY:
         return "unknown"
@@ -364,14 +338,22 @@ def _classify_niche(db: Session, username: str, profile: dict, raw_posts: list[d
 
 #  Row builder
 
-def _build_user_row(
+def _build_post_row(
     username: str,
     user_type: str,
     profile: dict,
     demo: dict,
-    top_posts: list[dict] | None,
+    item: dict,
     niche: str | None = None,
+    is_content_creator_re: bool = False,
 ) -> dict:
+    """
+    One row per post. For creators (coauthor_producer/tagged_user/mention)
+    this is called once per scraped post (up to 5), with demographics/niche
+    classified once and duplicated identically across every one of that
+    creator's rows. For commenters it's called once (they only ever scrape
+    1 post) — niche stays NULL for them, matching the prior convention.
+    """
     return {
         "username":            username,
         "profile_url":         f"https://www.instagram.com/{username}/",
@@ -390,13 +372,15 @@ def _build_user_row(
         "language":            demo["language"],
         "location":            demo["location"],
         "age_group":           demo["age_group"],
-        "top_posts":           top_posts,
-        # Flat list of captions from top_posts — only meaningful for actual
-        # creators (5 posts scraped); commenters only ever get 1 post
-        # scraped for profile data, so this stays NULL for them.
-        "captions":            [p.get("caption", "") for p in top_posts] if (top_posts and user_type != "commenter") else None,
         # LLM-classified content niche — creators only, NULL for commenters.
         "niche":               niche if user_type != "commenter" else None,
+        "post_id":             str(item.get("id") or ""),
+        "post_url":            item.get("url") or item.get("displayUrl") or "",
+        "caption":             item.get("caption"),
+        "likes_count":         item.get("likesCount"),
+        "comments_count":      item.get("commentsCount"),
+        "post_timestamp":      item.get("timestamp"),
+        "is_content_creator_re": is_content_creator_re,
         "raw_profile":         profile,
     }
 
@@ -449,31 +433,35 @@ def _link_existing_commenters_from_creator_snapshot(
     brand_raw_id: int,
     creator_username: str,
 ) -> None:
-    """Link known commenters from a stored creator snapshot without scraping."""
-    creator = (
-        db.query(InstagramUser)
-        .filter(InstagramUser.username == creator_username)
-        .first()
-    )
-    if not creator:
+    """
+    Link a creator's previously-discovered commenters to a new brand
+    without re-scraping. Reads from instagram_creator_commenters directly
+    (the real relational link table) rather than a creator's legacy
+    top_posts JSONB snapshot, since a creator can now own multiple rows
+    (one per post) with no single "the" row to read a snapshot from —
+    querying every id sharing this username covers all of them regardless.
+    """
+    creator_ids = [
+        r.id for r in
+        db.query(InstagramUser.id).filter(InstagramUser.username == creator_username).all()
+    ]
+    if not creator_ids:
         return
 
-    records = _commenter_records_from_top_posts(creator.top_posts)
-    if not records:
-        return
-
-    usernames = sorted({record["username"] for record in records})
-    existing_commenters = {
-        r.username for r in
-        db.query(InstagramUser.username)
-        .filter(InstagramUser.username.in_(usernames))
+    links = (
+        db.query(InstagramCreatorCommenter, InstagramUser.username)
+        .join(InstagramUser, InstagramUser.id == InstagramCreatorCommenter.commenter_user_id)
+        .filter(InstagramCreatorCommenter.creator_user_id.in_(creator_ids))
         .all()
-    }
-    for commenter in existing_commenters:
-        _link_to_brand(db, brand_raw_id, commenter)
-        for record in records:
-            if record["username"] == commenter:
-                _link_commenter_to_creator(db, brand_raw_id, creator_username, record)
+    )
+    for link, commenter_username in links:
+        _link_to_brand(db, brand_raw_id, commenter_username)
+        _link_commenter_to_creator(db, brand_raw_id, creator_username, {
+            "username": commenter_username,
+            "source_post_url": link.source_post_url,
+            "comment_text": link.comment_text,
+            "comment_likes": link.comment_likes,
+        })
 
 
 #  Main enrichment function 
@@ -546,11 +534,13 @@ def enrich_instagram_users(db: Session, limit: int = 5) -> int:
             niche = _classify_niche(db, username, profile, raw_posts)
             time.sleep(0.3)
 
-            #  d. Store content creator in instagram_users
-            top_posts = _format_top_posts(raw_posts)
-            upsert_rows(db, InstagramUser, [
-                _build_user_row(username, user_type, profile, demo, top_posts, niche=niche)
-            ], ["username"])
+            #  d. Store content creator in instagram_users — one row per post
+            creator_rows = [
+                _build_post_row(username, user_type, profile, demo, item, niche=niche)
+                for item in raw_posts
+                if item.get("id")
+            ]
+            upsert_rows(db, InstagramUser, creator_rows, ["post_id"])
             _link_to_brand(db, post.brand_raw_id, username)
 
             logger.info(
@@ -595,14 +585,14 @@ def enrich_instagram_users(db: Session, limit: int = 5) -> int:
                     time.sleep(0.5)
                     continue
 
-                c_profile  = _profile_from_posts(c_posts)
-                c_demo     = _classify_demographics(db, commenter, c_profile)
-                c_top_posts = _format_top_posts(c_posts)
+                c_profile = _profile_from_posts(c_posts)
+                c_demo    = _classify_demographics(db, commenter, c_profile)
                 time.sleep(0.3)
 
-                upsert_rows(db, InstagramUser, [
-                    _build_user_row(commenter, "commenter", c_profile, c_demo, c_top_posts)
-                ], ["username"])
+                if c_posts[0].get("id"):
+                    upsert_rows(db, InstagramUser, [
+                        _build_post_row(commenter, "commenter", c_profile, c_demo, c_posts[0])
+                    ], ["username"], index_where=_COMMENTER_USERNAME_INDEX_WHERE)
                 _link_to_brand(db, post.brand_raw_id, commenter)
                 for record in commenter_records:
                     if record["username"] == commenter:

@@ -215,10 +215,19 @@ class InstagramPost(Base):
 
 
 class InstagramUser(Base):
+    """
+    username is unique only for user_type="commenter" — coauthor_producer/
+    tagged_user/mention creators now get ONE ROW PER POST instead of one
+    row per profile (top_posts JSONB nesting is legacy-only at this point,
+    still populated on old rows but no longer written for new ones), so
+    multiple rows can share a username for those types. Enforced via a
+    partial unique index (see api/app.py migrations) rather than a plain
+    unique=True column constraint, which can't express "unique except when".
+    """
     __tablename__ = "instagram_users"
 
     id                  = Column(Integer, primary_key=True)
-    username            = Column(Text, unique=True, nullable=False)
+    username            = Column(Text, nullable=False)
     profile_url         = Column(Text)
 
     # Profile snapshot
@@ -232,7 +241,7 @@ class InstagramUser(Base):
     is_verified         = Column(Boolean)
     is_business_account = Column(Boolean)
 
-    # Source type: "coauthor_producer", "tagged_user", "mention", "commenter"
+    # Source type: "coauthor_producer", "tagged_user", "mention", "commenter", "contentcreatorRE"
     user_type           = Column(Text)
 
     # LLM demographics
@@ -245,9 +254,27 @@ class InstagramUser(Base):
     # LLM-extracted content niche, from bio + top 5 posts' captions/hashtags — creators only, NULL for commenters
     niche               = Column(Text)
 
-    # Top 5 posts with their top 5 comments each
+    # Legacy: pre-per-post-row creator snapshots (top 5 posts + top 5
+    # comments each nested as JSONB). Still present on old rows; no longer
+    # written by enrich_instagram_users() going forward — see the per-post
+    # columns below instead.
     top_posts           = Column(JSONB)
-    captions            = Column(JSONB)   # flat list of caption strings from top_posts — creators only, NULL for commenters
+    captions            = Column(JSONB)   # flat list of caption strings from top_posts — legacy, see above
+
+    # Per-post columns — one row per post for creators (coauthor_producer/
+    # tagged_user/mention/contentcreatorRE); commenters still get exactly 1
+    # row (they only ever scrape 1 post). post_id is unique when present
+    # (Postgres allows unlimited NULLs in a unique column).
+    post_id             = Column(Text, unique=True)
+    post_url            = Column(Text)
+    caption              = Column(Text)
+    likes_count         = Column(Integer)
+    comments_count      = Column(Integer)
+    post_timestamp      = Column(Text)
+
+    # True for rows produced by the content_creator_re pipeline specifically
+    # (not used by the regular brand-triggered flow above).
+    is_content_creator_re = Column(Boolean, nullable=False, server_default="false", default=False)
 
     raw_profile         = Column(JSONB)
     fetched_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
