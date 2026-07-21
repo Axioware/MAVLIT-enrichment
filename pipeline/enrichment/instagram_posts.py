@@ -46,7 +46,7 @@ from pipeline.helpers.social import normalize_handle
 logger = logging.getLogger(__name__)
 
 _ACTOR_ID     = "shu8hvrXbJbY3Eb9W"
-_POSTS_LIMIT  = 50   # last N posts, regardless of how far back that goes
+_POSTS_LIMIT  = 40   # last N posts, regardless of how far back that goes
 _RESULTS_TYPE = "posts"
 
 #  Prompt helpers
