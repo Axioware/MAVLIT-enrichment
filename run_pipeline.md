@@ -129,6 +129,18 @@ enrich_wikidata_socials(db, limit=1)
 db.close()
 "
 
+or (target one specific brand by brand_raw id)
+
+python3 -c "
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.wikidata_socials import enrich_wikidata_socials
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+db = SessionLocal()
+enrich_wikidata_socials(db, brand_id=5318)
+db.close()
+"
+
 ## Shopify detect (checks if brand website runs on Shopify)
 python3 -c "
 from dotenv import load_dotenv; load_dotenv()

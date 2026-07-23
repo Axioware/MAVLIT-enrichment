@@ -105,21 +105,23 @@ SELECT ?entity ?ig ?tw ?yt ?fb ?tt ?li WHERE {{
     return results
 
 
-def enrich_wikidata_socials(db: Session, limit: int = 500) -> int:
+def enrich_wikidata_socials(db: Session, limit: int = 500, brand_id: int | None = None) -> int:
     """
     Find brands_raw rows with wikidata_id and wikidata_enriched=False,
     fetch their social handles, write back, mark wikidata_enriched=True.
     Returns the number of rows updated.
+
+    Pass brand_id to target one specific brand directly — this bypasses the
+    wikidata_enriched filter (so you can re-run/test a brand that was already
+    processed), but wikidata_id must still be set.
     """
-    brands: list[BrandRaw] = (
-        db.query(BrandRaw)
-        .filter(
-            BrandRaw.wikidata_id.isnot(None),
-            BrandRaw.wikidata_enriched == False,
-        )
-        .limit(limit)
-        .all()
-    )
+    query = db.query(BrandRaw).filter(BrandRaw.wikidata_id.isnot(None))
+    if brand_id is not None:
+        query = query.filter(BrandRaw.id == brand_id)
+    else:
+        query = query.filter(BrandRaw.wikidata_enriched == False)
+
+    brands: list[BrandRaw] = query.limit(limit).all()
 
     if not brands:
         logger.info("Wikidata socials: no pending brands")
