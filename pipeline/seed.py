@@ -3,14 +3,14 @@ pipeline/seed.py
 
 Stage 1 of the brand enrichment pipeline.
 Populates brands_raw with raw brand names (and official websites) from
-Wikipedia + Wikidata (and optionally Google SERP).
+Wikipedia + Wikidata.
 
 Deduplication priority: wikidata_id > domain > normalized name (fuzzy).
-Source confidence: wikidata=100, wikipedia=80, google=50.
+Source confidence: wikidata=100, wikipedia=80.
 
 Usage:
     python main.py --niche footwear
-    python main.py --niche "electric vehicles" --google
+    python main.py --niche "electric vehicles"
 """
 
 import logging
@@ -21,7 +21,6 @@ from sqlalchemy.orm import Session
 
 from pipeline.db import SOURCE_CONFIDENCE, insert_brands_batch
 from pipeline.helpers.normalize import deduplicate, normalize
-from pipeline.sources.google_serp import google_brand_search
 from pipeline.sources.wikidata import search_wikidata_brands
 from pipeline.sources.wikipedia import search_wikipedia_brands
 
@@ -50,7 +49,6 @@ def _interleave_sources(rows: list[dict]) -> list[dict]:
 def run_seed(
     niche: str,
     db: Session,
-    use_google: bool = False,
     limit: Optional[int] = None,
     country: str | None = None,
     headquarters: str | None = None,
@@ -64,10 +62,10 @@ def run_seed(
     Wikipedia category search to a specific geography.
 
     `niche` still drives every search query (Wikipedia category, Wikidata
-    SPARQL, Google SERP) exactly as typed. Pass niche_label to store a
-    DIFFERENT value in brands_raw.niche for every row this run inserts —
-    e.g. search for "k-pop groups" but file every result under the fixed
-    label "Music". Falls back to `niche` itself when not given.
+    SPARQL) exactly as typed. Pass niche_label to store a DIFFERENT value in
+    brands_raw.niche for every row this run inserts — e.g. search for
+    "k-pop groups" but file every result under the fixed label "Music".
+    Falls back to `niche` itself when not given.
     """
     stored_niche = niche_label or niche
     geo_active = {
@@ -166,23 +164,6 @@ def run_seed(
         )
     except Exception:
         logger.exception("Wikidata query failed for niche '%s'", niche)
-
-    #  Source 3: Google SERP (optional) 
-    # google_brand_search still returns list[str]; no website/domain available.
-    if use_google:
-        query = f"top {niche} brands"
-        logger.info("Google SERP: %s", query)
-        try:
-            serp_names = google_brand_search(query)
-            for name in serp_names:
-                collected.append(_row(
-                    name=name,
-                    source="google",
-                    source_url=f"https://www.google.com/search?q={query}",
-                ))
-            logger.info("Google SERP yielded %d names", len(serp_names))
-        except Exception:
-            logger.exception("Google SERP failed for query '%s'", query)
 
     logger.info("Total raw names collected: %d", len(collected))
 

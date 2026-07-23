@@ -3,7 +3,6 @@ main.py — CLI entrypoint for the seed stage.
 
 Usage:
     python main.py --niche fashion
-    python main.py --niche music --google
     python main.py --niche fashion --limit 50   # for testing
 
 """
@@ -44,12 +43,6 @@ def main():
     parser = argparse.ArgumentParser(description="Seed brands_raw from free sources")
     parser.add_argument("--niche", required=True, help="Niche to seed (e.g. fashion)")
     parser.add_argument(
-        "--google",
-        action="store_true",
-        default=False,
-        help="Enable Google SERP scraping via Playwright (slow, may be blocked)",
-    )
-    parser.add_argument(
         "--limit",
         type=int,
         default=None,
@@ -64,7 +57,6 @@ def main():
         inserted = run_seed(
             niche=args.niche,
             db=db,
-            use_google=args.google,
             limit=args.limit,
         )
         print(f"\nDone. Inserted {inserted} new brands for niche: {args.niche}")

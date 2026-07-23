@@ -397,14 +397,6 @@
       <option value="Health & Wellness">Health &amp; Wellness</option>
     </select>
 
-    <div class="toggle-row" style="margin-top:1.25rem">
-      <label class="switch">
-        <input type="checkbox" id="useGoogle" />
-        <span class="slider"></span>
-      </label>
-      <span class="toggle-label">Include Google SERP <span style="color:#475569;">(slow)</span></span>
-    </div>
-
     <!-- Geographic filters -->
     <div class="geo-section">
       <div class="geo-toggle" id="geoToggle" onclick="toggleGeo()">
@@ -590,7 +582,6 @@
       document.getElementById('niche').focus();
       return;
     }
-    const useGoogle     = document.getElementById('useGoogle').checked;
     const country       = document.getElementById('country').value.trim() || null;
     const headquarters  = document.getElementById('headquarters').value.trim() || null;
     const location      = document.getElementById('location').value.trim() || null;
@@ -604,7 +595,6 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         niche,
-        use_google: useGoogle,
         country,
         headquarters,
         location,

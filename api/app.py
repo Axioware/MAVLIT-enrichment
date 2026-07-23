@@ -79,7 +79,7 @@ def _run_migrations() -> None:
         # Signal enrichment — website
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS has_official_website BOOLEAN",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS website_source TEXT",
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS google_discovered_website TEXT",
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS google_discovered_website",
         # Signal enrichment — detection
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS is_shopify BOOLEAN",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS is_woocommerce BOOLEAN",
@@ -88,7 +88,7 @@ def _run_migrations() -> None:
         # Signal enrichment — per-step tracking flags
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS wikidata_enriched BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS shopify_checked BOOLEAN NOT NULL DEFAULT false",
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS google_social_checked BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS google_social_checked",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS tranco_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS meta_ads_fetched BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS youtube_checked BOOLEAN NOT NULL DEFAULT false",
@@ -691,7 +691,6 @@ admin.add_view(TwitterPostAdmin)
 
 class SeedRequest(BaseModel):
     niche:          str
-    use_google:     bool        = False
     limit:          int | None  = None
     country:        str | None  = None
     headquarters:   str | None  = None
@@ -719,7 +718,6 @@ def _run_seed_job(job_id: str, body: SeedRequest) -> None:
         inserted = run_seed(
             niche=body.niche,
             db=db,
-            use_google=body.use_google,
             limit=body.limit,
             country=body.country,
             headquarters=body.headquarters,
@@ -855,7 +853,7 @@ def seed_status(job_id: str):
 def enrich_signals(body: EnrichRequest, background_tasks: BackgroundTasks):
     """
     Kick off signal enrichment in the background.
-    Steps: wikidata_socials, shopify, google_social, tranco, meta_ads, youtube.
+    Steps: wikidata_socials, shopify, tranco, meta_ads, youtube.
     Pass `steps` to run only a subset, e.g. ["shopify", "tranco"].
     Poll GET /enrich/signals/status/{job_id} to track progress.
     """

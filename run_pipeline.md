@@ -1,4 +1,4 @@
-# wikidata_socials → shopify → google_social → tranco → meta_ads → youtube → twitter
+# wikidata_socials → shopify → tranco → meta_ads → youtube → twitter
 
 
 ## to run instagram_posts.py (apify)
@@ -173,17 +173,6 @@ from pipeline.enrichment.tranco import enrich_tranco
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 db = SessionLocal()
 enrich_tranco(db, limit=1)
-db.close()
-"
-
-## run google_social_search.py
-python3 -c "
-from dotenv import load_dotenv; load_dotenv()
-from pipeline.db import SessionLocal
-from pipeline.enrichment.google_social_search import enrich_google_socials
-import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
-db = SessionLocal()
-enrich_google_socials(db, limit=1)
 db.close()
 "
 

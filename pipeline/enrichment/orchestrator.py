@@ -4,11 +4,10 @@ pipeline/enrichment/orchestrator.py
 Orchestrates all signal enrichment steps in order:
   1. wikidata_socials    — social handles for brands with QID
   2. shopify             — is_shopify / is_woocommerce + social URLs from homepage
-  3. google_social       — fills any still-missing social URLs via Google search
-  4. tranco              — in_tranco_list / tranco_rank for brands with domain
-  5. meta_ads            — store raw ad data from Meta Ad Library
-  6. youtube             — detect brands being sponsored in YouTube videos
-  7. twitter             — scrape sponsored tweets for brands with twitter_handle
+  3. tranco              — in_tranco_list / tranco_rank for brands with domain
+  4. meta_ads            — store raw ad data from Meta Ad Library
+  5. youtube             — detect brands being sponsored in YouTube videos
+  6. twitter             — scrape sponsored tweets for brands with twitter_handle
 
 Each step is independent; a failure in one doesn't abort the others.
 """
@@ -17,7 +16,6 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from .google_social_search import enrich_google_socials
 from .meta_ads import enrich_meta_ads
 from .shopify_detect import enrich_shopify
 from .tranco import enrich_tranco
@@ -39,13 +37,13 @@ def run_signal_enrichment(
     Run all (or a subset of) signal enrichment steps.
 
     Valid step names:
-      wikidata_socials, shopify, google_social, tranco, meta_ads, youtube, twitter
+      wikidata_socials, shopify, tranco, meta_ads, youtube, twitter
 
     If `steps` is None, all steps run.
     Returns a dict mapping step name → rows updated.
     """
     all_steps = [
-        "wikidata_socials", "shopify", "google_social",
+        "wikidata_socials", "shopify",
         "tranco", "meta_ads", "youtube", "twitter",
     ]
     run = set(steps) if steps else set(all_steps)
@@ -64,13 +62,6 @@ def run_signal_enrichment(
         except Exception:
             logger.exception("shopify step failed")
             results["shopify"] = -1
-
-    if "google_social" in run:
-        try:
-            results["google_social"] = enrich_google_socials(db, limit=limit_per_step)
-        except Exception:
-            logger.exception("google_social step failed")
-            results["google_social"] = -1
 
     if "tranco" in run:
         try:

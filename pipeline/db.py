@@ -8,7 +8,6 @@ from sqlalchemy.sql import func
 SOURCE_CONFIDENCE = {
     "wikidata":  100,
     "wikipedia": 80,
-    "google":    50,
 }
 
 from config import DATABASE_URL
@@ -54,10 +53,9 @@ class BrandRaw(Base):
     tiktok_handle       = Column(Text)
     linkedin_id         = Column(Text)
 
-    #  Website enrichment 
+    #  Website enrichment
     has_official_website     = Column(Boolean)
-    website_source           = Column(Text)   # 'wikidata' | 'google' | 'none'
-    google_discovered_website = Column(Text)
+    website_source           = Column(Text)   # 'wikidata' | 'none'
 
     #  Signal detection 
     is_shopify      = Column(Boolean)
@@ -68,7 +66,6 @@ class BrandRaw(Base):
     #  Per-step tracking flags 
     wikidata_enriched      = Column(Boolean, nullable=False, server_default="false", default=False)
     shopify_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
-    google_social_checked  = Column(Boolean, nullable=False, server_default="false", default=False)
     tranco_checked         = Column(Boolean, nullable=False, server_default="false", default=False)
     meta_ads_fetched       = Column(Boolean, nullable=False, server_default="false", default=False)
     youtube_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
