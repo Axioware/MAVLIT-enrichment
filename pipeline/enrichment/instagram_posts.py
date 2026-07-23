@@ -76,9 +76,32 @@ def _usernames_only(items) -> list[str] | None:
     return usernames or None
 
 
+def _real_coauthors(item: dict, brand_handle: str) -> list[dict]:
+    """
+    Apify's coauthorProducers lists a collab post's co-authors, which
+    excludes whoever is the post's primary owner. When the brand is the
+    co-author rather than the owner (a creator posted and tagged the brand),
+    coauthorProducers only contains the brand's own account — the real
+    collaborating creator is item["ownerUsername"] instead. Filter the
+    brand's own username out of coauthorProducers and add the owner in
+    when they're a different account.
+    """
+    handle_lower = (brand_handle or "").lower()
+    candidates = [
+        entry for entry in (item.get("coauthorProducers") or [])
+        if isinstance(entry, dict) and (entry.get("username") or "").lower() != handle_lower
+    ]
+    owner = item.get("ownerUsername")
+    if owner and owner.lower() != handle_lower and not any(
+        (c.get("username") or "").lower() == owner.lower() for c in candidates
+    ):
+        candidates.append({"username": owner})
+    return candidates
+
+
 #  LLM functions 
 
-def _llm_filter_all(db: Session, item: dict, brand_name: str) -> dict | None:
+def _llm_filter_all(db: Session, item: dict, brand_name: str, handle: str) -> dict | None:
     """
     Full-filter mode (ENABLE_INSTA_LLM=True).
     Sends all signals to Mistral; returns dict with filtered field values.
@@ -97,7 +120,7 @@ def _llm_filter_all(db: Session, item: dict, brand_name: str) -> dict | None:
         sponsors=_fmt(item.get("sponsors")),
         tagged_users=_fmt(item.get("taggedUsers")),
         mentions=_fmt(item.get("mentions")),
-        coauthor_producers=_fmt(item.get("coauthorProducers")),
+        coauthor_producers=_fmt(_real_coauthors(item, handle)),
     )
     result = call_mistral_json(prompt, context=f"{brand_name} full-filter post {item.get('id')}")
     if not isinstance(result, dict):
@@ -114,13 +137,13 @@ def _llm_filter_all(db: Session, item: dict, brand_name: str) -> dict | None:
     return result
 
 
-def _llm_filter_coauthors(db: Session, item: dict, brand_name: str) -> list:
+def _llm_filter_coauthors(db: Session, item: dict, brand_name: str, handle: str) -> list:
     """
     Coauthor-only filter — always active regardless of ENABLE_INSTA_LLM.
     Returns the filtered coauthor list (may be empty).
     Falls back to the raw Apify list when MISTRAL_API_KEY is not set.
     """
-    raw = item.get("coauthorProducers") or []
+    raw = _real_coauthors(item, handle)
     if not MISTRAL_API_KEY:
         logger.warning("Instagram LLM coauthor: MISTRAL_API_KEY not set — saving coauthors as-is")
         return raw
@@ -167,7 +190,7 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
         "hashtags":               item.get("hashtags"),
         "mentions":               item.get("mentions"),
         "tagged_users":           _usernames_only(item.get("taggedUsers")),
-        "coauthor_producers":     _usernames_only(item.get("coauthorProducers")),
+        "coauthor_producers":     _usernames_only(_real_coauthors(item, handle)),
         "paid_partnership":       item.get("paidPartnership"),
         "sponsors":               item.get("sponsors"),
         "likes_count":            item.get("likesCount"),
@@ -250,16 +273,16 @@ def enrich_instagram_posts(
 
         for item in items:
             has_paid   = bool(item.get("paidPartnership") or item.get("sponsors"))
-            has_coauth = bool(item.get("coauthorProducers"))
+            has_coauth = bool(_real_coauthors(item, handle))
             has_social = bool(item.get("taggedUsers") or item.get("mentions"))
 
             if ENABLE_INSTA_LLM:
-                #  Full LLM mode: all signals filtered 
+                #  Full LLM mode: all signals filtered
                 if not (has_paid or has_coauth or has_social):
                     skipped_no_signal += 1
                     continue
 
-                filtered = _llm_filter_all(db, item, brand.name)
+                filtered = _llm_filter_all(db, item, brand.name, handle)
                 if filtered is None:          # no API key
                     skipped_llm += 1
                     continue
@@ -294,7 +317,7 @@ def enrich_instagram_posts(
 
                 filtered_coauthors: list | None = None
                 if has_coauth:
-                    filtered_coauthors = _usernames_only(_llm_filter_coauthors(db, item, brand.name))
+                    filtered_coauthors = _usernames_only(_llm_filter_coauthors(db, item, brand.name, handle))
                     time.sleep(0.3)
 
                 if not has_direct and not filtered_coauthors:
