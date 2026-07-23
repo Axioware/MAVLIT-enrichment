@@ -202,7 +202,7 @@ def _insert_ads(db: Session, brand_raw_id: int, ads: list[dict]) -> int:
     return upsert_rows(db, MetaAd, rows, ["ad_archive_id"])
 
 
-def enrich_meta_ads(db: Session, limit: int = 200, niche: str | None = None) -> int:
+def enrich_meta_ads(db: Session, limit: int = 200, niche: str | None = None, brand_id: int | None = None) -> int:
     """
     For each brand with facebook_page or facebook_page_id set and meta_ads_fetched=False:
       1. Resolve the numeric facebook_page_id from the facebook_page URL via Graph API
@@ -218,6 +218,11 @@ def enrich_meta_ads(db: Session, limit: int = 200, niche: str | None = None) -> 
     (case-insensitive) — brands_raw.niche is stored verbatim as typed at
     seed time (see pipeline/seed.py), so this must match that same string.
 
+    Pass brand_id to target one specific brand directly — this bypasses the
+    meta_ads_fetched filter (so you can re-run/test a brand that was already
+    processed), but facebook_page or facebook_page_id must still be set.
+    niche is ignored if brand_id is also given.
+
     Returns number of brand rows processed.
     """
     if not META_ACCESS_TOKEN:
@@ -225,14 +230,15 @@ def enrich_meta_ads(db: Session, limit: int = 200, niche: str | None = None) -> 
         return 0
 
     query = db.query(BrandRaw).filter(
-        BrandRaw.meta_ads_fetched == False,
-        (
-            BrandRaw.facebook_page.isnot(None) |
-            BrandRaw.facebook_page_id.isnot(None)
-        ),
+        BrandRaw.facebook_page.isnot(None) |
+        BrandRaw.facebook_page_id.isnot(None)
     )
-    if niche:
-        query = query.filter(func.lower(BrandRaw.niche) == niche.strip().lower())
+    if brand_id is not None:
+        query = query.filter(BrandRaw.id == brand_id)
+    else:
+        query = query.filter(BrandRaw.meta_ads_fetched == False)
+        if niche:
+            query = query.filter(func.lower(BrandRaw.niche) == niche.strip().lower())
 
     brands: list[BrandRaw] = query.limit(limit).all()
 

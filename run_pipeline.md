@@ -105,6 +105,18 @@ enrich_meta_ads(db, limit=1, niche='Food & Beverage')
 db.close()
 "
 
+or (target one specific brand by brand_raw id)
+
+python3 -c "
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.meta_ads import enrich_meta_ads
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+db = SessionLocal()
+enrich_meta_ads(db, brand_id=5318)
+db.close()
+"
+
 
 ## Wikidata Socials (fetches instagram, youtube, twitter, facebook, tiktok handles)
 python3 -c "
