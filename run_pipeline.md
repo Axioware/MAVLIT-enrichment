@@ -2,7 +2,6 @@
 
 
 ## to run instagram_posts.py (apify)
-
 python3 -c "
 from dotenv import load_dotenv; load_dotenv()
 from pipeline.db import SessionLocal
@@ -37,10 +36,7 @@ enrich_instagram_posts(db, limit=1, niche='fashion')
 db.close()
 "
 
-
-
 ## to run youtube_sponsorship.py (daily limited run)
-
 python3 -c "
 from dotenv import load_dotenv; load_dotenv()
 from pipeline.db import SessionLocal
@@ -75,9 +71,7 @@ enrich_youtube_sponsorships(db, limit=1, niche='fashion')
 db.close()
 "
 
-
 ## to run tiktok_posts.py (apify)
-
 python3 -c "
 from dotenv import load_dotenv; load_dotenv()
 from pipeline.db import SessionLocal
@@ -89,7 +83,6 @@ db.close()
 "
 
 ## to run meta_ads.py
-
 python3 -c "
 from dotenv import load_dotenv; load_dotenv()
 from pipeline.db import SessionLocal
@@ -171,7 +164,6 @@ db.close()
 "
 
 ## run twitter_posts.py
-
 python3 -c "
 from dotenv import load_dotenv; load_dotenv()
 from pipeline.db import SessionLocal
@@ -192,7 +184,6 @@ enrich_twitter_posts(db, brand_id=123)
 db.close()
 "
 
-
 ## run intagram_users.py
 python3 -c "
 import logging; logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
@@ -201,6 +192,19 @@ from pipeline.db import SessionLocal
 from pipeline.enrichment.instagram_users import enrich_instagram_users
 db = SessionLocal()
 result = enrich_instagram_users(db, limit=1)
+print('Posts processed:', result)
+db.close()
+"
+
+OR
+
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.instagram_users import enrich_instagram_users
+db = SessionLocal()
+result = enrich_instagram_users(db, limit=1, post_id=2651)
 print('Posts processed:', result)
 db.close()
 "

@@ -466,21 +466,26 @@ def _link_existing_commenters_from_creator_snapshot(
 
 #  Main enrichment function 
 
-def enrich_instagram_users(db: Session, limit: int = 5) -> int:
+def enrich_instagram_users(db: Session, limit: int = 5, post_id: int | None = None) -> int:
     """
     Process up to `limit` instagram_posts where is_users_scraped=False.
     Returns number of posts processed.
+
+    Pass post_id to target one specific instagram_posts row directly — this
+    bypasses the is_users_scraped filter (so you can re-run/test a post that
+    was already processed).
     """
     if not APIFY_TOKEN:
         logger.warning("APIFY_TOKEN not set — skipping Instagram user enrichment")
         return 0
 
-    posts: list[InstagramPost] = (
-        db.query(InstagramPost)
-        .filter(InstagramPost.is_users_scraped == False)
-        .limit(limit)
-        .all()
-    )
+    query = db.query(InstagramPost)
+    if post_id is not None:
+        query = query.filter(InstagramPost.id == post_id)
+    else:
+        query = query.filter(InstagramPost.is_users_scraped == False)
+
+    posts: list[InstagramPost] = query.limit(limit).all()
 
     if not posts:
         logger.info("Instagram users: no pending posts")
