@@ -196,7 +196,7 @@ print('Posts processed:', result)
 db.close()
 "
 
-OR
+OR (target one specific instagram_posts row by its primary key id)
 
 python3 -c "
 import logging; logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
@@ -204,7 +204,20 @@ from dotenv import load_dotenv; load_dotenv()
 from pipeline.db import SessionLocal
 from pipeline.enrichment.instagram_users import enrich_instagram_users
 db = SessionLocal()
-result = enrich_instagram_users(db, limit=1, post_id=2651)
+result = enrich_instagram_users(db, limit=1, row_id=2651)
+print('Posts processed:', result)
+db.close()
+"
+
+OR (target all instagram_posts rows for one brand)
+
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.instagram_users import enrich_instagram_users
+db = SessionLocal()
+result = enrich_instagram_users(db, limit=5, brand_raw_id=5318)
 print('Posts processed:', result)
 db.close()
 "

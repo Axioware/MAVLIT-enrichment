@@ -466,22 +466,33 @@ def _link_existing_commenters_from_creator_snapshot(
 
 #  Main enrichment function 
 
-def enrich_instagram_users(db: Session, limit: int = 5, post_id: int | None = None) -> int:
+def enrich_instagram_users(
+    db: Session,
+    limit: int = 5,
+    row_id: int | None = None,
+    brand_raw_id: int | None = None,
+) -> int:
     """
     Process up to `limit` instagram_posts where is_users_scraped=False.
     Returns number of posts processed.
 
-    Pass post_id to target one specific instagram_posts row directly — this
-    bypasses the is_users_scraped filter (so you can re-run/test a post that
-    was already processed).
+    Pass row_id to target one specific instagram_posts row by its primary
+    key (instagram_posts.id) — bypasses the is_users_scraped filter (so you
+    can re-run/test a post that was already processed). Not to be confused
+    with instagram_posts.post_id, which is Instagram's own post ID string.
+
+    Pass brand_raw_id to target all instagram_posts rows for one brand
+    instead — also bypasses is_users_scraped. Ignored if row_id is given.
     """
     if not APIFY_TOKEN:
         logger.warning("APIFY_TOKEN not set — skipping Instagram user enrichment")
         return 0
 
     query = db.query(InstagramPost)
-    if post_id is not None:
-        query = query.filter(InstagramPost.id == post_id)
+    if row_id is not None:
+        query = query.filter(InstagramPost.id == row_id)
+    elif brand_raw_id is not None:
+        query = query.filter(InstagramPost.brand_raw_id == brand_raw_id)
     else:
         query = query.filter(InstagramPost.is_users_scraped == False)
 
