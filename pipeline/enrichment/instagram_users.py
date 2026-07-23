@@ -290,6 +290,18 @@ _UNKNOWN_DEMO = {
 }
 
 
+def _format_business_address(addr) -> str:
+    """businessAddress comes back as a dict (street_address/city_name/zip_code) for business accounts."""
+    if not addr:
+        return ""
+    if isinstance(addr, str):
+        return addr
+    if isinstance(addr, dict):
+        parts = [addr.get("street_address"), addr.get("city_name"), addr.get("zip_code")]
+        return ", ".join(p for p in parts if p)
+    return ""
+
+
 def _classify_demographics(db: Session, username: str, profile: dict) -> dict:
     """Classify demographics for a user profile via Mistral."""
     if not MISTRAL_API_KEY:
@@ -301,7 +313,7 @@ def _classify_demographics(db: Session, username: str, profile: dict) -> dict:
         full_name=profile.get("fullName") or "",
         bio=profile.get("biography") or "",
         external_url=profile.get("externalUrl") or "",
-        business_address=profile.get("businessAddress") or "",
+        business_address=_format_business_address(profile.get("businessAddress")),
     )
     result = call_mistral_json(prompt, context=f"demographics @{username}")
     if not isinstance(result, dict):
@@ -384,9 +396,18 @@ def _build_post_row(
         "likes_count":         item.get("likesCount"),
         "comments_count":      item.get("commentsCount"),
         "post_timestamp":      item.get("timestamp"),
+        "top_comments":        _top_comments_str(item),
         "is_content_creator_re": is_content_creator_re,
-        "raw_profile":         profile,
+        # No longer written — all its fields now live in flat columns above.
+        "raw_profile":         None,
     }
+
+
+def _top_comments_str(item: dict) -> str | None:
+    """Comma-separated comment texts from this post's latestComments."""
+    comments = item.get("latestComments") or []
+    texts = [c.get("text", "").strip() for c in comments if isinstance(c, dict) and c.get("text", "").strip()]
+    return ", ".join(texts) if texts else None
 
 
 #  Brand link helper 

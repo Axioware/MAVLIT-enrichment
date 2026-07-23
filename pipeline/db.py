@@ -270,11 +270,14 @@ class InstagramUser(Base):
     likes_count         = Column(Integer)
     comments_count      = Column(Integer)
     post_timestamp      = Column(Text)
+    top_comments        = Column(Text)   # comment texts for this post, comma-separated
 
     # True for rows produced by the content_creator_re pipeline specifically
     # (not used by the regular brand-triggered flow above).
     is_content_creator_re = Column(Boolean, nullable=False, server_default="false", default=False)
 
+    # No longer written (all its fields now live in flat columns above,
+    # same reasoning as top_posts/captions) — kept for legacy rows only.
     raw_profile         = Column(JSONB)
     fetched_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

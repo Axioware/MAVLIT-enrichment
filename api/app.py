@@ -124,6 +124,7 @@ def _run_migrations() -> None:
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS comments_count INTEGER",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS post_timestamp TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS is_content_creator_re BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS top_comments TEXT",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_instagram_users_post_id ON instagram_users(post_id)",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS tier_fit TEXT",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS comments JSONB",
