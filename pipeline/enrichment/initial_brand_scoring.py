@@ -549,27 +549,34 @@ def score_brand(db: Session, brand_raw_id: int) -> dict[str, Any] | None:
     return row
 
 
-def run_brand_scoring(db: Session, limit: int = 500) -> int:
+def run_brand_scoring(db: Session, limit: int = 500, brand_id: int | None = None) -> int:
     """
     Score all brands that have at least one enrichment step complete.
     Brands are scored regardless of enrichment_completeness; the completeness
     value in the output row lets callers filter before sending to Apollo.
     Returns number of brands scored.
+
+    Pass brand_id to target one specific brand directly — this bypasses the
+    enrichment-completeness and initial_brand_scored filters (so you can
+    re-run/test a brand regardless of its current state).
     """
-    brands = (
-        db.query(BrandRaw)
-        .filter(
-            BrandRaw.wikidata_enriched  == True,
-            BrandRaw.shopify_checked    == True,
-            BrandRaw.tranco_checked     == True,
-            BrandRaw.meta_ads_fetched   == True,
-            BrandRaw.youtube_checked    == True,
-            BrandRaw.instagram_checked  == True,
-            BrandRaw.initial_brand_scored == False,
+    if brand_id is not None:
+        brands = db.query(BrandRaw).filter(BrandRaw.id == brand_id).all()
+    else:
+        brands = (
+            db.query(BrandRaw)
+            .filter(
+                BrandRaw.wikidata_enriched  == True,
+                BrandRaw.shopify_checked    == True,
+                BrandRaw.tranco_checked     == True,
+                BrandRaw.meta_ads_fetched   == True,
+                BrandRaw.youtube_checked    == True,
+                BrandRaw.instagram_checked  == True,
+                BrandRaw.initial_brand_scored == False,
+            )
+            .limit(limit)
+            .all()
         )
-        .limit(limit)
-        .all()
-    )
 
     if not brands:
         logger.info("Brand scoring: no fully-enriched brands to score")

@@ -212,11 +212,25 @@ db.close()
 ## run brand_scoring.py
 
 python -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
 from pipeline.db import SessionLocal
 from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
-
 db = SessionLocal()
 scored = run_brand_scoring(db, limit=1)
+print(f'Scored {scored} brands')
+db.close()
+"
+
+OR
+
+python -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
+db = SessionLocal()
+scored = run_brand_scoring(db, brand_id=5318)
 print(f'Scored {scored} brands')
 db.close()
 "
