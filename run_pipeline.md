@@ -113,7 +113,7 @@ db.close()
 "
 
 
-# Wikidata Socials (fetches instagram, youtube, twitter, facebook, tiktok handles)
+## Wikidata Socials (fetches instagram, youtube, twitter, facebook, tiktok handles)
 python3 -c "
 from dotenv import load_dotenv; load_dotenv()
 from pipeline.db import SessionLocal
@@ -124,7 +124,7 @@ enrich_wikidata_socials(db, limit=1)
 db.close()
 "
 
-# Shopify detect (checks if brand website runs on Shopify)
+## Shopify detect (checks if brand website runs on Shopify)
 python3 -c "
 from dotenv import load_dotenv; load_dotenv()
 from pipeline.db import SessionLocal
@@ -148,7 +148,7 @@ db.close()
 "
 
 
-# Tranco (checks if brand domain is in top 1M website rankings)
+## Tranco (checks if brand domain is in top 1M website rankings)
 python3 -c "
 from dotenv import load_dotenv; load_dotenv()
 from pipeline.db import SessionLocal
