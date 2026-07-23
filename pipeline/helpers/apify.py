@@ -30,10 +30,10 @@ def run_apify_actor(
     client = ApifyClient(APIFY_TOKEN)
     try:
         run = client.actor(actor_id).call(run_input=run_input)
-        if require_success and run.status != "SUCCEEDED":
-            logger.error("%sApify actor failed — status: %s", prefix, run.status)
+        if require_success and run["status"] != "SUCCEEDED":
+            logger.error("%sApify actor failed — status: %s", prefix, run["status"])
             return None
-        items = list(client.dataset(run.default_dataset_id).iterate_items())
+        items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
         logger.info("%s%d items from Apify", prefix, len(items))
         return items
     except Exception as exc:
