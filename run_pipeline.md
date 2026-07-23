@@ -223,7 +223,6 @@ db.close()
 "
 
 ## run brand_scoring.py
-
 python -c "
 import logging; logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 from dotenv import load_dotenv; load_dotenv()

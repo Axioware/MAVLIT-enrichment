@@ -100,12 +100,16 @@ def _collect_creators(post: InstagramPost) -> dict[str, str]:
                 result[u] = "mention"
 
     for entry in post.tagged_users or []:
-        u = entry.get("username") if isinstance(entry, dict) else None
+        u = entry if isinstance(entry, str) else entry.get("username") if isinstance(entry, dict) else None
+        if u:
+            u = u.lstrip("@")
         if u and not _is_brand(u):
             result[u] = "tagged_user"
 
     for entry in post.coauthor_producers or []:
-        u = entry.get("username") if isinstance(entry, dict) else None
+        u = entry if isinstance(entry, str) else entry.get("username") if isinstance(entry, dict) else None
+        if u:
+            u = u.lstrip("@")
         if u and not _is_brand(u):
             result[u] = "coauthor_producer"
 
