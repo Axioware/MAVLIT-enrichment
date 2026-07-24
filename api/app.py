@@ -379,6 +379,7 @@ class BrandNicheAdmin(ModelView, model=BrandNiche):
     column_labels = {BrandNiche.brand_raw: "Brand"}
     column_searchable_list = [BrandNiche.niche, BrandNiche.description]
     column_sortable_list   = [BrandNiche.id, BrandNiche.niche, BrandNiche.description, BrandNiche.tags]
+    column_default_sort    = [(BrandNiche.id, True)]
     page_size = 15
 
 
@@ -419,7 +420,7 @@ class YoutubeSponsorshipAdmin(ModelView, model=YoutubeSponsorship):
         YoutubeSponsorship.published_at,
         YoutubeSponsorship.fetched_at,
     ]
-    column_default_sort    = [(YoutubeSponsorship.confidence, True)]
+    column_default_sort    = [(YoutubeSponsorship.id, True)]
     page_size = 15
 
 
@@ -486,7 +487,7 @@ class InstagramUserAdmin(ModelView, model=InstagramUser):
         InstagramUser.fetched_at,
         InstagramUser.niche
     ]
-    column_default_sort    = [(InstagramUser.followers_count, True)]
+    column_default_sort    = [(InstagramUser.id, True)]
     page_size = 15
 
 
@@ -497,7 +498,7 @@ class ContentCreatorREAdmin(ModelView, model=ContentCreatorRE):
     column_list  = "__all__"
     column_searchable_list = [ContentCreatorRE.username, ContentCreatorRE.niche]
     column_sortable_list   = [ContentCreatorRE.id, ContentCreatorRE.username, ContentCreatorRE.niche, ContentCreatorRE.currenttime]
-    column_default_sort    = [(ContentCreatorRE.currenttime, True)]
+    column_default_sort    = [(ContentCreatorRE.id, True)]
     page_size = 15
 
 
@@ -556,7 +557,7 @@ class TiktokPostAdmin(ModelView, model=TiktokPost):
         TiktokPost.is_ad,
         TiktokPost.fetched_at,
     ]
-    column_default_sort    = [(TiktokPost.play_count, True)]
+    column_default_sort    = [(TiktokPost.id, True)]
     page_size = 15
 
 
@@ -578,7 +579,7 @@ class TwitterPostAdmin(ModelView, model=TwitterPost):
         TwitterPost.is_sponsored,
         TwitterPost.fetched_at,
     ]
-    column_default_sort    = [(TwitterPost.likes, True)]
+    column_default_sort    = [(TwitterPost.id, True)]
     page_size = 15
 
 
@@ -609,7 +610,7 @@ class InitialBrandScoreAdmin(ModelView, model=InitialBrandScore):
         InitialBrandScore.enrichment_completeness,
         InitialBrandScore.scored_at,
     ]
-    column_default_sort = [(InitialBrandScore.total_score, True)]
+    column_default_sort = [(InitialBrandScore.id, True)]
     page_size = 15
 
 
@@ -620,6 +621,7 @@ class BrandProfileAdmin(ModelView, model=BrandProfile):
     column_list  = "__all__"
     column_labels = {BrandProfile.brand_raw: "Brand"}
     column_sortable_list = [
+        BrandProfile.brand_raw_id,
         BrandProfile.sponsorship_activity_score,
         BrandProfile.meta_ads_active,
         BrandProfile.meta_ads_recency_days,
@@ -632,7 +634,7 @@ class BrandProfileAdmin(ModelView, model=BrandProfile):
         BrandProfile.contact_mode,
         BrandProfile.computed_at,
     ]
-    column_default_sort = [(BrandProfile.sponsorship_activity_score, True)]
+    column_default_sort = [(BrandProfile.brand_raw_id, True)]
     page_size = 15
 
 
@@ -647,7 +649,7 @@ class BrandContactAdmin(ModelView, model=BrandContact):
         BrandContact.id, BrandContact.rank, BrandContact.is_enriched, BrandContact.full_name,
         BrandContact.seniority, BrandContact.country, BrandContact.fetched_at, BrandContact.phone,
     ]
-    column_default_sort = [(BrandContact.rank, False)]
+    column_default_sort = [(BrandContact.id, True)]
     page_size = 15
 
 
@@ -662,7 +664,7 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
         CreatorProfile.full_name, CreatorProfile.content_niche,
         CreatorProfile.primary_platform, CreatorProfile.creator_tier, CreatorProfile.created_at,
     ]
-    column_default_sort    = [(CreatorProfile.created_at, True)]
+    column_default_sort    = [(CreatorProfile.id, True)]
     page_size = 15
 
 # tables
