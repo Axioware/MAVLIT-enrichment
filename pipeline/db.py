@@ -24,15 +24,18 @@ class BrandRaw(Base):
     __tablename__ = "brands_raw"
 
     id                = Column(Integer, primary_key=True)
-    name              = Column(Text, nullable=False)
-    name_normalized   = Column(Text, unique=True, nullable=False)
+    # Nullable — a row can be created bare (instagram_handle only) by the
+    # content_creator_re brand_check flow, which has no name/niche/source to
+    # give it. Normal seeding (pipeline/seed.py) always sets all of these.
+    name              = Column(Text)
+    name_normalized   = Column(Text, unique=True)
     # Wikidata identity — unique index managed via migration (allows multiple NULLs)
     wikidata_id       = Column(Text)
     entity_type       = Column(Text)
     description       = Column(Text)
     wikipedia_url     = Column(Text)
-    niche             = Column(Text, nullable=False)
-    source            = Column(Text, nullable=False)
+    niche             = Column(Text)
+    source            = Column(Text)
     source_confidence = Column(Integer)
     source_url        = Column(Text)
     # Official website (P856) resolved at seed time
@@ -73,6 +76,11 @@ class BrandRaw(Base):
     tiktok_checked         = Column(Boolean, nullable=False, server_default="false", default=False)
     twitter_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
     initial_brand_scored   = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Set by pipeline/enrichment/brand_wikidata_lookup.py after attempting a
+    # reverse Wikidata lookup by instagram_handle for bare brand rows (name
+    # IS NULL) — true whether or not a match was found, so unresolvable
+    # handles aren't retried every run.
+    instagram_wikidata_checked = Column(Boolean, nullable=False, server_default="false", default=False)
 
     def __str__(self) -> str:
         return self.name or f"Brand #{self.id}"
@@ -284,8 +292,9 @@ class InstagramUser(Base):
 
 class ContentCreatorRE(Base):
     """
-    Standalone table — schema only for now, not wired into any enrichment
-    code yet (population logic to be added later).
+    Reverse-engineering seed list — you supply username/niche/url directly
+    (no discovery via a brand's post), then pipeline.enrichment.content_creator_re
+    scrapes each one the same way the main creator flow does.
     """
     __tablename__ = "content_creator_re"
 
@@ -294,6 +303,7 @@ class ContentCreatorRE(Base):
     niche       = Column(Text)
     url         = Column(Text)
     currenttime = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    is_scraped  = Column(Boolean, nullable=False, server_default="false", default=False)
 
     def __str__(self) -> str:
         return self.username or f"Content Creator RE #{self.id}"
@@ -613,15 +623,18 @@ def _brand_raw_fields(b: dict) -> dict:
         "operating_area":        b.get("operating_area"),
         "has_official_website":  True if website else None,
         "website_source":        "wikidata" if website else None,
+        "instagram_handle":      b.get("instagram_handle") or None,
     }
 
 
 def _row_values(b: dict) -> dict:
+    # .get() rather than [...] — content_creator_re's brand_check flow calls
+    # insert_brand() with only instagram_handle set, no name/niche/source.
     return {
-        "name":            b["name"],
-        "name_normalized": b["normalized"],
-        "niche":           b["niche"],
-        "source":          b["source"],
+        "name":            b.get("name"),
+        "name_normalized": b.get("normalized"),
+        "niche":           b.get("niche"),
+        "source":          b.get("source"),
         "source_url":      b.get("source_url"),
         **_brand_raw_fields(b),
     }

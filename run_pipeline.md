@@ -269,3 +269,13 @@ processed = run_apollo_contacts(db, limit=1)
 print('processed:', processed)
 db.close()
 "
+
+
+# Reverse Engineering 
+
+## content_creator_re
+from pipeline.db import SessionLocal
+from pipeline.enrichment.content_creator_re import enrich_content_creator_re
+db = SessionLocal()
+enrich_content_creator_re(db, limit=1)
+db.close()

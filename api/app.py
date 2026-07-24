@@ -25,6 +25,7 @@ from pipeline.helpers.prompts import (
     APOLLO_RANK_PROMPT_NAME, APOLLO_RANK_DEFAULT_PROMPT,
     TAGS_PROMPT_NAME, TAGS_DEFAULT_PROMPT,
     BRAND_NICHE_TAGS_PROMPT_NAME, BRAND_NICHE_TAGS_DEFAULT_PROMPT,
+    BRAND_CHECK_PROMPT_NAME, BRAND_CHECK_DEFAULT_PROMPT,
 )
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.enrichment.orchestrator import run_signal_enrichment
@@ -68,8 +69,25 @@ def _run_migrations() -> None:
         # Full unique index on wikidata_id — PostgreSQL treats NULLs as distinct,
         # so multiple NULL rows are permitted even with a UNIQUE index.
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_brands_raw_wikidata_id ON brands_raw(wikidata_id)",
+        # name/name_normalized/niche/source relaxed to nullable — the
+        # content_creator_re brand_check flow creates bare rows with only
+        # instagram_handle set, no name/niche/source available.
+        "ALTER TABLE brands_raw ALTER COLUMN name DROP NOT NULL",
+        "ALTER TABLE brands_raw ALTER COLUMN name_normalized DROP NOT NULL",
+        "ALTER TABLE brands_raw ALTER COLUMN niche DROP NOT NULL",
+        "ALTER TABLE brands_raw ALTER COLUMN source DROP NOT NULL",
         # Signal enrichment — social handles
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS instagram_handle TEXT",
+        # Partial unique index on instagram_handle, scoped to bare rows only
+        # (name IS NULL — only content_creator_re's brand_check flow creates
+        # those). A table-wide unique index isn't possible: legacy seeded
+        # data already has ~32 groups of brands sharing a duplicate
+        # instagram_handle from historical scraping issues.
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_brands_raw_instagram_handle_bare
+        ON brands_raw(instagram_handle)
+        WHERE name IS NULL
+        """,
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS youtube_channel_id TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS twitter_handle TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS facebook_page TEXT",
@@ -96,6 +114,7 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS tiktok_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS twitter_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS initial_brand_scored BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS instagram_wikidata_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS top_commenters",
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS is_comment_profile_scraped",
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS confirmed_creators",
@@ -126,6 +145,7 @@ def _run_migrations() -> None:
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS is_content_creator_re BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS top_comments TEXT",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_instagram_users_post_id ON instagram_users(post_id)",
+        "ALTER TABLE content_creator_re ADD COLUMN IF NOT EXISTS is_scraped BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS tier_fit TEXT",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS comments JSONB",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS male_pct FLOAT",
@@ -222,6 +242,7 @@ def _run_migrations() -> None:
         """
         INSERT INTO brands_niches (brand_raw_id, niche)
         SELECT id, niche FROM brands_raw
+        WHERE niche IS NOT NULL
         ON CONFLICT (brand_raw_id, niche) DO NOTHING
         """,
         # brands_niches: description mirrored from shopify_detect.py's scraped
@@ -284,6 +305,7 @@ def _run_migrations() -> None:
             (SPONSOR_CHECK_PROMPT_NAME, SPONSOR_CHECK_DEFAULT_PROMPT),
             (APOLLO_RANK_PROMPT_NAME,   APOLLO_RANK_DEFAULT_PROMPT),
             (BRAND_NICHE_TAGS_PROMPT_NAME, BRAND_NICHE_TAGS_DEFAULT_PROMPT),
+            (BRAND_CHECK_PROMPT_NAME,   BRAND_CHECK_DEFAULT_PROMPT),
         ]:
             if not db.query(Prompt).filter(Prompt.name == name).first():
                 db.add(Prompt(name=name, content=content))
@@ -364,6 +386,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.tiktok_checked,
         BrandRaw.twitter_checked,
         BrandRaw.initial_brand_scored,
+        BrandRaw.instagram_wikidata_checked,
         BrandRaw.created_at,
         BrandRaw.description,
     ]
@@ -497,7 +520,10 @@ class ContentCreatorREAdmin(ModelView, model=ContentCreatorRE):
     icon         = "fa-solid fa-address-card"
     column_list  = "__all__"
     column_searchable_list = [ContentCreatorRE.username, ContentCreatorRE.niche]
-    column_sortable_list   = [ContentCreatorRE.id, ContentCreatorRE.username, ContentCreatorRE.niche, ContentCreatorRE.currenttime]
+    column_sortable_list   = [
+        ContentCreatorRE.id, ContentCreatorRE.username, ContentCreatorRE.niche,
+        ContentCreatorRE.currenttime, ContentCreatorRE.is_scraped,
+    ]
     column_default_sort    = [(ContentCreatorRE.id, True)]
     page_size = 15
 

@@ -22,6 +22,7 @@ Prompt name -> which enrichment module actually calls it:
   apollo_contact_check          — pipeline/enrichment/apollo_contacts.py
   creator_content_tags          — pipeline/enrichment/creator_signals.py
   brand_niche_tags              — pipeline/enrichment/shopify_detect.py
+  brand_check                   — pipeline/enrichment/content_creator_re.py
 """
 
 #  instagram_posts.py
@@ -208,4 +209,26 @@ Extract specific, concrete sub-niche tags/keywords that describe what this brand
 Reply ONLY with this JSON object, no extra text:
 {"tags": ["...", "..."]}
 Use an empty list if the description doesn't give enough information — do not invent tags not supported by the input.\
+"""
+
+
+#  content_creator_re.py
+
+BRAND_CHECK_PROMPT_NAME = "brand_check"
+BRAND_CHECK_DEFAULT_PROMPT = """\
+You are checking whether a content creator's Instagram post involves a genuine brand or company account, for a reverse-engineering pipeline that discovers which brands a creator has worked with.
+
+Creator: {creator_username} ({creator_full_name})
+Post caption: {caption}
+Paid partnership marker: {paid_partnership}
+
+Accounts referenced in this post:
+mentions: {mentions}
+tagged_users: {tagged_users}
+coauthor_producers: {coauthor_producers}
+
+For each account listed above, decide whether it is a real BRAND or COMPANY account — not another individual creator, influencer, personal account, or unrelated person.
+
+Reply ONLY with this JSON object (empty list if none are brands):
+{"brands": ["username1", "username2", ...]}\
 """
