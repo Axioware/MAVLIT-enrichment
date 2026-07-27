@@ -134,6 +134,7 @@ def _apply_match(db: Session, brand: BrandRaw, data: dict, handle: str) -> None:
     brand.website_source    = "wikidata" if website else None
     brand.source            = "wikidata"
     brand.source_confidence = 100
+    brand.source_url        = _SPARQL_URL
     brand.instagram_wikidata_checked = True
 
     try:
