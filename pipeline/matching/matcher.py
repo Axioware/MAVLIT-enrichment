@@ -33,15 +33,23 @@ Runs on every page load; designed to be cheap:
                on the YouTube side.
 
            Creators must also share at least one EXACT (case-insensitive)
-           niche string with EITHER the brand itself OR at least one of the
-           brand's confirmed Instagram collaborators (instagram_users.niche,
-           for coauthor_producer/tagged_user/mention rows — never
-           commenters) — e.g. a creator picking "technology" matches Bambu
-           Lab (niche "3d printing") because Bambu Lab sponsored
-           @makerworld_official, an Instagram creator classified as
-           "technology". This is a hard yes/no check, separate from and
-           stricter than the fuzzy niche_match scoring dimension in Step C,
-           which still runs on whatever niche overlap exists for ranking.
+           niche string with ANY of:
+             - the brand itself
+             - one of the brand's confirmed Instagram collaborators
+               (instagram_users.niche, for coauthor_producer/tagged_user/
+               mention rows — never commenters) — e.g. a creator picking
+               "technology" matches Bambu Lab (niche "3d printing") because
+               Bambu Lab sponsored @makerworld_official, an Instagram
+               creator classified as "technology".
+             - a reverse-engineered creator (content_creator_re) the brand
+               is linked to, matched against that creator's SOURCE
+               content_creator_re.niche (a live join, not the possibly-
+               stale copy mirrored onto instagram_users.niche at scrape
+               time) — lets brands discovered via the RE pipeline surface
+               even when the brand's own niche differs.
+           This is a hard yes/no check, separate from and stricter than the
+           fuzzy niche_match scoring dimension in Step C, which still runs
+           on whatever niche overlap exists for ranking.
   Step B — Semantic shortlist: a single indexed pgvector cosine-distance
            query against the creator's embedding narrows the (already
            hard-filtered) pool to the top _SHORTLIST_SIZE candidates —
@@ -65,7 +73,7 @@ import logging
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from pipeline.db import BrandInstagramUser, BrandProfile, BrandRaw, CreatorProfile, InstagramUser
+from pipeline.db import BrandInstagramUser, BrandProfile, BrandRaw, ContentCreatorRE, CreatorProfile, InstagramUser
 from pipeline.matching.match_text import generate_match_reasons
 from pipeline.matching.scoring import score_match
 
@@ -151,7 +159,23 @@ def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) 
                     func.lower(InstagramUser.niche).in_(creator_niches),
                 )
             )
-            query = query.filter(or_(brand_niche_match, collaborator_niche_match))
+            # Reverse-engineering path: a brand also passes if it's linked
+            # (brand_instagram_users) to a content_creator_re creator whose
+            # SOURCE content_creator_re.niche matches — looked up live via
+            # this join rather than trusting instagram_users.niche, which is
+            # only a snapshot copied at scrape time and goes stale if
+            # content_creator_re.niche is edited afterward.
+            re_creator_niche_match = BrandRaw.id.in_(
+                db.query(BrandInstagramUser.brand_raw_id)
+                .join(InstagramUser, InstagramUser.id == BrandInstagramUser.instagram_user_id)
+                .join(ContentCreatorRE, ContentCreatorRE.username == InstagramUser.username)
+                .filter(
+                    InstagramUser.user_type != "commenter",
+                    InstagramUser.is_content_creator_re.is_(True),
+                    func.lower(ContentCreatorRE.niche).in_(creator_niches),
+                )
+            )
+            query = query.filter(or_(brand_niche_match, collaborator_niche_match, re_creator_niche_match))
 
     # Step B — semantic shortlist (single indexed pgvector query)
     query = query.order_by(distance_expr).limit(_SHORTLIST_SIZE)
