@@ -18,8 +18,6 @@ APOLLO_API_KEY = os.getenv("APOLLO_API_KEY", "")
 ENABLE_APOLLO_PHONE_REVEAL = os.getenv("ENABLE_APOLLO_PHONE_REVEAL", "false").strip().lower() == "true"
 
 # Signal enrichment
-GOOGLE_API_KEY    = os.getenv("GOOGLE_API_KEY", "")
-GOOGLE_CX         = os.getenv("GOOGLE_CX", "")       # Custom Search Engine ID
 META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN", "")
 YOUTUBE_API_KEY   = os.getenv("YOUTUBE_API_KEY", "")
 YOUTUBE_API_KEY_1 = os.getenv("YOUTUBE_API_KEY_1", "")
