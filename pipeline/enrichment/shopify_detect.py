@@ -7,10 +7,14 @@ Fetches each brand's homepage to:
   3. Extract full social media profile URLs → instagram_handle, twitter_handle,
      facebook_page, youtube_channel_id, tiktok_handle, linkedin_id
   4. Scrape the brand's about page → description
-  5. Mirror that description into brands_niches.description (every niche row
-     for the brand — today that's just 1 row per brand, see BrandNiche) and
-     send it to Mistral to extract concrete sub-niche/category tags, stored
-     in brands_niches.tags. Skipped if MISTRAL_API_KEY isn't set.
+  5. Send that description to Mistral to extract sub-niche/category tags,
+     stored in brands_niches.tags — and, if brands_raw.niche is currently
+     NULL (bare brands created by content_creator_re / brand_wikidata_lookup
+     that never got a niche), ask the same call to also determine a best-fit
+     niche and backfill brands_raw.niche with it. An existing niche is never
+     overwritten — the LLM is told to just echo it back unchanged. Skipped
+     if MISTRAL_API_KEY isn't set. brands_niches is upserted (not just
+     updated) since a bare brand has no existing row there yet.
 
 Social fields are only written if the column is currently NULL, so they
 don't overwrite more-authoritative Wikidata data fetched earlier.
@@ -30,6 +34,7 @@ from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
 from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from config import MISTRAL_API_KEY
@@ -224,38 +229,66 @@ def _get_brand_niche_tags_prompt(db: Session) -> str:
     return row.content if row else BRAND_NICHE_TAGS_DEFAULT_PROMPT
 
 
-def _extract_brand_niche_tags(db: Session, brand: BrandRaw, description: str) -> list[str]:
+def _extract_brand_niche_and_tags(db: Session, brand: BrandRaw, description: str) -> tuple[str | None, list[str]]:
     """
     Ask Mistral for concrete sub-niche/category tags from a brand's scraped
-    description. Returns [] on any failure or if MISTRAL_API_KEY isn't set —
-    never raises, so a tag-extraction problem never blocks the rest of
-    enrich_shopify's per-brand processing.
+    description, and — only when brand.niche is currently unset — a best-fit
+    broad niche guess too (the prompt is told to just echo back an already-
+    known niche unchanged, so this never overwrites one). Returns
+    (None, []) on any failure or if MISTRAL_API_KEY isn't set — never
+    raises, so this never blocks the rest of enrich_shopify's per-brand
+    processing.
     """
     if not MISTRAL_API_KEY:
-        return []
+        return None, []
     prompt = fill_template(
         _get_brand_niche_tags_prompt(db),
-        brand_name=brand.name,
+        brand_name=brand.name or brand.instagram_handle or "unknown",
         niche=brand.niche or "unknown",
         description=description,
     )
     result = call_mistral_json(prompt, context=f"brand niche tags for {brand.name}")
-    tags = result.get("tags") if isinstance(result, dict) else None
-    return [t for t in tags if isinstance(t, str) and t.strip()] if isinstance(tags, list) else []
+    if not isinstance(result, dict):
+        return None, []
+
+    niche = result.get("niche")
+    niche = niche.strip() if isinstance(niche, str) and niche.strip() and niche.strip().lower() != "unknown" else None
+
+    tags = result.get("tags")
+    tags = [t for t in tags if isinstance(t, str) and t.strip()] if isinstance(tags, list) else []
+    return niche, tags
+
+
+def _upsert_brand_niche(db: Session, brand_id: int, niche: str, description: str, tags: list[str] | None) -> None:
+    """Insert a brands_niches row if this brand doesn't have one yet for this niche, else update it."""
+    stmt = (
+        pg_insert(BrandNiche)
+        .values(brand_raw_id=brand_id, niche=niche, description=description, tags=tags)
+        .on_conflict_do_update(
+            index_elements=["brand_raw_id", "niche"],
+            set_={"description": description, "tags": tags},
+        )
+    )
+    db.execute(stmt)
 
 
 def _update_brand_niche_description_and_tags(db: Session, brand: BrandRaw, description: str) -> None:
     """
-    Mirrors `description` into every brands_niches row for this brand and
-    stores Mistral-extracted sub-niche tags alongside it. Rows already exist
-    by the time this runs (insert_brand/insert_brands_batch create them at
-    seed time) — this only ever UPDATEs, never inserts.
+    Extracts sub-niche tags (and a niche backfill, if brand.niche was NULL)
+    from the scraped description via Mistral, then upserts brands_niches —
+    a plain UPDATE would silently no-op for bare brands (content_creator_re /
+    brand_wikidata_lookup rows) that have no brands_niches row yet.
     """
-    tags = _extract_brand_niche_tags(db, brand, description)
-    db.query(BrandNiche).filter(BrandNiche.brand_raw_id == brand.id).update(
-        {"description": description, "tags": tags or None},
-        synchronize_session=False,
-    )
+    had_niche = bool(brand.niche)
+    niche, tags = _extract_brand_niche_and_tags(db, brand, description)
+
+    if not had_niche and niche:
+        brand.niche = niche
+        logger.info("Shopify/socials check: %s niche backfilled → '%s'", brand.name, niche)
+
+    effective_niche = brand.niche
+    if effective_niche:
+        _upsert_brand_niche(db, brand.id, effective_niche, description, tags or None)
 
 
 def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None) -> int:
