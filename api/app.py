@@ -363,33 +363,7 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.twitter_handle,
         BrandRaw.tiktok_handle,
     ]
-    column_sortable_list = [
-        BrandRaw.id,
-        BrandRaw.niche,
-        BrandRaw.source,
-        BrandRaw.source_confidence,
-        BrandRaw.domain,
-        BrandRaw.country,
-        BrandRaw.has_official_website,
-        BrandRaw.website_source,
-        BrandRaw.is_shopify,
-        BrandRaw.is_woocommerce,
-        BrandRaw.facebook_page_id,
-        BrandRaw.in_tranco_list,
-        BrandRaw.tranco_rank,
-        BrandRaw.wikidata_enriched,
-        BrandRaw.shopify_checked,
-        BrandRaw.tranco_checked,
-        BrandRaw.meta_ads_fetched,
-        BrandRaw.youtube_checked,
-        BrandRaw.instagram_checked,
-        BrandRaw.tiktok_checked,
-        BrandRaw.twitter_checked,
-        BrandRaw.initial_brand_scored,
-        BrandRaw.instagram_wikidata_checked,
-        BrandRaw.created_at,
-        BrandRaw.description,
-    ]
+    column_sortable_list = [c.name for c in BrandRaw.__table__.columns]
     column_default_sort = [(BrandRaw.id, True)]
     page_size = 15
 
@@ -401,7 +375,7 @@ class BrandNicheAdmin(ModelView, model=BrandNiche):
     column_list  = "__all__"
     column_labels = {BrandNiche.brand_raw: "Brand"}
     column_searchable_list = [BrandNiche.niche, BrandNiche.description]
-    column_sortable_list   = [BrandNiche.id, BrandNiche.niche, BrandNiche.description, BrandNiche.tags]
+    column_sortable_list   = [c.name for c in BrandNiche.__table__.columns]
     column_default_sort    = [(BrandNiche.id, True)]
     page_size = 15
 
@@ -413,7 +387,7 @@ class MetaAdAdmin(ModelView, model=MetaAd):
     column_list  = "__all__"
     column_labels      = {MetaAd.brand_raw: "Brand"}
     column_searchable_list = [MetaAd.page_name, MetaAd.page_id, MetaAd.ad_archive_id]
-    column_sortable_list   = [MetaAd.id, MetaAd.brand_raw_id, MetaAd.start_date, MetaAd.fetched_at, MetaAd.impressions, MetaAd.spend]
+    column_sortable_list   = [c.name for c in MetaAd.__table__.columns]
     column_default_sort    = [(MetaAd.id, True)]
     page_size = 15
 
@@ -425,24 +399,7 @@ class YoutubeSponsorshipAdmin(ModelView, model=YoutubeSponsorship):
     column_list  = "__all__"
     column_labels      = {YoutubeSponsorship.brand_raw: "Brand"}
     column_searchable_list = [YoutubeSponsorship.video_title, YoutubeSponsorship.channel_name]
-    column_sortable_list   = [
-        YoutubeSponsorship.id,
-        YoutubeSponsorship.brand_raw_id,
-        YoutubeSponsorship.video_title,
-        YoutubeSponsorship.channel_name,
-        YoutubeSponsorship.subscriber_count,
-        YoutubeSponsorship.tier_fit,
-        YoutubeSponsorship.sponsorship_type,
-        YoutubeSponsorship.confidence,
-        YoutubeSponsorship.matched_keywords,
-        YoutubeSponsorship.comments,
-        YoutubeSponsorship.male_pct,
-        YoutubeSponsorship.female_pct,
-        YoutubeSponsorship.view_count,
-        YoutubeSponsorship.like_count,
-        YoutubeSponsorship.published_at,
-        YoutubeSponsorship.fetched_at,
-    ]
+    column_sortable_list   = [c.name for c in YoutubeSponsorship.__table__.columns]
     column_default_sort    = [(YoutubeSponsorship.id, True)]
     page_size = 15
 
@@ -454,26 +411,7 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
     column_list  = "__all__"
     column_labels          = {InstagramPost.brand_raw: "Brand"}
     column_searchable_list = [InstagramPost.instagram_handle, InstagramPost.caption, InstagramPost.post_id]
-    column_sortable_list   = [
-        InstagramPost.id,
-        InstagramPost.brand_raw_id,
-        InstagramPost.instagram_handle,
-        InstagramPost.timestamp,
-        InstagramPost.likes_count,
-        InstagramPost.comments_count,
-        InstagramPost.video_view_count,
-        InstagramPost.followers_count,
-        InstagramPost.paid_partnership,
-        InstagramPost.sponsors,
-        InstagramPost.llm_checked,
-        InstagramPost.is_users_scraped,
-        InstagramPost.coauthor_producers,
-        InstagramPost.mentions,
-        InstagramPost.tagged_users,
-        InstagramPost.biography,
-        InstagramPost.fetched_at,
-        InstagramPost.business_category_name,
-    ]
+    column_sortable_list   = [c.name for c in InstagramPost.__table__.columns]
     column_default_sort    = [(InstagramPost.id, True)]
     page_size = 15
 
@@ -490,26 +428,7 @@ class InstagramUserAdmin(ModelView, model=InstagramUser):
         InstagramUser.country,
         InstagramUser.location,
     ]
-    column_sortable_list   = [
-        InstagramUser.id,
-        InstagramUser.username,
-        InstagramUser.user_type,
-        InstagramUser.followers_count,
-        InstagramUser.tier_fit,
-        InstagramUser.follows_count,
-        InstagramUser.posts_count,
-        InstagramUser.is_verified,
-        InstagramUser.gender,
-        InstagramUser.country,
-        InstagramUser.language,
-        InstagramUser.age_group,
-        InstagramUser.top_posts,
-        InstagramUser.captions,
-        InstagramUser.raw_profile,
-        InstagramUser.bio,
-        InstagramUser.fetched_at,
-        InstagramUser.niche
-    ]
+    column_sortable_list   = [c.name for c in InstagramUser.__table__.columns]
     column_default_sort    = [(InstagramUser.id, True)]
     page_size = 15
 
@@ -520,10 +439,7 @@ class ContentCreatorREAdmin(ModelView, model=ContentCreatorRE):
     icon         = "fa-solid fa-address-card"
     column_list  = "__all__"
     column_searchable_list = [ContentCreatorRE.username, ContentCreatorRE.niche]
-    column_sortable_list   = [
-        ContentCreatorRE.id, ContentCreatorRE.username, ContentCreatorRE.niche,
-        ContentCreatorRE.currenttime, ContentCreatorRE.is_scraped,
-    ]
+    column_sortable_list   = [c.name for c in ContentCreatorRE.__table__.columns]
     column_default_sort    = [(ContentCreatorRE.id, True)]
     page_size = 15
 
@@ -537,7 +453,7 @@ class BrandInstagramUserAdmin(ModelView, model=BrandInstagramUser):
         BrandInstagramUser.brand_raw:      "Brand",
         BrandInstagramUser.instagram_user: "Instagram User",
     }
-    column_sortable_list = [BrandInstagramUser.created_at]
+    column_sortable_list = [c.name for c in BrandInstagramUser.__table__.columns]
     column_default_sort  = [(BrandInstagramUser.created_at, True)]
     page_size = 15
 
@@ -555,10 +471,7 @@ class InstagramCreatorCommenterAdmin(ModelView, model=InstagramCreatorCommenter)
         InstagramCreatorCommenter.comment_likes:  "Comment Likes",
         InstagramCreatorCommenter.comment_text:   "Comment",
     }
-    column_sortable_list = [
-        InstagramCreatorCommenter.created_at,
-        InstagramCreatorCommenter.comment_likes,
-    ]
+    column_sortable_list = [c.name for c in InstagramCreatorCommenter.__table__.columns]
     column_default_sort  = [(InstagramCreatorCommenter.created_at, True)]
     page_size = 15
 
@@ -570,19 +483,7 @@ class TiktokPostAdmin(ModelView, model=TiktokPost):
     column_list  = "__all__"
     column_labels          = {TiktokPost.brand_raw: "Brand"}
     column_searchable_list = [TiktokPost.tiktok_handle, TiktokPost.video_id]
-    column_sortable_list   = [
-        TiktokPost.id,
-        TiktokPost.brand_raw_id,
-        TiktokPost.tiktok_handle,
-        TiktokPost.create_time,
-        TiktokPost.play_count,
-        TiktokPost.like_count,
-        TiktokPost.comment_count,
-        TiktokPost.share_count,
-        TiktokPost.is_sponsored,
-        TiktokPost.is_ad,
-        TiktokPost.fetched_at,
-    ]
+    column_sortable_list   = [c.name for c in TiktokPost.__table__.columns]
     column_default_sort    = [(TiktokPost.id, True)]
     page_size = 15
 
@@ -594,17 +495,7 @@ class TwitterPostAdmin(ModelView, model=TwitterPost):
     column_list  = "__all__"
     column_labels          = {TwitterPost.brand_raw: "Brand"}
     column_searchable_list = [TwitterPost.twitter_handle, TwitterPost.username, TwitterPost.tweet_id, TwitterPost.text]
-    column_sortable_list   = [
-        TwitterPost.id,
-        TwitterPost.brand_raw_id,
-        TwitterPost.twitter_handle,
-        TwitterPost.created_at,
-        TwitterPost.likes,
-        TwitterPost.retweets,
-        TwitterPost.comments,
-        TwitterPost.is_sponsored,
-        TwitterPost.fetched_at,
-    ]
+    column_sortable_list   = [c.name for c in TwitterPost.__table__.columns]
     column_default_sort    = [(TwitterPost.id, True)]
     page_size = 15
 
@@ -615,6 +506,7 @@ class PromptAdmin(ModelView, model=Prompt):
     icon         = "fa-solid fa-wand-magic-sparkles"
     column_list  = "__all__"
     column_searchable_list = [Prompt.name]
+    column_sortable_list    = [c.name for c in Prompt.__table__.columns]
     column_default_sort    = [(Prompt.id, True)]
     page_size = 20
 
@@ -625,17 +517,7 @@ class InitialBrandScoreAdmin(ModelView, model=InitialBrandScore):
     icon         = "fa-solid fa-star"
     column_list  = "__all__"
     column_labels = {InitialBrandScore.brand_raw: "Brand"}
-    column_sortable_list = [
-        InitialBrandScore.id,
-        InitialBrandScore.total_score,
-        InitialBrandScore.score_band,
-        InitialBrandScore.influencer_score,
-        InitialBrandScore.ad_spend_score,
-        InitialBrandScore.legitimacy_score,
-        InitialBrandScore.reachability_score,
-        InitialBrandScore.enrichment_completeness,
-        InitialBrandScore.scored_at,
-    ]
+    column_sortable_list = [c.name for c in InitialBrandScore.__table__.columns]
     column_default_sort = [(InitialBrandScore.id, True)]
     page_size = 15
 
@@ -644,22 +526,14 @@ class BrandProfileAdmin(ModelView, model=BrandProfile):
     name         = "Brand Match Profile"
     name_plural  = "Brand Match Profiles"
     icon         = "fa-solid fa-chart-line"
-    column_list  = "__all__"
+    # embedding is a pgvector column (numpy array) — sqladmin's list/detail
+    # rendering does `if value and isinstance(value, Enum)`, which raises
+    # "truth value of an array... is ambiguous" for any multi-element
+    # array. Must be excluded from column_list (can't combine column_list
+    # with column_exclude_list) and from column_sortable_list.
+    column_exclude_list = [BrandProfile.embedding]
     column_labels = {BrandProfile.brand_raw: "Brand"}
-    column_sortable_list = [
-        BrandProfile.brand_raw_id,
-        BrandProfile.sponsorship_activity_score,
-        BrandProfile.meta_ads_active,
-        BrandProfile.meta_ads_recency_days,
-        BrandProfile.meta_ads_count,
-        BrandProfile.typical_creator_tier,
-        BrandProfile.has_instagram,
-        BrandProfile.has_youtube,
-        BrandProfile.has_facebook,
-        BrandProfile.has_marketing_contact,
-        BrandProfile.contact_mode,
-        BrandProfile.computed_at,
-    ]
+    column_sortable_list = [c.name for c in BrandProfile.__table__.columns if c.name != "embedding"]
     column_default_sort = [(BrandProfile.brand_raw_id, True)]
     page_size = 15
 
@@ -671,10 +545,7 @@ class BrandContactAdmin(ModelView, model=BrandContact):
     column_list  = "__all__"
     column_labels = {BrandContact.brand_raw: "Brand"}
     column_searchable_list = [BrandContact.full_name, BrandContact.title, BrandContact.email]
-    column_sortable_list = [
-        BrandContact.id, BrandContact.rank, BrandContact.is_enriched, BrandContact.full_name,
-        BrandContact.seniority, BrandContact.country, BrandContact.fetched_at, BrandContact.phone,
-    ]
+    column_sortable_list = [c.name for c in BrandContact.__table__.columns]
     column_default_sort = [(BrandContact.id, True)]
     page_size = 15
 
@@ -683,13 +554,11 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
     name         = "Creator Profile"
     name_plural  = "Creator Profiles"
     icon         = "fa-solid fa-id-badge"
-    column_list  = "__all__"
+    # embedding is a pgvector column (numpy array) — see BrandProfileAdmin's
+    # comment above for why it must be excluded from list/sort.
+    column_exclude_list = [CreatorProfile.embedding]
     column_searchable_list = [CreatorProfile.email, CreatorProfile.full_name, CreatorProfile.creator_handle, CreatorProfile.content_niche]
-    column_sortable_list    = [
-        CreatorProfile.id, CreatorProfile.email, CreatorProfile.is_active,
-        CreatorProfile.full_name, CreatorProfile.content_niche,
-        CreatorProfile.primary_platform, CreatorProfile.creator_tier, CreatorProfile.created_at,
-    ]
+    column_sortable_list    = [c.name for c in CreatorProfile.__table__.columns if c.name != "embedding"]
     column_default_sort    = [(CreatorProfile.id, True)]
     page_size = 15
 
