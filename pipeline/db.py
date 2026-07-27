@@ -76,7 +76,7 @@ class BrandRaw(Base):
     tiktok_checked         = Column(Boolean, nullable=False, server_default="false", default=False)
     twitter_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
     initial_brand_scored   = Column(Boolean, nullable=False, server_default="false", default=False)
-    # Set by pipeline/enrichment/brand_wikidata_lookup.py after attempting a
+    # Set by pipeline/enrichment_re/brand_wikidata_lookup.py after attempting a
     # reverse Wikidata lookup by instagram_handle for bare brand rows (name
     # IS NULL) — true whether or not a match was found, so unresolvable
     # handles aren't retried every run.
@@ -293,7 +293,7 @@ class InstagramUser(Base):
 class ContentCreatorRE(Base):
     """
     Reverse-engineering seed list — you supply username/niche/url directly
-    (no discovery via a brand's post), then pipeline.enrichment.content_creator_re
+    (no discovery via a brand's post), then pipeline.enrichment_re.content_creator_re
     scrapes each one the same way the main creator flow does.
     """
     __tablename__ = "content_creator_re"

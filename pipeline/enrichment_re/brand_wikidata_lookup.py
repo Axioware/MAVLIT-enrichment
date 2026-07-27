@@ -1,9 +1,9 @@
 """
-pipeline/enrichment/brand_wikidata_lookup.py
+pipeline/enrichment_re/brand_wikidata_lookup.py
 
 Reverse lookup for bare brand rows: brands_raw rows created with only
 instagram_handle set (name IS NULL) — e.g. from content_creator_re's
-brand_check flow (pipeline/enrichment/content_creator_re.py) — have no
+brand_check flow (pipeline/enrichment_re/content_creator_re.py) — have no
 name, description, website, etc. This queries Wikidata by instagram_handle
 (P2003) to find the matching entity, if one exists, and backfills
 whatever pipeline/seed.py would normally have set at seed time:

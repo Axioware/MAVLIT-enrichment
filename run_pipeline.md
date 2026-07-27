@@ -274,8 +274,24 @@ db.close()
 # Reverse Engineering 
 
 ## content_creator_re
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
 from pipeline.db import SessionLocal
-from pipeline.enrichment.content_creator_re import enrich_content_creator_re
+from pipeline.enrichment_re.content_creator_re import enrich_content_creator_re
 db = SessionLocal()
 enrich_content_creator_re(db, limit=1)
 db.close()
+"
+
+## brand_wikidata_lookup (reverse-lookup bare brands by instagram_handle)
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment_re.brand_wikidata_lookup import enrich_brand_wikidata_lookup
+db = SessionLocal()
+enrich_brand_wikidata_lookup(db, limit=50)
+db.close()
+"
+    

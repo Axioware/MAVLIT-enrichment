@@ -1,5 +1,5 @@
 """
-pipeline/enrichment/content_creator_re.py
+pipeline/enrichment_re/content_creator_re.py
 
 Reverse-engineering flow: content_creator_re is a manually-seeded list
 (username, niche, url) with no brand/post behind it. For each row where
@@ -21,7 +21,9 @@ is_scraped=False:
   4. Collect up to 5 commenters per post (same _collect_commenter_records
      function), scrape 1 post each for profile data, store them in
      instagram_users (user_type="commenter") with is_content_creator_re=True,
-     and link every commenter to every brand confirmed in step 3.
+     and link every commenter to every brand confirmed in step 3
+     (brand_instagram_users) as well as to the creator itself
+     (instagram_creator_commenters, scoped per confirmed brand).
   5. Mark content_creator_re.is_scraped=True.
 
 Prompts (editable via /admin > Prompts):
@@ -46,6 +48,7 @@ from pipeline.enrichment.instagram_users import (
     _build_post_row,
     _classify_demographics,
     _collect_commenter_records,
+    _link_commenter_to_creator,
     _link_to_brand,
     _profile_from_posts,
     _scrape_posts,
@@ -253,10 +256,13 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> int:
                 )
                 time.sleep(1.0)
 
-            #  Link every commenter (existing + new) to every confirmed brand
+            #  Link every commenter (existing + new) to every confirmed
+            #  brand, plus creator <-> commenter itself (instagram_creator_commenters)
             for brand_id in confirmed_brand_ids:
                 for commenter in commenter_usernames:
                     _link_to_brand(db, brand_id, commenter)
+                for record in commenter_records:
+                    _link_commenter_to_creator(db, brand_id, username, record)
 
         row.is_scraped = True
         db.commit()
