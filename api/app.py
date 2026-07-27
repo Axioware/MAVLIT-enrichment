@@ -11,7 +11,7 @@ from sqladmin import Admin, ModelView
 from sqlalchemy import text
 
 from config import IS_PRODUCTION
-from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, TiktokPost, TwitterPost, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
 from pipeline.matching.matcher import get_matches
 from pipeline.enrichment.creator_signals import compute_creator_signals
@@ -89,10 +89,10 @@ def _run_migrations() -> None:
         WHERE name IS NULL
         """,
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS youtube_channel_id TEXT",
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS twitter_handle TEXT",
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS twitter_handle",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS facebook_page TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS facebook_page_id TEXT",
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS tiktok_handle TEXT",
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS tiktok_handle",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS linkedin_id TEXT",
         # Signal enrichment — website
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS has_official_website BOOLEAN",
@@ -111,10 +111,12 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS meta_ads_fetched BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS youtube_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS instagram_checked BOOLEAN NOT NULL DEFAULT false",
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS tiktok_checked BOOLEAN NOT NULL DEFAULT false",
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS twitter_checked BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS tiktok_checked",
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS twitter_checked",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS initial_brand_scored BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS instagram_wikidata_checked BOOLEAN NOT NULL DEFAULT false",
+        "DROP TABLE IF EXISTS tiktok_posts",
+        "DROP TABLE IF EXISTS twitter_posts",
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS top_commenters",
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS is_comment_profile_scraped",
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS confirmed_creators",
@@ -202,8 +204,10 @@ def _run_migrations() -> None:
         "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS has_instagram BOOLEAN",
         "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS has_youtube BOOLEAN",
         "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS has_facebook BOOLEAN",
-        "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS has_tiktok BOOLEAN",
-        "ALTER TABLE brand_match_profile ADD COLUMN IF NOT EXISTS has_twitter BOOLEAN",
+        "ALTER TABLE brand_match_profile DROP COLUMN IF EXISTS has_tiktok",
+        "ALTER TABLE brand_match_profile DROP COLUMN IF EXISTS has_twitter",
+        "ALTER TABLE brand_match_profile DROP COLUMN IF EXISTS tiktok_sponsored_count",
+        "ALTER TABLE brand_match_profile DROP COLUMN IF EXISTS twitter_sponsored_count",
         # brand_contacts: switched from keyword title_score to Mistral-ranked llm_reason,
         # and from a single `department` string to Apollo's real departments/subdepartments/functions
         "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS departments TEXT",
@@ -258,8 +262,9 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS facebook_stats",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_followers INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_following INTEGER",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS tiktok_followers INTEGER",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS tiktok_following INTEGER",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS tiktok_handle",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS tiktok_followers",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS tiktok_following",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_followers INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS facebook_followers INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS facebook_following INTEGER",
@@ -360,8 +365,6 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.wikipedia_url,
         BrandRaw.country,
         BrandRaw.instagram_handle,
-        BrandRaw.twitter_handle,
-        BrandRaw.tiktok_handle,
     ]
     column_sortable_list = [c.name for c in BrandRaw.__table__.columns]
     column_default_sort = [(BrandRaw.id, True)]
@@ -476,30 +479,6 @@ class InstagramCreatorCommenterAdmin(ModelView, model=InstagramCreatorCommenter)
     page_size = 15
 
 
-class TiktokPostAdmin(ModelView, model=TiktokPost):
-    name         = "TikTok Post"
-    name_plural  = "TikTok Posts"
-    icon         = "fa-brands fa-tiktok"
-    column_list  = "__all__"
-    column_labels          = {TiktokPost.brand_raw: "Brand"}
-    column_searchable_list = [TiktokPost.tiktok_handle, TiktokPost.video_id]
-    column_sortable_list   = [c.name for c in TiktokPost.__table__.columns]
-    column_default_sort    = [(TiktokPost.id, True)]
-    page_size = 15
-
-
-class TwitterPostAdmin(ModelView, model=TwitterPost):
-    name         = "Twitter Post"
-    name_plural  = "Twitter Posts"
-    icon         = "fa-brands fa-x-twitter"
-    column_list  = "__all__"
-    column_labels          = {TwitterPost.brand_raw: "Brand"}
-    column_searchable_list = [TwitterPost.twitter_handle, TwitterPost.username, TwitterPost.tweet_id, TwitterPost.text]
-    column_sortable_list   = [c.name for c in TwitterPost.__table__.columns]
-    column_default_sort    = [(TwitterPost.id, True)]
-    page_size = 15
-
-
 class PromptAdmin(ModelView, model=Prompt):
     name         = "Prompt"
     name_plural  = "Prompts"
@@ -579,8 +558,6 @@ admin.add_view(ContentCreatorREAdmin)
 admin.add_view(BrandInstagramUserAdmin)
 admin.add_view(InstagramCreatorCommenterAdmin)
 admin.add_view(PromptAdmin)
-admin.add_view(TiktokPostAdmin)
-admin.add_view(TwitterPostAdmin)
 
 # 
 # API models
@@ -852,7 +829,6 @@ class CreatorProfileRequest(BaseModel):
     excluded_categories:  list[str] | None = None
 
     instagram_handle: str | None = None
-    tiktok_handle:     str | None = None
     youtube_channel:   str | None = None
     facebook_page:     str | None = None
     substack_url:      str | None = None
@@ -860,8 +836,6 @@ class CreatorProfileRequest(BaseModel):
 
     instagram_followers: int | None = None
     instagram_following: int | None = None
-    tiktok_followers:    int | None = None
-    tiktok_following:    int | None = None
     youtube_followers:   int | None = None
     facebook_followers:  int | None = None
     facebook_following:  int | None = None
@@ -894,7 +868,6 @@ class CreatorProfileResponse(BaseModel):
     excluded_categories:  list[str] | None = None
 
     instagram_handle: str | None = None
-    tiktok_handle:     str | None = None
     youtube_channel:   str | None = None
     facebook_page:     str | None = None
     substack_url:      str | None = None
@@ -902,8 +875,6 @@ class CreatorProfileResponse(BaseModel):
 
     instagram_followers: int | None = None
     instagram_following: int | None = None
-    tiktok_followers:    int | None = None
-    tiktok_following:    int | None = None
     youtube_followers:   int | None = None
     facebook_followers:  int | None = None
     facebook_following:  int | None = None
@@ -939,15 +910,12 @@ def _profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         content_description=row.content_description,
         excluded_categories=row.excluded_categories,
         instagram_handle=row.instagram_handle,
-        tiktok_handle=row.tiktok_handle,
         youtube_channel=row.youtube_channel,
         facebook_page=row.facebook_page,
         substack_url=row.substack_url,
         substack_subscribers=row.substack_subscribers,
         instagram_followers=row.instagram_followers,
         instagram_following=row.instagram_following,
-        tiktok_followers=row.tiktok_followers,
-        tiktok_following=row.tiktok_following,
         youtube_followers=row.youtube_followers,
         facebook_followers=row.facebook_followers,
         facebook_following=row.facebook_following,

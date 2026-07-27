@@ -272,7 +272,6 @@
             <select id="primary_platform" name="primary_platform">
               <option value="">Select a platform…</option>
               <option value="instagram">Instagram</option>
-              <option value="tiktok">TikTok</option>
               <option value="youtube">YouTube</option>
               <option value="facebook">Facebook</option>
               <option value="substack">Substack</option>
@@ -287,10 +286,6 @@
           <div class="field">
             <label for="instagram_handle">Instagram</label>
             <input id="instagram_handle" name="instagram_handle" type="text" placeholder="https://instagram.com/janedoe" />
-          </div>
-          <div class="field">
-            <label for="tiktok_handle">TikTok</label>
-            <input id="tiktok_handle" name="tiktok_handle" type="text" placeholder="https://tiktok.com/@janedoe" />
           </div>
           <div class="field">
             <label for="youtube_channel">YouTube</label>
@@ -322,14 +317,6 @@
           <div class="field">
             <label for="instagram_following">Instagram following</label>
             <input id="instagram_following" name="instagram_following" type="number" min="0" placeholder="0" />
-          </div>
-          <div class="field">
-            <label for="tiktok_followers">TikTok followers</label>
-            <input id="tiktok_followers" name="tiktok_followers" type="number" min="0" placeholder="0" />
-          </div>
-          <div class="field">
-            <label for="tiktok_following">TikTok following</label>
-            <input id="tiktok_following" name="tiktok_following" type="number" min="0" placeholder="0" />
           </div>
           <div class="field">
             <label for="youtube_followers">YouTube subscribers</label>
@@ -548,15 +535,12 @@
       content_description: form.elements['content_description'].value || null,
       excluded_categories: listOrNull(form.elements['excluded_categories'].value),
       instagram_handle: form.elements['instagram_handle'].value || null,
-      tiktok_handle:    form.elements['tiktok_handle'].value || null,
       youtube_channel:  form.elements['youtube_channel'].value || null,
       facebook_page:    form.elements['facebook_page'].value || null,
       substack_url:     form.elements['substack_url'].value || null,
       substack_subscribers: numOrNull(form.elements['substack_subscribers'].value),
       instagram_followers: numOrNull(form.elements['instagram_followers'].value),
       instagram_following: numOrNull(form.elements['instagram_following'].value),
-      tiktok_followers:    numOrNull(form.elements['tiktok_followers'].value),
-      tiktok_following:    numOrNull(form.elements['tiktok_following'].value),
       youtube_followers:   numOrNull(form.elements['youtube_followers'].value),
       facebook_followers:  numOrNull(form.elements['facebook_followers'].value),
       facebook_following:  numOrNull(form.elements['facebook_following'].value),

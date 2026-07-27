@@ -67,8 +67,6 @@ _PLATFORM_FLAG_ATTR = {
     "instagram": "has_instagram",
     "youtube":   "has_youtube",
     "facebook":  "has_facebook",
-    "tiktok":    "has_tiktok",
-    "twitter":   "has_twitter",
 }
 
 

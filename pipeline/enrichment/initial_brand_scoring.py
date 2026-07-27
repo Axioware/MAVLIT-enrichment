@@ -54,7 +54,7 @@ Section 3 — Brand Scale & Legitimacy (25 pts max)
     E-commerce platform (0-8 pts, NOT additive — higher of the two wins):
         is_shopify: 8   is_woocommerce: 5   neither: 0
     Social presence (0-7 pts, additive): instagram_handle +3, youtube_channel_id
-        +2, facebook_page +2 (V1 has no TikTok/Twitter here)
+        +2, facebook_page +2
     total = min(tranco_pts + ecommerce_pts + social_pts, 25)
 
 Section 4 — Contact Reachability (10 pts max)
@@ -407,7 +407,7 @@ def _score_legitimacy(brand: BrandRaw) -> tuple[int, dict[str, Any]]:
         ecommerce_pts = 0
     details["ecommerce_pts"] = ecommerce_pts
 
-    # Social presence (0-7 pts) — Instagram/YouTube/Facebook only (V1 has no TikTok/Twitter)
+    # Social presence (0-7 pts) — Instagram/YouTube/Facebook only
     social_handles = []
     social_pts = 0
     if brand.instagram_handle:
@@ -484,7 +484,7 @@ def score_brand(db: Session, brand_raw_id: int) -> dict[str, Any] | None:
         logger.warning("score_brand: brand_raw_id=%d not found", brand_raw_id)
         return None
 
-    # Enrichment completeness (0-3) — V1 doesn't score TikTok/Twitter, so they're excluded here
+    # Enrichment completeness (0-3)
     completeness = sum([
         bool(brand.youtube_checked),
         bool(brand.instagram_checked),

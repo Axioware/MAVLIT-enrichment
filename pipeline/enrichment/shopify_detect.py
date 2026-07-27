@@ -4,8 +4,8 @@ pipeline/enrichment/shopify_detect.py
 Fetches each brand's homepage to:
   1. Detect Shopify (cdn.shopify.com fingerprint) → is_shopify
   2. Detect WooCommerce (wp-content/plugins/woocommerce fingerprint) → is_woocommerce
-  3. Extract full social media profile URLs → instagram_handle, twitter_handle,
-     facebook_page, youtube_channel_id, tiktok_handle, linkedin_id
+  3. Extract full social media profile URLs → instagram_handle,
+     facebook_page, youtube_channel_id, linkedin_id
   4. Scrape the brand's about page → description
   5. Send that description to Mistral to extract sub-niche/category tags,
      stored in brands_niches.tags — and, if brands_raw.niche is currently
@@ -85,8 +85,8 @@ def _extract_socials(html: str) -> dict[str, str]:
     """
     Parse all <a href> tags and return full social media profile URLs.
     Returns a dict with any subset of keys:
-      instagram_handle, twitter_handle, facebook_page,
-      youtube_channel_id, tiktok_handle, linkedin_id
+      instagram_handle, facebook_page,
+      youtube_channel_id, linkedin_id
     Values are full cleaned URLs (https, no query/fragment).
     """
     soup = BeautifulSoup(html, "html.parser")
@@ -120,10 +120,6 @@ def _extract_socials(html: str) -> dict[str, str]:
             if first not in ("p", "reel", "stories", "explore", "tv"):
                 found["instagram_handle"] = normalize_social_url(href)
 
-        elif netloc in ("twitter.com", "x.com") and "twitter_handle" not in found:
-            if first not in _SKIP_PATHS:
-                found["twitter_handle"] = normalize_social_url(href)
-
         elif netloc == "facebook.com" and "facebook_page" not in found:
             if first == "pages" and len(parts) >= 2:
                 found["facebook_page"] = normalize_social_url(href)
@@ -137,13 +133,6 @@ def _extract_socials(html: str) -> dict[str, str]:
                 found["youtube_channel_id"] = normalize_social_url(href)
             elif first not in _SKIP_PATHS:
                 found["youtube_channel_id"] = normalize_social_url(href)
-
-        elif netloc == "tiktok.com" and "tiktok_handle" not in found:
-            handle = parts[0].lower()
-            if handle.startswith("@"):
-                handle = handle[1:]
-            if handle and handle not in _SKIP_PATHS:
-                found["tiktok_handle"] = normalize_social_url(href)
 
         elif netloc == "linkedin.com" and "linkedin_id" not in found:
             if first == "company" and len(parts) >= 2:

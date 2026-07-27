@@ -7,8 +7,8 @@ algorithm. Writes to brand_match_profile (BrandProfile).
 Covers:
   compute_creator_tier_profile(db, brand_raw_id)  — avg collaborator follower/subscriber size, bucketed
   compute_audience_demographics(db, brand_raw_id) — gender/country/age aggregate + sample size
-  compute_platform_presence(db, brand_raw_id)     — has_instagram/youtube/facebook/tiktok/twitter booleans
-  compute_sponsorship_activity(db, brand_raw_id)  — 0-100 sponsorship_activity_score + meta_ads_*/youtube_last_sponsorship (YouTube/Instagram/Meta Ads only — TikTok/Twitter not scored in V1)
+  compute_platform_presence(db, brand_raw_id)     — has_instagram/youtube/facebook booleans
+  compute_sponsorship_activity(db, brand_raw_id)  — 0-100 sponsorship_activity_score + meta_ads_*/youtube_last_sponsorship (YouTube/Instagram/Meta Ads only)
   compute_brand_embedding(db, brand_raw_id)       — prose text + Mistral embedding
 
 NOT covered here:
@@ -193,8 +193,7 @@ def compute_platform_presence(db: Session, brand_raw_id: int) -> dict | None:
     Simple booleans for whether the brand has a known handle on each
     platform (from brands_raw). Denormalized onto brand_match_profile so
     matching doesn't need a join back to brands_raw for this check.
-    TikTok/Twitter are not scored in V1. Returns None if the brand doesn't
-    exist.
+    Returns None if the brand doesn't exist.
     """
     brand = db.query(BrandRaw).filter(BrandRaw.id == brand_raw_id).first()
     if not brand:
@@ -219,8 +218,7 @@ def compute_platform_presence(db: Session, brand_raw_id: int) -> dict | None:
 # scoring.py's "Influencer Buying Activity" + "Advertising Budget" sections
 # exactly (its Section 3/4 — legitimacy/reachability — are deliberately
 # excluded, same as the matching design doc excludes tranco rank/HQ country/
-# traffic tier from Stage 3). TikTok/Twitter are not scored in V1 (same as
-# has_tiktok/has_twitter in compute_platform_presence above).
+# traffic tier from Stage 3).
 _ACTIVITY_MAX_POINTS = 25 + 25 + 15
 
 
@@ -232,9 +230,8 @@ def compute_sponsorship_activity(db: Session, brand_raw_id: int) -> dict | None:
     meta_ads_active/meta_ads_no_end_date/meta_ads_count/meta_ads_recency_days/
     youtube_last_sponsorship — those raw counts feed match_text.py's
     Priority-3 "actively running paid campaigns" reason, which was
-    previously always None since nothing wrote to them. TikTok/Twitter are
-    not scored in V1. Writes to brand_match_profile. Returns None if the
-    brand doesn't exist.
+    previously always None since nothing wrote to them. Writes to
+    brand_match_profile. Returns None if the brand doesn't exist.
 
     A brand with zero measured activity across every platform gets a real
     0.0 (not None) — a genuine "nothing observed" answer, not "unknown",

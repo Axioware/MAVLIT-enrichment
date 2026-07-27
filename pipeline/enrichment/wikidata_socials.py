@@ -5,10 +5,8 @@ Fetches social media handles for brands that have a Wikidata QID.
 
 Properties fetched per entity:
   P2003 → instagram_handle
-  P2002 → twitter_handle
   P2397 → youtube_channel_id
   P4003 → facebook_page
-  P7085 → tiktok_handle
   P4264 → linkedin_id
 
 Works in batches of 50 QIDs per SPARQL request.
@@ -39,18 +37,16 @@ _RETRY_WAIT  = 65   # seconds to wait on 429
 def _fetch_socials_batch(qids: list[str]) -> dict[str, dict]:
     """
     SPARQL query for a batch of Wikidata QIDs.
-    Returns {qid: {instagram_handle, twitter_handle, youtube_channel_id,
-                   facebook_page, tiktok_handle, linkedin_id}}
+    Returns {qid: {instagram_handle, youtube_channel_id,
+                   facebook_page, linkedin_id}}
     """
     values_block = " ".join(f"wd:{q}" for q in qids)
     sparql = f"""
-SELECT ?entity ?ig ?tw ?yt ?fb ?tt ?li WHERE {{
+SELECT ?entity ?ig ?yt ?fb ?li WHERE {{
   VALUES ?entity {{ {values_block} }}
   OPTIONAL {{ ?entity wdt:P2003 ?ig . }}
-  OPTIONAL {{ ?entity wdt:P2002 ?tw . }}
   OPTIONAL {{ ?entity wdt:P2397 ?yt . }}
   OPTIONAL {{ ?entity wdt:P4003 ?fb . }}
-  OPTIONAL {{ ?entity wdt:P7085 ?tt . }}
   OPTIONAL {{ ?entity wdt:P4264 ?li . }}
 }}
 """
@@ -83,9 +79,6 @@ SELECT ?entity ?ig ?tw ?yt ?fb ?tt ?li WHERE {{
         if "ig" in row:
             v = row["ig"]["value"]
             entry["instagram_handle"]   = f"https://www.instagram.com/{v}"
-        if "tw" in row:
-            v = row["tw"]["value"]
-            entry["twitter_handle"]     = f"https://twitter.com/{v}"
         if "yt" in row:
             v = row["yt"]["value"]
             # P2397 stores either a channel ID (UC...) or a handle (@...)
@@ -96,9 +89,6 @@ SELECT ?entity ?ig ?tw ?yt ?fb ?tt ?li WHERE {{
         if "fb" in row:
             v = row["fb"]["value"]
             entry["facebook_page"]      = f"https://www.facebook.com/{v}"
-        if "tt" in row:
-            v = row["tt"]["value"]
-            entry["tiktok_handle"]      = f"https://www.tiktok.com/@{v}"
         if "li" in row:
             v = row["li"]["value"]
             entry["linkedin_id"]        = f"https://www.linkedin.com/company/{v}"

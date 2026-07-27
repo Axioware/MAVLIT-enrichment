@@ -1,4 +1,4 @@
-# wikidata_socials → shopify → tranco → meta_ads → youtube → twitter
+# wikidata_socials → shopify → tranco → meta_ads → youtube
 
 
 ## to run instagram_posts.py (apify)
@@ -71,17 +71,6 @@ enrich_youtube_sponsorships(db, limit=1, niche='fashion')
 db.close()
 "
 
-## to run tiktok_posts.py (apify)
-python3 -c "
-from dotenv import load_dotenv; load_dotenv()
-from pipeline.db import SessionLocal
-from pipeline.enrichment.tiktok_posts import enrich_tiktok_posts
-import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
-db = SessionLocal()
-enrich_tiktok_posts(db, limit=1)
-db.close()
-"
-
 ## to run meta_ads.py
 python3 -c "
 from dotenv import load_dotenv; load_dotenv()
@@ -118,7 +107,7 @@ db.close()
 "
 
 
-## Wikidata Socials (fetches instagram, youtube, twitter, facebook, tiktok handles)
+## Wikidata Socials (fetches instagram, youtube, facebook handles)
 python3 -c "
 from dotenv import load_dotenv; load_dotenv()
 from pipeline.db import SessionLocal
@@ -173,27 +162,6 @@ from pipeline.enrichment.tranco import enrich_tranco
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 db = SessionLocal()
 enrich_tranco(db, limit=1)
-db.close()
-"
-
-## run twitter_posts.py
-python3 -c "
-from dotenv import load_dotenv; load_dotenv()
-from pipeline.db import SessionLocal
-from pipeline.enrichment.twitter_posts import enrich_twitter_posts
-import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
-db = SessionLocal()
-enrich_twitter_posts(db, limit=1)
-db.close()
-"
-OR
-python3 -c "
-from dotenv import load_dotenv; load_dotenv()
-from pipeline.db import SessionLocal
-from pipeline.enrichment.twitter_posts import enrich_twitter_posts
-import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
-db = SessionLocal()
-enrich_twitter_posts(db, brand_id=123)
 db.close()
 "
 

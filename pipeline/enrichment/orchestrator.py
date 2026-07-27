@@ -7,7 +7,6 @@ Orchestrates all signal enrichment steps in order:
   3. tranco              — in_tranco_list / tranco_rank for brands with domain
   4. meta_ads            — store raw ad data from Meta Ad Library
   5. youtube             — detect brands being sponsored in YouTube videos
-  6. twitter             — scrape sponsored tweets for brands with twitter_handle
 
 Each step is independent; a failure in one doesn't abort the others.
 """
@@ -19,7 +18,6 @@ from sqlalchemy.orm import Session
 from .meta_ads import enrich_meta_ads
 from .shopify_detect import enrich_shopify
 from .tranco import enrich_tranco
-from .twitter_posts import enrich_twitter_posts
 from .wikidata_socials import enrich_wikidata_socials
 from .youtube_sponsorship import enrich_youtube_sponsorships
 
@@ -37,14 +35,14 @@ def run_signal_enrichment(
     Run all (or a subset of) signal enrichment steps.
 
     Valid step names:
-      wikidata_socials, shopify, tranco, meta_ads, youtube, twitter
+      wikidata_socials, shopify, tranco, meta_ads, youtube
 
     If `steps` is None, all steps run.
     Returns a dict mapping step name → rows updated.
     """
     all_steps = [
         "wikidata_socials", "shopify",
-        "tranco", "meta_ads", "youtube", "twitter",
+        "tranco", "meta_ads", "youtube",
     ]
     run = set(steps) if steps else set(all_steps)
     results: dict[str, int] = {}
@@ -83,13 +81,6 @@ def run_signal_enrichment(
         except Exception:
             logger.exception("youtube step failed")
             results["youtube"] = -1
-
-    if "twitter" in run:
-        try:
-            results["twitter"] = enrich_twitter_posts(db, limit=limit_per_step)
-        except Exception:
-            logger.exception("twitter step failed")
-            results["twitter"] = -1
 
     logger.info("Signal enrichment complete: %s", results)
     return results

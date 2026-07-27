@@ -47,13 +47,11 @@ class BrandRaw(Base):
     operating_area    = Column(Text)
     created_at        = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
-    #  Social media handles (from Wikidata Layer 1 enrichment) 
+    #  Social media handles (from Wikidata Layer 1 enrichment)
     instagram_handle    = Column(Text)
     youtube_channel_id  = Column(Text)
-    twitter_handle      = Column(Text)
     facebook_page       = Column(Text)
     facebook_page_id    = Column(Text)   # numeric Page ID resolved via Graph API
-    tiktok_handle       = Column(Text)
     linkedin_id         = Column(Text)
 
     #  Website enrichment
@@ -73,8 +71,6 @@ class BrandRaw(Base):
     meta_ads_fetched       = Column(Boolean, nullable=False, server_default="false", default=False)
     youtube_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
     instagram_checked      = Column(Boolean, nullable=False, server_default="false", default=False)
-    tiktok_checked         = Column(Boolean, nullable=False, server_default="false", default=False)
-    twitter_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
     initial_brand_scored   = Column(Boolean, nullable=False, server_default="false", default=False)
     # Set by pipeline/enrichment_re/brand_wikidata_lookup.py after attempting a
     # reverse Wikidata lookup by instagram_handle for bare brand rows (name
@@ -336,74 +332,6 @@ class InstagramCreatorCommenter(Base):
     commenter_user = relationship("InstagramUser", lazy="selectin", foreign_keys=[commenter_user_id])
 
 
-class TiktokPost(Base):
-    __tablename__ = "tiktok_posts"
-
-    id             = Column(Integer, primary_key=True)
-    brand_raw_id   = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
-    tiktok_handle  = Column(Text, nullable=False)
-
-    # Post identity
-    video_id       = Column(Text, unique=True, nullable=False)
-    video_url      = Column(Text)
-    create_time    = Column(Text)
-
-    # Engagement
-    play_count     = Column(Integer)
-    like_count     = Column(Integer)
-    comment_count  = Column(Integer)
-    share_count    = Column(Integer)
-    collect_count  = Column(Integer)
-
-    # Sponsorship signals
-    is_sponsored   = Column(Boolean)
-    is_ad          = Column(Boolean)
-    mentions       = Column(JSONB)
-    hashtags       = Column(JSONB)
-
-    fetched_at     = Column(TIMESTAMP(timezone=True), server_default=func.now())
-
-    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
-
-
-class TwitterPost(Base):
-    __tablename__ = "twitter_posts"
-
-    id              = Column(Integer, primary_key=True)
-    brand_raw_id    = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
-    twitter_handle  = Column(Text, nullable=False)
-
-    # Tweet identity
-    tweet_id        = Column(Text, unique=True, nullable=False)
-    permalink       = Column(Text)
-    created_at      = Column(Text)
-
-    # Content
-    text            = Column(Text)
-    hashtags        = Column(JSONB)
-    mentions        = Column(JSONB)
-
-    # Sponsorship signals
-    is_sponsored    = Column(Boolean)
-    sponsor_signals = Column(JSONB)
-
-    # Engagement
-    likes           = Column(Integer)
-    retweets        = Column(Integer)
-    quotes          = Column(Integer)
-    comments        = Column(Integer)
-    has_media       = Column(Boolean)
-
-    # Author snapshot
-    username        = Column(Text)
-    fullname        = Column(Text)
-    verified        = Column(Boolean)
-
-    fetched_at      = Column(TIMESTAMP(timezone=True), server_default=func.now())
-
-    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
-
-
 class InitialBrandScore(Base):
     __tablename__ = "initial_brand_score"
 
@@ -441,8 +369,6 @@ class BrandProfile(Base):
     meta_ads_no_end_date       = Column(Boolean)               # True if any ad has no end_date (still live)
     meta_ads_count             = Column(Integer)
     youtube_last_sponsorship   = Column(TIMESTAMP(timezone=True))   # publish date of the most recent sponsored video
-    tiktok_sponsored_count     = Column(Integer)
-    twitter_sponsored_count    = Column(Integer)
 
     #  Creator tier fit
     avg_yt_creator_subscribers    = Column(Integer)
@@ -463,8 +389,6 @@ class BrandProfile(Base):
     has_instagram = Column(Boolean)
     has_youtube   = Column(Boolean)
     has_facebook  = Column(Boolean)
-    has_tiktok    = Column(Boolean)   # reserved — not scored in V1
-    has_twitter   = Column(Boolean)   # reserved — not scored in V1
 
     #  Contact / outreach routing signal (NOT used in scoring)
     has_marketing_contact    = Column(Boolean)   # True if Apollo returned a marketing/partnerships title
@@ -548,7 +472,6 @@ class CreatorProfile(Base):
 
     #  Platform links
     instagram_handle = Column(Text)
-    tiktok_handle     = Column(Text)
     youtube_channel   = Column(Text)
     facebook_page     = Column(Text)
     substack_url      = Column(Text)
@@ -556,8 +479,6 @@ class CreatorProfile(Base):
     #  Platform stats
     instagram_followers = Column(Integer)
     instagram_following = Column(Integer)
-    tiktok_followers     = Column(Integer)
-    tiktok_following      = Column(Integer)
     youtube_followers    = Column(Integer)
     facebook_followers   = Column(Integer)
     facebook_following    = Column(Integer)
