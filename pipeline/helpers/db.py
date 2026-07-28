@@ -1,5 +1,4 @@
 import logging
-
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement

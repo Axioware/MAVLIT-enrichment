@@ -1,12 +1,3 @@
-"""
-main.py — CLI entrypoint for the seed stage.
-
-Usage:
-    python main.py --niche fashion
-    python main.py --niche fashion --limit 50   # for testing
-
-"""
-
 import argparse
 import logging
 import sys

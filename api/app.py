@@ -2,14 +2,12 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqlalchemy import text
-
 from config import IS_PRODUCTION
 from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router

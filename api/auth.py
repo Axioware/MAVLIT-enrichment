@@ -1,28 +1,14 @@
-"""
-api/auth.py
-
-Google OAuth 2.0 sign-in / sign-up.
-
-Routes:
-  GET  /auth/google           → redirect user to Google consent screen
-  GET  /auth/google/callback  → exchange code, create/find user, set JWT cookie
-  GET  /auth/me               → return current user (requires cookie)
-  POST /auth/logout           → clear JWT cookie
-"""
-
 import hmac
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
-
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from jose import JWTError, jwt
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-
 from config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, IS_PRODUCTION, JWT_SECRET, OAUTH_REDIRECT_URI
 from pipeline.db import CreatorProfile, get_db
 

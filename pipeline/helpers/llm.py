@@ -1,7 +1,6 @@
 import json
 import logging
 import re
-
 from config import MISTRAL_API_KEY
 
 logger = logging.getLogger(__name__)
