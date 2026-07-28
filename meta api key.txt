@@ -1,23 +1,99 @@
-Still expired (Session has expired on Monday, 27-Jul-26 11:00:00 PDT). Here's the fix — this time let's get a long-lived token (~60 days) instead of another short-lived one, so it stops expiring every day or two:
+WHY meta_ads.py IS NOT WORKING (brief)
+========================================
+The META_ACCESS_TOKEN itself is valid — that is NOT the problem.
 
+meta_ads.py needs to resolve OTHER companies' Facebook Page URLs (e.g.
+facebook.com/nike) into numeric Page IDs, because Meta's Ad Library API
+only accepts numeric IDs, not vanity URLs. That lookup
+(GET /{page-slug}?fields=id) fails with:
+
+  (#100) Object does not exist, cannot be loaded due to missing permission
+  or reviewable feature ... requires 'pages_read_engagement' permission or
+  'Page Public Content Access' or 'Page Public Metadata Access' feature.
+
+This is an APP-LEVEL PERMISSION Meta has not approved yet — not a token
+problem. Pages you administer, or test Pages connected to your Meta app
+while it's still in Development Mode, work fine without this. Any real,
+unrelated third-party brand Page (which is what this pipeline needs —
+Toyota, Nike, random brands, etc.) will always fail with this error until
+Meta approves "Page Public Metadata Access" for this app.
+
+Regenerating the token will NOT fix this. Only App Review approval will.
+
+
+WHAT YOU HAVE TO DO — Meta App Review for Page Public Metadata Access
+========================================================================
+1. Business Verification (usually required first)
+   - Meta App Dashboard → Settings → Basic → Business Verification.
+   - Submit legal business name, address, supporting document.
+   - Takes a few days to process.
+
+2. Request the feature
+   - App Review → Permissions and Features → search "Page Public Metadata
+     Access" → click "Request Advanced Access" (or "Edit App Review
+     Request" if one is already in progress).
+
+3. Fill out the submission
+   - Description (why you need it) — example:
+     "Our platform is a brand-creator sponsorship matching service. Brands
+     in our database each have a public Facebook Page URL, collected from
+     their own website or public sources. We use Page Public Metadata
+     Access to resolve that Page's vanity URL to its numeric Page ID via
+     GET /{page-slug}?fields=id, because Meta's Ad Library API only
+     accepts numeric Page IDs. Once resolved, we use that ID only to query
+     the already-public Ad Library API for that brand's ad activity (ad
+     creative, impression/spend range, platform placement), so creators on
+     our platform can see which brands are actively running paid social
+     ads. We do not access private engagement metrics, Page Insights, or
+     user content — only the Page's own public numeric identifier and
+     subsequently public Ad Library data."
+   - Screen recording (1-3 min) showing: running the pipeline live on a
+     real brand, the GET /{page-slug}?fields=id request + numeric ID
+     response, then the Ad Library query using that ID and the resulting
+     ad data (e.g. show it landing in the Meta Ad admin table).
+   - Data handling section — legal entity name / country must match your
+     Business Verification submission exactly. Data processors: "No"
+     unless you host on a third-party cloud provider (then name it).
+     Government data requests: "No" (no live users yet). Policies for
+     such requests: "None of the above" if none actually exist yet.
+   - Reviewer instructions (Site URL / how to test) — if there's no public
+     URL for this specific feature (this app currently runs locally), say
+     so plainly and point to the attached screen recording as the primary
+     evidence. Facebook Login integrated? No — this app uses Google OAuth
+     only, not Facebook Login.
+   - Submit for review.
+
+4. Wait for approval (days to a couple weeks). Once approved, this is an
+   APP-LEVEL feature grant — your current token works immediately, no
+   need to regenerate it again for this reason.
+
+
+HOW TO GET/REFRESH THE ACCESS TOKEN (separate from the above — tokens
+still expire periodically and need refreshing regardless of App Review status)
+================================================================================
 Step 1 — Get a fresh short-lived token
+  Go to Meta Graph API Explorer.
+  Select your app from the dropdown (top right).
+  Click Generate Access Token, grant the permissions this pipeline needs
+  (ads_read — used by meta_ads.py's Ad Library queries).
+  Copy the token it gives you — this one only lasts ~1-2 hours, don't put
+  it directly in .env yet.
 
-Go to Meta Graph API Explorer.
-Select your app from the dropdown (top right).
-Click Generate Access Token, grant the permissions this pipeline needs (ads_read — used by meta_ads.py's Ad Library queries).
-Copy the token it gives you — this one only lasts ~1-2 hours, don't put it directly in .env yet.
 Step 2 — Find your App ID and App Secret
+  In your app dashboard, go to Settings → Basic.
+  Copy the App ID and click Show next to App Secret to reveal it.
 
-In your app dashboard, go to Settings → Basic.
-Copy the App ID and click Show next to App Secret to reveal it.
 Step 3 — Exchange it for a long-lived token
-Run this (replace the three placeholders):
+  Run this (replace the three placeholders):
 
+  curl -i -X GET "https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id={app-id}&client_secret={app-secret}&fb_exchange_token={short-lived-token-from-step-1}"
 
-curl -i -X GET "https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id={app-id}&client_secret={app-secret}&fb_exchange_token={short-lived-token-from-step-1}"
-The response's access_token field is your long-lived token (~60 days instead of ~1-2 hours).
+  The response's access_token field is your long-lived token (~60 days
+  instead of ~1-2 hours).
 
 Step 4 — Update .env
-Replace META_ACCESS_TOKEN with that long-lived token, then restart uvicorn (same reason as the Google OAuth issue — it won't pick up .env changes on its own).
+  Replace META_ACCESS_TOKEN with that long-lived token, then restart
+  uvicorn (it only reads .env at startup, not on --reload).
 
-Note: even the long-lived token isn't permanent — it'll need refreshing roughly every 60 days. If you want, I can also add a startup check that logs a clear warning when the token's close to expiring, so this doesn't catch you off guard again — let me know if that's worth doing.
+Note: even the long-lived token isn't permanent — it'll need refreshing
+roughly every 60 days.
