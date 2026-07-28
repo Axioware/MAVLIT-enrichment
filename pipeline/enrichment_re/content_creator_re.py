@@ -161,7 +161,7 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> int:
         logger.info("Content creator RE: scraping @%s", username)
 
         #  Scrape top 5 posts (addParentData gets profile info too)
-        raw_posts = _scrape_posts(username, n=5)
+        raw_posts = _scrape_posts(username, n=40)
         if not raw_posts:
             logger.warning("Content creator RE: no posts returned for @%s", username)
             row.is_scraped = True
