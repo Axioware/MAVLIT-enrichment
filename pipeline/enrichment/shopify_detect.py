@@ -12,9 +12,12 @@ Fetches each brand's homepage to:
      NULL (bare brands created by content_creator_re / brand_wikidata_lookup
      that never got a niche), ask the same call to also determine a best-fit
      niche and backfill brands_raw.niche with it. An existing niche is never
-     overwritten — the LLM is told to just echo it back unchanged. Skipped
-     if MISTRAL_API_KEY isn't set. brands_niches is upserted (not just
-     updated) since a bare brand has no existing row there yet.
+     overwritten — the LLM is told to just echo it back unchanged. If the
+     LLM can't confidently classify it, "unknown" is stored as a real niche
+     value (not left NULL) — that distinguishes "looked and couldn't tell"
+     from "never processed", so a brand doesn't sit unclassified forever.
+     Skipped if MISTRAL_API_KEY isn't set. brands_niches is upserted (not
+     just updated) since a bare brand has no existing row there yet.
 
 Social fields are only written if the column is currently NULL, so they
 don't overwrite more-authoritative Wikidata data fetched earlier.
@@ -240,8 +243,12 @@ def _extract_brand_niche_and_tags(db: Session, brand: BrandRaw, description: str
     if not isinstance(result, dict):
         return None, []
 
+    # "unknown" is a real, storable answer here (not treated as no-answer) —
+    # it distinguishes "the LLM looked and couldn't tell" from "never
+    # processed", so a brand doesn't sit at niche=NULL forever just because
+    # its description was too vague to classify.
     niche = result.get("niche")
-    niche = niche.strip() if isinstance(niche, str) and niche.strip() and niche.strip().lower() != "unknown" else None
+    niche = niche.strip() if isinstance(niche, str) and niche.strip() else None
 
     tags = result.get("tags")
     tags = [t for t in tags if isinstance(t, str) and t.strip()] if isinstance(tags, list) else []

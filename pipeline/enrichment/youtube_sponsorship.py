@@ -509,7 +509,10 @@ def enrich_youtube_sponsorships(
         logger.warning("YOUTUBE_API_KEY not set — skipping YouTube sponsorship detection")
         return 0
 
-    query = db.query(BrandRaw)
+    # name is required — this module's whole methodology embeds the brand
+    # name in every search query (_build_queries), which a bare brand (from
+    # content_creator_re / brand_wikidata_lookup, name IS NULL) has none of.
+    query = db.query(BrandRaw).filter(BrandRaw.name.isnot(None))
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:
