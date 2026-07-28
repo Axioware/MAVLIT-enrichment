@@ -1,0 +1,23 @@
+Still expired (Session has expired on Monday, 27-Jul-26 11:00:00 PDT). Here's the fix — this time let's get a long-lived token (~60 days) instead of another short-lived one, so it stops expiring every day or two:
+
+Step 1 — Get a fresh short-lived token
+
+Go to Meta Graph API Explorer.
+Select your app from the dropdown (top right).
+Click Generate Access Token, grant the permissions this pipeline needs (ads_read — used by meta_ads.py's Ad Library queries).
+Copy the token it gives you — this one only lasts ~1-2 hours, don't put it directly in .env yet.
+Step 2 — Find your App ID and App Secret
+
+In your app dashboard, go to Settings → Basic.
+Copy the App ID and click Show next to App Secret to reveal it.
+Step 3 — Exchange it for a long-lived token
+Run this (replace the three placeholders):
+
+
+curl -i -X GET "https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id={app-id}&client_secret={app-secret}&fb_exchange_token={short-lived-token-from-step-1}"
+The response's access_token field is your long-lived token (~60 days instead of ~1-2 hours).
+
+Step 4 — Update .env
+Replace META_ACCESS_TOKEN with that long-lived token, then restart uvicorn (same reason as the Google OAuth issue — it won't pick up .env changes on its own).
+
+Note: even the long-lived token isn't permanent — it'll need refreshing roughly every 60 days. If you want, I can also add a startup check that logs a clear warning when the token's close to expiring, so this doesn't catch you off guard again — let me know if that's worth doing.
