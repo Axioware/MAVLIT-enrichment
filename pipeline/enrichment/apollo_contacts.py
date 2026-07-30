@@ -2,7 +2,7 @@
 pipeline/enrichment/apollo_contacts.py
 
 Finds up to 50 marketing/sponsorship contacts for high-scoring brands,
-ranks ALL of them best-first via Mistral, and stores the full ranked list
+ranks ALL of them best-first via OpenAI, and stores the full ranked list
 in brand_contacts — gives a content creator a whole queue of people to try,
 not just one. Only the top 5 are enriched (the paid Apollo call that
 reveals a real email); the rest are stored from the free search preview
@@ -27,15 +27,15 @@ Pipeline (adapted from apollo_sponsorship_finder.py, minus the CSV/testing bits)
                   (person_seniorities=c_suite/founder/owner, no title
                   filter) so the creator still has someone to reach out to
                   directly. Still free.
-  2) RANK      -> Mistral (pipeline.helpers.llm.call_mistral_json) ranks
+  2) RANK      -> OpenAI (pipeline.helpers.gpt_llm.call_gpt_json) ranks
                   ALL of the found candidates (up to 50) best-first by how
                   likely each is to personally own or influence
                   sponsorship/influencer-marketing decisions. Any candidate
-                  Mistral's response omits is appended at the end (in
+                  the response omits is appended at the end (in
                   original order) so nobody found in search is ever
-                  silently dropped. Costs a fraction of a cent of Mistral
+                  silently dropped. Costs a fraction of a cent of OpenAI
                   usage, not Apollo credits. Falls back to keyword/order
-                  ranking if MISTRAL_API_KEY isn't set, or if Mistral's
+                  ranking if OPENAI_KEY isn't set, or if the LLM's
                   response is unusable.
   3) ENRICH    -> Apollo /v1/people/match. Only the top ENRICH_TOP_N-ranked
                   candidates get enriched to reveal a real name/email —
@@ -85,9 +85,9 @@ import httpx
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from config import APOLLO_API_KEY, ENABLE_APOLLO_PHONE_REVEAL, MISTRAL_API_KEY
+from config import APOLLO_API_KEY, ENABLE_APOLLO_PHONE_REVEAL, OPENAI_KEY
 from pipeline.db import BrandContact, BrandProfile, BrandRaw, InitialBrandScore, Prompt
-from pipeline.helpers.llm import call_mistral_json, fill_template
+from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import APOLLO_RANK_PROMPT_NAME, APOLLO_RANK_DEFAULT_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -147,7 +147,7 @@ _MARKETING_DEPARTMENT_TITLES = [
 # straight to company leadership instead of giving up.
 _C_SUITE_SENIORITIES = ["c_suite", "founder", "owner"]
 
-# Keyword fallback used only if MISTRAL_API_KEY isn't set, or Mistral's
+# Keyword fallback used only if OPENAI_KEY isn't set, or the LLM's
 # response is unusable, for the marketing-search path.
 _TITLE_PRIORITIES: list[tuple[list[str], int]] = [
     (["partnership"], 1),
@@ -243,7 +243,7 @@ def _score_title(title: str) -> int:
 
 def _keyword_rank_all(people: list[dict], fallback_mode: bool) -> list[tuple[dict, str]]:
     """
-    Fallback ranking used only if MISTRAL_API_KEY isn't set, or Mistral's
+    Fallback ranking used only if OPENAI_KEY isn't set, or the LLM's
     response is unusable. Marketing-title keyword scoring doesn't apply to
     the C-suite fallback pool (everyone there is already an executive), so
     that case just keeps Apollo's own result order.
@@ -265,18 +265,18 @@ def _get_apollo_rank_prompt(db: Session) -> str:
 
 def _rank_all_candidates(db: Session, people: list[dict], brand_name: str, fallback_mode: bool = False) -> list[tuple[dict, str]]:
     """
-    Ask Mistral to rank ALL found candidates (up to 50) best-first by how
+    Ask OpenAI to rank ALL found candidates (up to 50) best-first by how
     likely each is to personally own or influence sponsorship/influencer-
     marketing decisions. Returns a best-first list of (person_dict, reason)
-    covering every candidate in `people` — any candidate Mistral's response
+    covering every candidate in `people` — any candidate the response
     doesn't explicitly rank is appended at the end (original order) so
     nobody is ever silently dropped from storage. Falls back to keyword/
-    order ranking if MISTRAL_API_KEY isn't set or Mistral's response is
+    order ranking if OPENAI_KEY isn't set or the response is
     unusable.
     """
     if not people:
         return []
-    if not MISTRAL_API_KEY:
+    if not OPENAI_KEY:
         return _keyword_rank_all(people, fallback_mode)
 
     candidates = [
@@ -320,7 +320,7 @@ def _rank_all_candidates(db: Session, people: list[dict], brand_name: str, fallb
         candidates=json.dumps(candidates, indent=2),
     )
 
-    result = call_mistral_json(prompt, context=f"apollo full ranking for {brand_name}")
+    result = call_gpt_json(prompt, context=f"apollo full ranking for {brand_name}")
     picks = result.get("picks", []) if isinstance(result, dict) else []
 
     by_id = {p.get("id"): p for p in people}
@@ -332,13 +332,13 @@ def _rank_all_candidates(db: Session, people: list[dict], brand_name: str, fallb
             continue
         person = by_id.get(pid)
         if not person:
-            logger.warning("Mistral picked id=%s which isn't in the candidate list — skipping", pid)
+            logger.warning("LLM picked id=%s which isn't in the candidate list — skipping", pid)
             continue
         seen_ids.add(pid)
         ranked.append((person, pick.get("reason", "")))
 
     # Safety net: never let a candidate found in search go unstored just
-    # because Mistral's response omitted it.
+    # because the LLM's response omitted it.
     for p in people:
         pid = p.get("id")
         if pid not in seen_ids:
@@ -346,7 +346,7 @@ def _rank_all_candidates(db: Session, people: list[dict], brand_name: str, fallb
             seen_ids.add(pid)
 
     if not ranked:
-        logger.info("Mistral returned no usable ranking for '%s' — falling back to keyword/order ranking", brand_name)
+        logger.info("LLM returned no usable ranking for '%s' — falling back to keyword/order ranking", brand_name)
         return _keyword_rank_all(people, fallback_mode)
 
     return ranked

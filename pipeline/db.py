@@ -105,7 +105,7 @@ class BrandNiche(Base):
     # source text without needing to join back to brands_raw.
     description  = Column(Text)
     # LLM-extracted sub-niche/category tags derived from `description` via
-    # Mistral — e.g. ["sustainable clothing", "streetwear"] for a brand
+    # the LLM — e.g. ["sustainable clothing", "streetwear"] for a brand
     # whose niche is just "fashion". NULL until shopify_detect.py finds a
     # description to extract from.
     tags         = Column(JSONB)
@@ -136,7 +136,7 @@ class YoutubeSponsorship(Base):
     confidence          = Column(Float)
     matched_keywords    = Column(JSONB)
     comments            = Column(JSONB)   # up to 200 top-level comments: [{"author":.., "text":.., "likes":..}, ...]
-    male_pct            = Column(Float)   # gender split of commenters, inferred via Mistral from display names — excludes "unknown"
+    male_pct            = Column(Float)   # gender split of commenters, inferred via the LLM from display names — excludes "unknown"
     female_pct          = Column(Float)
     fetched_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
@@ -395,7 +395,7 @@ class BrandProfile(Base):
     contact_mode             = Column(Text)      # 'in_house' | 'outsourced_likely' | 'none'
     best_contact_title_score = Column(Integer)
 
-    #  Embedding — mistral-embed (Mistral API), 1024 dims
+    #  Embedding — text-embedding-3-small (OpenAI API), 1024 dims
     embedding      = Column(Vector(1024))
     embedding_text = Column(Text)
 
@@ -416,7 +416,7 @@ class BrandContact(Base):
     id           = Column(Integer, primary_key=True)
     brand_raw_id = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
 
-    rank = Column(Integer)   # 1-50, Mistral's priority order among this brand's contacts (1 = best)
+    rank = Column(Integer)   # 1-50, the LLM's priority order among this brand's contacts (1 = best)
     is_enriched = Column(Boolean, nullable=False, server_default="false", default=False)   # True only for the paid-enriched top 5
 
     full_name      = Column(Text)
@@ -433,7 +433,7 @@ class BrandContact(Base):
     state          = Column(Text)
     country        = Column(Text)
 
-    llm_reason       = Column(Text)   # Mistral's one-line justification for picking this person
+    llm_reason       = Column(Text)   # the LLM's one-line justification for picking this person
     apollo_person_id = Column(Text)
 
     fetched_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
@@ -500,7 +500,7 @@ class CreatorProfile(Base):
     #  Derived / computed fields
     creator_tier  = Column(Text)
     content_tags  = Column(JSONB)   # LLM-extracted content tags + audience-value keywords, merged into one list
-    embedding     = Column(Vector(1024))   # mistral-embed (Mistral API), must match BrandProfile.embedding
+    embedding     = Column(Vector(1024))   # text-embedding-3-small (OpenAI API), must match BrandProfile.embedding
     embedding_text = Column(Text)
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())

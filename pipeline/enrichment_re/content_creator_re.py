@@ -6,13 +6,13 @@ Reverse-engineering flow: content_creator_re is a manually-seeded list
 is_scraped=False:
 
   1. Scrape the creator's top 5 posts via Apify and classify demographics
-     via Mistral — same _scrape_posts/_profile_from_posts/_classify_demographics
+     via the LLM — same _scrape_posts/_profile_from_posts/_classify_demographics
      functions used by the main creator flow in instagram_users.py. niche is
      NOT LLM-classified here — it's copied straight from content_creator_re.niche.
   2. Store one row per post in instagram_users (user_type="contentcreatorRE"),
      with is_content_creator_re=True.
   3. For each of those 5 posts, extract mentions/tagged_users/coauthor_producers/
-     paid_partnership and ask Mistral (brand_check prompt) which referenced
+     paid_partnership and ask the LLM (brand_check prompt) which referenced
      accounts, if any, are real brand/company accounts — not other creators.
      Any confirmed brand gets a bare brands_raw row (instagram_handle only;
      name/niche/source are nullable for exactly this case — see pipeline/db.py)
@@ -36,10 +36,10 @@ import time
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from config import APIFY_TOKEN, MISTRAL_API_KEY
+from config import APIFY_TOKEN, OPENAI_KEY
 from pipeline.db import BrandRaw, ContentCreatorRE, InstagramUser, Prompt, insert_brand
 from pipeline.helpers.db import upsert_rows
-from pipeline.helpers.llm import call_mistral_json, fill_template
+from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import BRAND_CHECK_PROMPT_NAME, BRAND_CHECK_DEFAULT_PROMPT
 from pipeline.helpers.social import normalize_handle
 from pipeline.enrichment.instagram_posts import _usernames_only
@@ -65,7 +65,7 @@ def _get_brand_check_prompt(db: Session) -> str:
 def _check_post_for_brands(db: Session, username: str, full_name: str | None, item: dict) -> list[str]:
     """
     Extract mentions/tagged_users/coauthor_producers/paid_partnership from a
-    raw post item and ask Mistral which of those referenced accounts, if
+    raw post item and ask the LLM which of those referenced accounts, if
     any, are real brand/company accounts. Returns confirmed brand usernames
     — empty if none, or if the post has no such signal to check at all.
     """
@@ -73,7 +73,7 @@ def _check_post_for_brands(db: Session, username: str, full_name: str | None, it
     tagged    = _usernames_only(item.get("taggedUsers")) or []
     coauthors = _usernames_only(item.get("coauthorProducers")) or []
 
-    if not (mentions or tagged or coauthors) or not MISTRAL_API_KEY:
+    if not (mentions or tagged or coauthors) or not OPENAI_KEY:
         return []
 
     prompt = fill_template(
@@ -86,7 +86,7 @@ def _check_post_for_brands(db: Session, username: str, full_name: str | None, it
         tagged_users=", ".join(tagged) if tagged else "none",
         coauthor_producers=", ".join(coauthors) if coauthors else "none",
     )
-    result = call_mistral_json(prompt, context=f"brand_check @{username} post {item.get('id')}")
+    result = call_gpt_json(prompt, context=f"brand_check @{username} post {item.get('id')}")
     if not isinstance(result, dict):
         return []
     brands = result.get("brands")

@@ -12,8 +12,8 @@ For each instagram_post where is_users_scraped=False:
   3. For each new content creator username:
      a. Scrape their top 5 posts via Apify (addParentData=True embeds profile data in every post).
      b. Extract profile data (bio, businessAddress, etc.) from the first post's parent fields.
-     c. Classify demographics via Mistral (gender, country, language, location, age_group), and
-        the creator's content niche via Mistral from bio + the 5 posts' captions/hashtags —
+     c. Classify demographics via the LLM (gender, country, language, location, age_group), and
+        the creator's content niche via the LLM from bio + the 5 posts' captions/hashtags —
         niche classification only ever runs for creators, never for commenters (see step f).
         Both are classified ONCE per creator and duplicated identically across every one
         of that creator's post rows (see step d).
@@ -24,7 +24,7 @@ For each instagram_post where is_users_scraped=False:
      e. Collect up to 5 commenters per post from latestComments → up to 25 unique usernames.
      f. For each commenter NOT already in instagram_users:
         - Scrape 1 post via Apify (addParentData=True) to get their profile data.
-        - Classify demographics via Mistral (no niche classification for commenters).
+        - Classify demographics via the LLM (no niche classification for commenters).
         - Store ONE row (commenters only ever get 1 post) with user_type="commenter"
           and niche=NULL. Upserted on username — commenters are the only user_type
           still unique-by-username (see InstagramUser's docstring in pipeline/db.py).
@@ -45,12 +45,12 @@ import time
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from config import APIFY_TOKEN, MISTRAL_API_KEY
+from config import APIFY_TOKEN, OPENAI_KEY
 from pipeline.db import BrandInstagramUser, InstagramCreatorCommenter, InstagramPost, InstagramUser, Prompt
 from pipeline.helpers.apify import run_apify_actor
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
-from pipeline.helpers.llm import call_mistral_json, fill_template
+from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import (
     DEMOGRAPHICS_PROMPT_NAME, DEMOGRAPHICS_DEFAULT_PROMPT,
     CREATOR_NICHE_PROMPT_NAME, CREATOR_NICHE_DEFAULT_PROMPT,
@@ -303,8 +303,8 @@ def _format_business_address(addr) -> str:
 
 
 def _classify_demographics(db: Session, username: str, profile: dict) -> dict:
-    """Classify demographics for a user profile via Mistral."""
-    if not MISTRAL_API_KEY:
+    """Classify demographics for a user profile via the LLM."""
+    if not OPENAI_KEY:
         return _UNKNOWN_DEMO
 
     prompt = fill_template(
@@ -315,7 +315,7 @@ def _classify_demographics(db: Session, username: str, profile: dict) -> dict:
         external_url=profile.get("externalUrl") or "",
         business_address=_format_business_address(profile.get("businessAddress")),
     )
-    result = call_mistral_json(prompt, context=f"demographics @{username}")
+    result = call_gpt_json(prompt, context=f"demographics @{username}")
     if not isinstance(result, dict):
         return _UNKNOWN_DEMO
     return {
@@ -329,11 +329,11 @@ def _classify_demographics(db: Session, username: str, profile: dict) -> dict:
 
 def _classify_niche(db: Session, username: str, profile: dict, raw_posts: list[dict]) -> str:
     """
-    Classify a content creator's niche via Mistral, from their bio plus the
+    Classify a content creator's niche via the LLM, from their bio plus the
     captions/hashtags of the (up to 5) posts just scraped. Creators only —
     never called for commenters (see _build_post_row's niche gating).
     """
-    if not MISTRAL_API_KEY:
+    if not OPENAI_KEY:
         return "unknown"
 
     captions = " | ".join((p.get("caption") or "")[:300] for p in raw_posts if p.get("caption"))
@@ -345,7 +345,7 @@ def _classify_niche(db: Session, username: str, profile: dict, raw_posts: list[d
         captions=captions or "none",
         hashtags=", ".join(hashtags) if hashtags else "none",
     )
-    result = call_mistral_json(prompt, context=f"creator niche @{username}")
+    result = call_gpt_json(prompt, context=f"creator niche @{username}")
     if not isinstance(result, dict):
         return "unknown"
     niche = result.get("niche")

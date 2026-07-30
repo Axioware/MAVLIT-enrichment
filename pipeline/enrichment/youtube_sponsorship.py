@@ -19,7 +19,7 @@ Also fetches up to 200 top-level comments (commentThreads.list, paginated
 2×100) for each video that's actually stored as a sponsorship — cheap at 1
 quota unit per page regardless of maxResults, so this only runs for
 genuine hits, not every video searched. Commenter display names are then
-batch-classified by gender via Mistral (one call per video) and
+batch-classified by gender via the LLM (one call per video) and
 aggregated into male_pct/female_pct — a rough proxy for the video's
 audience gender split, same caveat as any name-based classification
 elsewhere in this codebase (usernames/handles are often ungendered, hence
@@ -40,11 +40,11 @@ import httpx
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, MISTRAL_API_KEY, ENABLE_LLM
+from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, OPENAI_KEY, ENABLE_LLM
 from pipeline.db import BrandRaw, Prompt, YoutubeSponsorship
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
-from pipeline.helpers.llm import call_mistral_json, call_mistral_text, fill_template
+from pipeline.helpers.gpt_llm import call_gpt_json, call_gpt_text, fill_template
 from pipeline.helpers.prompts import (
     GENDER_PROMPT_NAME, GENDER_DEFAULT_PROMPT,
     SPONSOR_CHECK_PROMPT_NAME, SPONSOR_CHECK_DEFAULT_PROMPT,
@@ -351,7 +351,7 @@ def _fetch_video_comments(video_id: str, max_results: int = _MAX_COMMENTS) -> li
     return comments
 
 
-_GENDER_BATCH_SIZE = 50   # keeps each Mistral response comfortably short — a
+_GENDER_BATCH_SIZE = 50   # keeps each LLM response comfortably short — a
                           # single call for all 200 names risked the response
                           # getting truncated mid-array (confirmed live: a
                           # 200-name call failed with "Unterminated string"
@@ -360,7 +360,7 @@ _GENDER_BATCH_SIZE = 50   # keeps each Mistral response comfortably short — a
 
 def _classify_commenter_genders(db: Session, comments: list[dict]) -> tuple[float | None, float | None]:
     """
-    Batch-classifies all commenter display names via Mistral (in chunks of
+    Batch-classifies all commenter display names via the LLM (in chunks of
     _GENDER_BATCH_SIZE — see that constant's comment) and returns
     (male_pct, female_pct) computed only over classifications that came
     back "male"/"female" — "unknown" is excluded from the percentage base
@@ -368,13 +368,13 @@ def _classify_commenter_genders(db: Session, comments: list[dict]) -> tuple[floa
     codebase. A batch that's not a usable list at all is skipped (logged),
     not fatal — the other batches still contribute. A batch whose length
     merely doesn't match is truncated/padded rather than discarded outright
-    (confirmed live: Mistral sometimes pads a few extra trailing "unknown"
+    (confirmed live: the LLM sometimes pads a few extra trailing "unknown"
     entries; the entries up to the requested count still line up correctly
     with the input in order). Returns (None, None) if there are no
-    comments, MISTRAL_API_KEY isn't set, or every batch fails outright.
+    comments, OPENAI_KEY isn't set, or every batch fails outright.
     """
     names = [c["author"] for c in comments if c.get("author")]
-    if not names or not MISTRAL_API_KEY:
+    if not names or not OPENAI_KEY:
         return None, None
 
     prompt_template = _get_gender_prompt(db)
@@ -383,7 +383,7 @@ def _classify_commenter_genders(db: Session, comments: list[dict]) -> tuple[floa
     for i in range(0, len(names), _GENDER_BATCH_SIZE):
         chunk = names[i : i + _GENDER_BATCH_SIZE]
         prompt = fill_template(prompt_template, names=json.dumps(chunk, ensure_ascii=False))
-        result = call_mistral_json(prompt, context=f"commenter gender classification (batch {i // _GENDER_BATCH_SIZE + 1}, {len(chunk)} names)")
+        result = call_gpt_json(prompt, context=f"commenter gender classification (batch {i // _GENDER_BATCH_SIZE + 1}, {len(chunk)} names)")
         genders = result.get("genders") if isinstance(result, dict) else None
 
         if not isinstance(genders, list) or not genders:
@@ -417,12 +417,12 @@ def _llm_verify_sponsorship(
     detected_type: str,
 ) -> tuple[bool, str]:
     """
-    Ask Mistral to verify whether a video is a genuine sponsorship for the brand
+    Ask the LLM to verify whether a video is a genuine sponsorship for the brand
     or a false positive detected by the regex.
 
     Returns (is_genuine: bool, reason: str).
     Falls back to True (keep the video) on any error so no data is lost.
-    Only called when ENABLE_LLM=true and MISTRAL_API_KEY is set.
+    Only called when ENABLE_LLM=true and OPENAI_KEY is set.
     """
     prompt = fill_template(
         _get_sponsor_check_prompt(db),
@@ -432,7 +432,7 @@ def _llm_verify_sponsorship(
         description=description[:1500],
     )
 
-    text = call_mistral_text(prompt, context=title[:60])
+    text = call_gpt_text(prompt, context=title[:60])
     if not text:
         return True, "LLM error — kept by default"
 
@@ -582,7 +582,7 @@ def enrich_youtube_sponsorships(
                     continue  # skip videos with no sponsorship signal
 
                 #  LLM false-positive check (only when ENABLE_LLM=true)
-                if ENABLE_LLM and MISTRAL_API_KEY:
+                if ENABLE_LLM and OPENAI_KEY:
                     is_genuine, llm_reason = _llm_verify_sponsorship(
                         db, name, title, description, stype
                     )

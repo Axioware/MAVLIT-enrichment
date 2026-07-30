@@ -25,8 +25,8 @@ APIFY_TOKEN       = os.getenv("APIFY_TOKEN", "")
 # LLM verification (Claude) — set ENABLE_LLM=true to activate
 ENABLE_LLM        = os.getenv("ENABLE_LLM", "false").strip().lower() == "true"
 
-# Demographics classification (Mistral)
-MISTRAL_API_KEY   = os.getenv("MISTRAL_API_KEY", "")
+# LLM classification/extraction + embeddings (OpenAI, gpt-5-mini + text-embedding-3-small)
+OPENAI_KEY = os.getenv("OPENAI_KEY", "")
 
 # Instagram post LLM creator verification — independent of ENABLE_LLM
 # When true: taggedUsers + mentions are also sent to LLM (in addition to coauthorProducers)

@@ -11,8 +11,8 @@ the brand-side pipelines in this package. Computes and caches:
                            from niche/sub_niches/content_description
   3) embedding + embedding_text — prose built the same way as
                            build_brand_embedding_text() in brand_signals.py,
-                           embedded via the same Mistral mistral-embed model
-                           (pipeline.helpers.llm.embed_text) so creator and
+                           embedded via the same OpenAI text-embedding-3-small model
+                           (pipeline.helpers.gpt_llm.embed_text) so creator and
                            brand vectors are directly comparable by cosine
                            similarity in Stage 3.
 
@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from pipeline.db import CreatorProfile, Prompt
 from pipeline.helpers.creator_tier import bucket_creator_tier
-from pipeline.helpers.llm import call_mistral_json, embed_text, fill_template
+from pipeline.helpers.gpt_llm import call_gpt_json, embed_text, fill_template
 from pipeline.helpers.prompts import TAGS_PROMPT_NAME, TAGS_DEFAULT_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ def _extract_content_tags(db: Session, profile: CreatorProfile) -> list[str]:
         sub_niches=", ".join(profile.sub_niches) if profile.sub_niches else "none provided",
         content_description=profile.content_description or "none provided",
     )
-    result = call_mistral_json(prompt, context=f"creator tags for creator_id={profile.id}")
+    result = call_gpt_json(prompt, context=f"creator tags for creator_id={profile.id}")
     if not isinstance(result, dict):
         return []
 
@@ -124,7 +124,7 @@ def build_creator_embedding_text(profile: CreatorProfile) -> str:
 def compute_creator_signals(db: Session, creator_id: int) -> dict | None:
     """
     Full Stage 2 pipeline for one creator: buckets tier from follower_count,
-    LLM-extracts content tags, builds embedding text, embeds via Mistral.
+    LLM-extracts content tags, builds embedding text, embeds via OpenAI.
     Writes creator_tier, content_tags, embedding, embedding_text to
     creator_profiles. Returns None if the creator doesn't exist.
 

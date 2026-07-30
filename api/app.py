@@ -979,7 +979,7 @@ def upsert_my_creator_profile(
     Update the logged-in user's creator profile fields. creator_tier is
     bucketed synchronously (instant, no LLM call) so the response reflects
     it immediately; content_tags and the embedding are refreshed in a
-    background task (an LLM call + a Mistral embed call — a few seconds,
+    background task (an LLM call + an OpenAI embed call — a few seconds,
     not worth blocking the response for).
     """
     db = SessionLocal()

@@ -9,16 +9,16 @@ Covers:
   compute_audience_demographics(db, brand_raw_id) — gender/country/age aggregate + sample size
   compute_platform_presence(db, brand_raw_id)     — has_instagram/youtube/facebook booleans
   compute_sponsorship_activity(db, brand_raw_id)  — 0-100 sponsorship_activity_score + meta_ads_*/youtube_last_sponsorship (YouTube/Instagram/Meta Ads only)
-  compute_brand_embedding(db, brand_raw_id)       — prose text + Mistral embedding
+  compute_brand_embedding(db, brand_raw_id)       — prose text + OpenAI embedding
 
 NOT covered here:
   contact signal              — blocked, no Apollo contact-fetch pipeline exists yet
 
-Embedding model: Mistral's "mistral-embed" (1024 dims, fixed — this model
-doesn't support a custom output_dimension). Both brand_match_profile.embedding
+Embedding model: OpenAI's "text-embedding-3-small", requested at 1024 dims
+via the API's dimensions param. Both brand_match_profile.embedding
 and creator_profiles.embedding are Vector(1024) to match — they must use
 the same model/dimension to be comparable via cosine similarity in Stage 3
-matching. embed_text() lives in pipeline/helpers/llm.py so it can be reused
+matching. embed_text() lives in pipeline/helpers/gpt_llm.py so it can be reused
 for the creator-side embedding once that's built.
 
 Scope notes:
@@ -50,7 +50,7 @@ from pipeline.db import (
 )
 from pipeline.enrichment.initial_brand_scoring import _score_instagram, _score_meta_ads, _score_youtube
 from pipeline.helpers.creator_tier import bucket_creator_tier
-from pipeline.helpers.llm import embed_text
+from pipeline.helpers.gpt_llm import embed_text
 
 logger = logging.getLogger(__name__)
 
@@ -379,7 +379,7 @@ def compute_brand_embedding(db: Session, brand_raw_id: int) -> dict | None:
     """
     Build the brand's embedding_text prose from brands_raw + whatever
     brand_match_profile signals are already computed, then embed it via
-    Mistral (mistral-embed). Writes embedding + embedding_text to
+    OpenAI (text-embedding-3-small). Writes embedding + embedding_text to
     brand_match_profile. Returns None if the brand doesn't exist, or if the
     embed call fails (embedding_text is still worth having on its own, but
     a partial/empty vector would break cosine similarity downstream, so

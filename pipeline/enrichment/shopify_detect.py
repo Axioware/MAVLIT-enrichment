@@ -7,7 +7,7 @@ Fetches each brand's homepage to:
   3. Extract full social media profile URLs → instagram_handle,
      facebook_page, youtube_channel_id, linkedin_id
   4. Scrape the brand's about page → description
-  5. Send that description to Mistral to extract sub-niche/category tags,
+  5. Send that description to the LLM to extract sub-niche/category tags,
      stored in brands_niches.tags — and, if brands_raw.niche is currently
      NULL (bare brands created by content_creator_re / brand_wikidata_lookup
      that never got a niche), ask the same call to also determine a best-fit
@@ -16,7 +16,7 @@ Fetches each brand's homepage to:
      LLM can't confidently classify it, "unknown" is stored as a real niche
      value (not left NULL) — that distinguishes "looked and couldn't tell"
      from "never processed", so a brand doesn't sit unclassified forever.
-     Skipped if MISTRAL_API_KEY isn't set. brands_niches is upserted (not
+     Skipped if OPENAI_KEY isn't set. brands_niches is upserted (not
      just updated) since a bare brand has no existing row there yet.
 
 Social fields are only written if the column is currently NULL, so they
@@ -40,9 +40,9 @@ from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from config import MISTRAL_API_KEY
+from config import OPENAI_KEY
 from pipeline.db import BrandNiche, BrandRaw, Prompt
-from pipeline.helpers.llm import call_mistral_json, fill_template
+from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import BRAND_NICHE_TAGS_PROMPT_NAME, BRAND_NICHE_TAGS_DEFAULT_PROMPT
 from pipeline.helpers.social import normalize_social_url
 
@@ -223,15 +223,15 @@ def _get_brand_niche_tags_prompt(db: Session) -> str:
 
 def _extract_brand_niche_and_tags(db: Session, brand: BrandRaw, description: str) -> tuple[str | None, list[str]]:
     """
-    Ask Mistral for concrete sub-niche/category tags from a brand's scraped
+    Ask the LLM for concrete sub-niche/category tags from a brand's scraped
     description, and — only when brand.niche is currently unset — a best-fit
     broad niche guess too (the prompt is told to just echo back an already-
     known niche unchanged, so this never overwrites one). Returns
-    (None, []) on any failure or if MISTRAL_API_KEY isn't set — never
+    (None, []) on any failure or if OPENAI_KEY isn't set — never
     raises, so this never blocks the rest of enrich_shopify's per-brand
     processing.
     """
-    if not MISTRAL_API_KEY:
+    if not OPENAI_KEY:
         return None, []
     prompt = fill_template(
         _get_brand_niche_tags_prompt(db),
@@ -239,7 +239,7 @@ def _extract_brand_niche_and_tags(db: Session, brand: BrandRaw, description: str
         niche=brand.niche or "unknown",
         description=description,
     )
-    result = call_mistral_json(prompt, context=f"brand niche tags for {brand.name}")
+    result = call_gpt_json(prompt, context=f"brand niche tags for {brand.name}")
     if not isinstance(result, dict):
         return None, []
 
@@ -271,7 +271,7 @@ def _upsert_brand_niche(db: Session, brand_id: int, niche: str, description: str
 def _update_brand_niche_description_and_tags(db: Session, brand: BrandRaw, description: str) -> None:
     """
     Extracts sub-niche tags (and a niche backfill, if brand.niche was NULL)
-    from the scraped description via Mistral, then upserts brands_niches —
+    from the scraped description via the LLM, then upserts brands_niches —
     a plain UPDATE would silently no-op for bare brands (content_creator_re /
     brand_wikidata_lookup rows) that have no brands_niches row yet.
     """

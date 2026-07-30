@@ -7,7 +7,7 @@ Scrapes recent Instagram posts for each brand via Apify (shu8hvrXbJbY3Eb9W).
 
 ENABLE_INSTA_LLM = True  (full LLM mode)
   • ALL signals (paid_partnership, sponsors, taggedUsers, mentions,
-    coauthorProducers) go through Mistral.
+    coauthorProducers) go through the LLM.
   • LLM filters out false positives and returns trimmed versions of each field.
   • Filtered values are stored back into their own columns.
   • llm_checked = True
@@ -15,7 +15,7 @@ ENABLE_INSTA_LLM = True  (full LLM mode)
 
 ENABLE_INSTA_LLM = False  (coauthor-only LLM mode)
   • paid_partnership, sponsors, taggedUsers, mentions → saved as-is from Apify.
-  • coauthorProducers → ALWAYS filtered through Mistral (even when flag is off).
+  • coauthorProducers → ALWAYS filtered through the LLM (even when flag is off).
   • Filtered coauthors stored in coauthor_producers column.
   • llm_checked = False  (never True in this mode)
   • Post is skipped only if the ONLY signal is coauthorProducers AND LLM rejects all.
@@ -32,11 +32,11 @@ import time
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from config import APIFY_TOKEN, ENABLE_INSTA_LLM, MISTRAL_API_KEY
+from config import APIFY_TOKEN, ENABLE_INSTA_LLM, OPENAI_KEY
 from pipeline.db import BrandRaw, InstagramPost, Prompt
 from pipeline.helpers.apify import run_apify_actor
 from pipeline.helpers.db import upsert_rows
-from pipeline.helpers.llm import call_mistral_json, fill_template
+from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
     COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT,
@@ -104,11 +104,11 @@ def _real_coauthors(item: dict, brand_handle: str) -> list[dict]:
 def _llm_filter_all(db: Session, item: dict, brand_name: str, handle: str) -> dict | None:
     """
     Full-filter mode (ENABLE_INSTA_LLM=True).
-    Sends all signals to Mistral; returns dict with filtered field values.
-    Returns None when MISTRAL_API_KEY is not set so the caller can skip the post.
+    Sends all signals to the LLM; returns dict with filtered field values.
+    Returns None when OPENAI_KEY is not set so the caller can skip the post.
     """
-    if not MISTRAL_API_KEY:
-        logger.warning("Instagram LLM full: MISTRAL_API_KEY not set — skipping post")
+    if not OPENAI_KEY:
+        logger.warning("Instagram LLM full: OPENAI_KEY not set — skipping post")
         return None
 
     caption = (item.get("caption") or "")[:600]
@@ -122,7 +122,7 @@ def _llm_filter_all(db: Session, item: dict, brand_name: str, handle: str) -> di
         mentions=_fmt(item.get("mentions")),
         coauthor_producers=_fmt(_real_coauthors(item, handle)),
     )
-    result = call_mistral_json(prompt, context=f"{brand_name} full-filter post {item.get('id')}")
+    result = call_gpt_json(prompt, context=f"{brand_name} full-filter post {item.get('id')}")
     if not isinstance(result, dict):
         return {}
     logger.info(
@@ -141,11 +141,11 @@ def _llm_filter_coauthors(db: Session, item: dict, brand_name: str, handle: str)
     """
     Coauthor-only filter — always active regardless of ENABLE_INSTA_LLM.
     Returns the filtered coauthor list (may be empty).
-    Falls back to the raw Apify list when MISTRAL_API_KEY is not set.
+    Falls back to the raw Apify list when OPENAI_KEY is not set.
     """
     raw = _real_coauthors(item, handle)
-    if not MISTRAL_API_KEY:
-        logger.warning("Instagram LLM coauthor: MISTRAL_API_KEY not set — saving coauthors as-is")
+    if not OPENAI_KEY:
+        logger.warning("Instagram LLM coauthor: OPENAI_KEY not set — saving coauthors as-is")
         return raw
 
     caption = (item.get("caption") or "")[:600]
@@ -155,7 +155,7 @@ def _llm_filter_coauthors(db: Session, item: dict, brand_name: str, handle: str)
         caption=caption,
         coauthor_producers=_fmt(raw),
     )
-    result = call_mistral_json(prompt, context=f"{brand_name} coauthor-filter post {item.get('id')}")
+    result = call_gpt_json(prompt, context=f"{brand_name} coauthor-filter post {item.get('id')}")
     if not isinstance(result, dict):
         return []
     filtered = result.get("coauthor_producers", [])
