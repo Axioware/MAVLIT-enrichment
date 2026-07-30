@@ -21,7 +21,7 @@ _MODEL = "gpt-5-mini"
 _EMBED_MODEL = "text-embedding-3-small"
 _EMBED_DIMENSIONS = 1024
 
-_TIMEOUT = 30.0
+_TIMEOUT = 60.0
 
 
 def _headers() -> dict:
