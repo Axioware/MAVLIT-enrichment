@@ -506,8 +506,11 @@ def enrich_instagram_users(
     can re-run/test a post that was already processed). Not to be confused
     with instagram_posts.post_id, which is Instagram's own post ID string.
 
-    Pass brand_raw_id to target all instagram_posts rows for one brand
-    instead — also bypasses is_users_scraped. Ignored if row_id is given.
+    Pass brand_raw_id to scope the run to one brand's instagram_posts rows
+    instead — still filtered to is_users_scraped=False, so repeated calls
+    (e.g. limit=1 in a loop) advance through that brand's pending posts one
+    at a time rather than reprocessing the same already-done row forever.
+    Ignored if row_id is given.
     """
     if not APIFY_TOKEN:
         logger.warning("APIFY_TOKEN not set — skipping Instagram user enrichment")
@@ -517,7 +520,10 @@ def enrich_instagram_users(
     if row_id is not None:
         query = query.filter(InstagramPost.id == row_id)
     elif brand_raw_id is not None:
-        query = query.filter(InstagramPost.brand_raw_id == brand_raw_id)
+        query = query.filter(
+            InstagramPost.brand_raw_id == brand_raw_id,
+            InstagramPost.is_users_scraped == False,
+        )
     else:
         query = query.filter(InstagramPost.is_users_scraped == False)
 

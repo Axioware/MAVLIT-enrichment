@@ -69,10 +69,21 @@ def _fmt(value) -> str:
 
 
 def _usernames_only(items) -> list[str] | None:
-    """Reduce a list of user dicts down to just their usernames."""
+    """
+    Reduce a list down to just usernames — entries may be Apify's raw user
+    dicts (id/username/full_name/is_verified/...) or, when this runs on an
+    LLM's filtered response, plain username strings if the LLM didn't echo
+    the full dict shape back. Handles both so only bare usernames ever reach
+    the DB, never the LLM's id/full_name/is_verified fields.
+    """
     if not items or not isinstance(items, list):
         return None
-    usernames = [entry.get("username") for entry in items if isinstance(entry, dict) and entry.get("username")]
+    usernames = []
+    for entry in items:
+        if isinstance(entry, dict) and entry.get("username"):
+            usernames.append(entry["username"])
+        elif isinstance(entry, str) and entry.strip():
+            usernames.append(entry.strip())
     return usernames or None
 
 
@@ -118,9 +129,9 @@ def _llm_filter_all(db: Session, item: dict, brand_name: str, handle: str) -> di
         caption=caption,
         paid_partnership=str(bool(item.get("paidPartnership"))).lower(),
         sponsors=_fmt(item.get("sponsors")),
-        tagged_users=_fmt(item.get("taggedUsers")),
+        tagged_users=_fmt(_usernames_only(item.get("taggedUsers"))),
         mentions=_fmt(item.get("mentions")),
-        coauthor_producers=_fmt(_real_coauthors(item, handle)),
+        coauthor_producers=_fmt(_usernames_only(_real_coauthors(item, handle))),
     )
     result = call_gpt_json(prompt, context=f"{brand_name} full-filter post {item.get('id')}")
     if not isinstance(result, dict):
@@ -219,7 +230,8 @@ def enrich_instagram_posts(
     niche: str | None = None,
 ) -> int:
     """
-    For each brand with instagram_handle set and instagram_checked=False:
+    For each brand with instagram_handle set, instagram_checked=False, and
+    has_official_website=True:
       1. Scrape posts via Apify
       2. Apply LLM filtering based on ENABLE_INSTA_LLM flag
       3. Store qualifying posts in instagram_posts
@@ -229,8 +241,9 @@ def enrich_instagram_posts(
     regardless of how far back that goes — no time-window filter is applied.
 
     Pass brand_id to target one specific brand directly — this bypasses the
-    instagram_checked filter (so you can re-run/test a brand that was already
-    processed), but instagram_handle must still be set.
+    instagram_checked/has_official_website filters (so you can re-run/test a
+    brand that was already processed, or one with no website on file), but
+    instagram_handle must still be set.
 
     Pass niche to scope the run to brands.niche matching that value exactly
     (case-insensitive) — brands_raw.niche is stored verbatim as typed at
@@ -247,7 +260,10 @@ def enrich_instagram_posts(
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:
-        query = query.filter(BrandRaw.instagram_checked.is_(False))
+        query = query.filter(
+            BrandRaw.instagram_checked.is_(False),
+            BrandRaw.has_official_website.is_(True),
+        )
         if niche:
             query = query.filter(func.lower(BrandRaw.niche) == niche.strip().lower())
 
@@ -300,11 +316,17 @@ def enrich_instagram_posts(
 
                 row = _build_row(brand.id, handle, item)
                 if row:
+                    # tagged_users/coauthor_producers/mentions: the LLM is
+                    # handed Apify's raw dicts (id/username/full_name/
+                    # is_verified) so it can judge who's a real creator, but
+                    # it also echoes that same dict shape back — reduce to
+                    # bare usernames here so only usernames ever land in the
+                    # DB, same as when ENABLE_INSTA_LLM is off.
                     row["paid_partnership"]   = bool(filtered.get("paid_partnership"))
                     row["sponsors"]           = filtered.get("sponsors") or None
-                    row["tagged_users"]       = filtered.get("tagged_users") or None
-                    row["mentions"]           = filtered.get("mentions") or None
-                    row["coauthor_producers"] = filtered.get("coauthor_producers") or None
+                    row["tagged_users"]       = _usernames_only(filtered.get("tagged_users"))
+                    row["mentions"]           = _usernames_only(filtered.get("mentions"))
+                    row["coauthor_producers"] = _usernames_only(filtered.get("coauthor_producers"))
                     row["llm_checked"]        = True
                     inserted += upsert_rows(db, InstagramPost, [row], ["post_id"])
                 time.sleep(0.3)

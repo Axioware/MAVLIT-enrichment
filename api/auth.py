@@ -2,14 +2,14 @@ import hmac
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from jose import JWTError, jwt
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, IS_PRODUCTION, JWT_SECRET, OAUTH_REDIRECT_URI
+from config import FRONTEND_ORIGINS, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, IS_PRODUCTION, JWT_SECRET, OAUTH_REDIRECT_URI
 from pipeline.db import CreatorProfile, get_db
 
 logger = logging.getLogger(__name__)
@@ -23,16 +23,27 @@ _ALGORITHM        = "HS256"
 _TOKEN_DAYS       = 7
 _HTTP_TIMEOUT     = 10.0
 
+# See the access_token set_cookie() call in google_callback() for why this
+# is conditional on IS_PRODUCTION.
+_CROSS_SITE_SAMESITE = "none" if IS_PRODUCTION else "lax"
+
 
 def _safe_return_to(path: str | None) -> str:
     """
-    Only allow same-origin relative paths as a post-login redirect target.
-    Rejects protocol-relative ("//evil.com"), absolute ("https://evil.com"),
-    and backslash-based ("/\\evil.com") open-redirect tricks.
+    Allow a same-origin relative path (this API's own frontend/*.html pages),
+    or an absolute URL whose origin exactly matches one of FRONTEND_ORIGINS
+    (a separate cross-origin frontend app, configured in config.py). Rejects
+    everything else — protocol-relative ("//evil.com"), unlisted absolute
+    URLs, and backslash-based ("/\\evil.com") open-redirect tricks.
     """
-    if not path or not path.startswith("/") or path.startswith("//") or path.startswith("/\\") or ":" in path:
+    if not path:
         return "/"
-    return path
+    if path.startswith("/") and not path.startswith("//") and not path.startswith("/\\") and ":" not in path:
+        return path
+    parsed = urlparse(path)
+    if parsed.scheme in ("http", "https") and f"{parsed.scheme}://{parsed.netloc}" in FRONTEND_ORIGINS:
+        return path
+    return "/"
 
 
 #  JWT helpers
@@ -229,7 +240,13 @@ async def google_callback(
         "access_token", token,
         httponly=True,
         max_age=60 * 60 * 24 * _TOKEN_DAYS,
-        samesite="lax",
+        # SameSite=None is required for a cross-origin frontend's fetch()
+        # calls (credentials: 'include') to carry this cookie back to the
+        # API — but browsers reject SameSite=None without Secure, so this
+        # only takes effect in production (HTTPS). In dev (IS_PRODUCTION=
+        # false) this stays "lax" so the same-origin frontend/*.html pages
+        # keep working over plain http://localhost as before.
+        samesite=_CROSS_SITE_SAMESITE,
         secure=IS_PRODUCTION,
     )
     response.delete_cookie("oauth_state")
@@ -251,5 +268,7 @@ def me(current_user: CreatorProfile = Depends(get_current_user)):
 @router.post("/logout")
 def logout(response: Response):
     """Clear the JWT cookie."""
-    response.delete_cookie("access_token")
+    # Must match the samesite/secure attributes it was set with, or some
+    # browsers treat this as a different cookie and leave the real one intact.
+    response.delete_cookie("access_token", samesite=_CROSS_SITE_SAMESITE, secure=IS_PRODUCTION)
     return {"message": "Logged out"}
