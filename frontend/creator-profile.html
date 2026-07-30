@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script src="/posthog-init.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Creator Profile — MAVLIT</title>
@@ -624,6 +625,7 @@
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(user) {
         isLoggedIn = !!user;
+        if (user) window.mavlitIdentifyUser(user);
         setButtonMode();
 
         var pending = localStorage.getItem(PENDING_KEY);

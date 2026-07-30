@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script src="/posthog-init.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MAVLIT Pipeline</title>
@@ -705,6 +706,7 @@
     .then(r => r.ok ? r.json() : null)
     .then(user => {
       if (!user) return;
+      window.mavlitIdentifyUser(user);
       var navUser = document.getElementById('navUser');
       var signoutBtn = document.getElementById('signoutBtn');
       navUser.textContent = user.name || user.email;
@@ -714,7 +716,7 @@
 
   function signOut() {
     fetch('/auth/logout', { method: 'POST', credentials: 'include' })
-      .then(function() { window.location.replace('/signin'); });
+      .then(function() { window.mavlitResetIdentity(); window.location.replace('/signin'); });
   }
 </script>
 </body>

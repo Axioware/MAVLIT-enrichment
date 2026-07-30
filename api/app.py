@@ -3,12 +3,13 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqlalchemy import text
-from config import IS_PRODUCTION
+from config import FRONTEND_ORIGINS, IS_PRODUCTION, POSTHOG_PROJECT_TOKEN, POSTHOG_HOST
 from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
 from pipeline.matching.matcher import get_matches
@@ -330,6 +331,20 @@ app = FastAPI(
 
 app.include_router(auth_router)
 
+# Lets a separate frontend app (different domain, see FRONTEND_ORIGINS in
+# config.py) call this API with credentials (cookies) from the browser.
+# allow_credentials=True requires explicit origins — CORS forbids pairing
+# it with a wildcard "*". Empty FRONTEND_ORIGINS (the default) means no
+# cross-origin frontend is configured, so this is a no-op.
+if FRONTEND_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=FRONTEND_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
 
 @app.middleware("http")
 async def security_headers(request, call_next):
@@ -619,9 +634,42 @@ def _run_enrich_job(job_id: str, body: EnrichRequest) -> None:
     finally:
         db.close()
 
-# 
+#
 # Frontend — /
-# 
+#
+
+# PostHog's standard array.js loader snippet, with the project token/host
+# filled in server-side (from config.py) rather than hardcoded into the
+# static HTML — keeps it configurable per environment (dev/staging/prod
+# can point at different PostHog projects without editing frontend files).
+_POSTHOG_JS_TEMPLATE = """
+!function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagResult isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+posthog.init("__PH_TOKEN__", { api_host: "__PH_HOST__", defaults: "2026-05-30", capture_pageview: true, autocapture: true });
+
+// Called by each page after GET /auth/me resolves, so logged-in users are
+// tied to their PostHog events instead of being tracked as anonymous.
+window.mavlitIdentifyUser = function(user) {
+  if (user && user.email && window.posthog) {
+    posthog.identify(user.email, { email: user.email, name: user.name || undefined });
+  }
+};
+
+// Called on sign-out so the next visitor on this device isn't merged into
+// the previous user's PostHog identity.
+window.mavlitResetIdentity = function() {
+  if (window.posthog) posthog.reset();
+};
+"""
+
+
+@app.get("/posthog-init.js", include_in_schema=False)
+def posthog_init_js():
+    if not POSTHOG_PROJECT_TOKEN:
+        js = "console.warn('PostHog: POSTHOG_PROJECT_TOKEN not set — analytics disabled');"
+    else:
+        js = _POSTHOG_JS_TEMPLATE.replace("__PH_TOKEN__", POSTHOG_PROJECT_TOKEN).replace("__PH_HOST__", POSTHOG_HOST)
+    return Response(content=js, media_type="application/javascript")
+
 
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
