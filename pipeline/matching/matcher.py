@@ -47,6 +47,11 @@ Runs on every page load; designed to be cheap:
                stale copy mirrored onto instagram_users.niche at scrape
                time) — lets brands discovered via the RE pipeline surface
                even when the brand's own niche differs.
+             - ANY overlap between the creator's chosen sub_niches and the
+               brand's own brands_niches.tags (finer-grained tags
+               LLM-extracted in shopify_detect.py, e.g. "sustainable
+               clothing", "streetwear") — an independent, optional signal
+               alongside the niche checks above, not a replacement for them.
            This is a hard yes/no check, separate from and stricter than the
            fuzzy niche_match scoring dimension in Step C, which still runs
            on whatever niche overlap exists for ranking.
@@ -73,7 +78,7 @@ import logging
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from pipeline.db import BrandInstagramUser, BrandProfile, BrandRaw, ContentCreatorRE, CreatorProfile, InstagramUser
+from pipeline.db import BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, CreatorProfile, InstagramUser
 from pipeline.matching.match_text import generate_match_reasons
 from pipeline.matching.scoring import score_match
 
@@ -175,7 +180,31 @@ def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) 
                     func.lower(ContentCreatorRE.niche).in_(creator_niches),
                 )
             )
-            query = query.filter(or_(brand_niche_match, collaborator_niche_match, re_creator_niche_match))
+            match_clauses = [brand_niche_match, collaborator_niche_match, re_creator_niche_match]
+
+            # Sub-niches: a finer-grained tag vocabulary (brands_niches.tags,
+            # LLM-extracted from each brand's scraped about-page description
+            # in shopify_detect.py — e.g. "sustainable clothing", "streetwear")
+            # independent of the coarse niche string above. A brand also
+            # passes if ANY of the creator's chosen sub_niches appears in
+            # its own brands_niches.tags — lets a brand surface via tag
+            # overlap even when its niche/collaborator-niche differs from
+            # the creator's primary niche pick. Done in Python (not a JSONB
+            # SQL operator) for simple case-insensitive matching — the
+            # brands_niches.tags population is small enough for this to be
+            # cheap even every call.
+            if creator.sub_niches:
+                creator_tags = {t.strip().lower() for t in creator.sub_niches if t and t.strip()}
+                if creator_tags:
+                    tag_rows = db.query(BrandNiche.brand_raw_id, BrandNiche.tags).filter(BrandNiche.tags.isnot(None)).all()
+                    tag_matched_ids = {
+                        brand_raw_id for brand_raw_id, tags in tag_rows
+                        if isinstance(tags, list) and any(isinstance(t, str) and t.lower() in creator_tags for t in tags)
+                    }
+                    if tag_matched_ids:
+                        match_clauses.append(BrandRaw.id.in_(tag_matched_ids))
+
+            query = query.filter(or_(*match_clauses))
 
     # Step B — semantic shortlist (single indexed pgvector query)
     query = query.order_by(distance_expr).limit(_SHORTLIST_SIZE)

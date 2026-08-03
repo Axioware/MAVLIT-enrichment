@@ -1001,6 +1001,29 @@ def list_brand_niches():
         db.close()
 
 
+@app.get("/brand-niche-tags")
+def list_brand_niche_tags():
+    """
+    Distinct sub-niche/category tags from brands_niches.tags — LLM-extracted
+    in shopify_detect.py from each brand's scraped about-page description
+    (e.g. ["sustainable clothing", "streetwear"]), for the creator-profile
+    form's Sub-niches multi-select. Used the same way content_niche is in
+    the Stage 3 hard filter (matcher.py): a brand matches if the creator's
+    sub_niches overlaps with that brand's brands_niches.tags.
+    """
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT DISTINCT tag
+            FROM brands_niches, jsonb_array_elements_text(tags) AS tag
+            WHERE jsonb_typeof(tags) = 'array'
+        """)).fetchall()
+        tags = sorted({r[0] for r in rows if r[0]}, key=str.lower)
+        return {"tags": tags}
+    finally:
+        db.close()
+
+
 @app.get("/creator-profile/me", response_model=CreatorProfileResponse)
 def get_my_creator_profile(current_user: CreatorProfile = Depends(get_current_user)):
     """Return the logged-in user's creator profile."""

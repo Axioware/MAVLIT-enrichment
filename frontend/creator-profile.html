@@ -250,11 +250,11 @@
             <label>Sub-niches</label>
             <div class="msel">
               <button type="button" class="msel-toggle" data-panel="sub_niches_list" onclick="toggleMsel('sub_niches_list')">
-                <span class="placeholder">Select niche(s)…</span>
+                <span class="placeholder">Select tag(s)…</span>
               </button>
               <div class="msel-panel" id="sub_niches_list"></div>
             </div>
-            <p class="niche-hint">Click to select one or more — same list as Primary niche above.</p>
+            <p class="niche-hint">Click to select one or more — finer-grained tags brands are tagged with.</p>
           </div>
           <div class="field full">
             <label for="content_description">Describe your content</label>
@@ -436,33 +436,42 @@
     }
   }
 
-  // Primary niche AND Sub-niches are both checkbox dropdowns populated
-  // from GET /brand-niches (the same distinct niche vocabulary
-  // brands.niche and instagram_users.niche use) — two independent
-  // selections from the same option set, plain click toggles a checkbox
+  // Primary niche is a checkbox dropdown populated from GET /brand-niches
+  // (the distinct niche vocabulary brands.niche and instagram_users.niche
+  // use). Sub-niches is a separate checkbox dropdown populated from GET
+  // /brand-niche-tags (distinct brands_niches.tags — the finer-grained
+  // sub-niche/category tags LLM-extracted in shopify_detect.py, e.g.
+  // "sustainable clothing", "streetwear"). Plain click toggles a checkbox
   // (no Ctrl/Cmd modifier needed, unlike a native <select multiple>).
   // content_niche is stored as one comma-joined string
   // (niche_compatibility() splits it), sub_niches is stored as a real array.
+  function populateMselOptions(panelId, values) {
+    var panel = document.getElementById(panelId);
+    (values || []).forEach(function(value) {
+      var label = document.createElement('label');
+      label.className = 'msel-option';
+      var checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = value;
+      checkbox.onchange = function() { updateMselLabel(panelId); };
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(value));
+      panel.appendChild(label);
+    });
+  }
+
   function loadNiches() {
-    return fetch('/brand-niches')
+    var niches = fetch('/brand-niches')
       .then(function(r) { return r.ok ? r.json() : { niches: [] }; })
-      .then(function(data) {
-        ['content_niche_list', 'sub_niches_list'].forEach(function(panelId) {
-          var panel = document.getElementById(panelId);
-          (data.niches || []).forEach(function(niche) {
-            var label = document.createElement('label');
-            label.className = 'msel-option';
-            var checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.value = niche;
-            checkbox.onchange = function() { updateMselLabel(panelId); };
-            label.appendChild(checkbox);
-            label.appendChild(document.createTextNode(niche));
-            panel.appendChild(label);
-          });
-        });
-      })
-      .catch(function() { /* leave lists empty — form still usable */ });
+      .then(function(data) { populateMselOptions('content_niche_list', data.niches); })
+      .catch(function() { /* leave list empty — form still usable */ });
+
+    var tags = fetch('/brand-niche-tags')
+      .then(function(r) { return r.ok ? r.json() : { tags: [] }; })
+      .then(function(data) { populateMselOptions('sub_niches_list', data.tags); })
+      .catch(function() { /* leave list empty — form still usable */ });
+
+    return Promise.all([niches, tags]);
   }
 
   function toggleMsel(panelId) {
@@ -478,12 +487,19 @@
     }
   });
 
+  var MSEL_PLACEHOLDERS = {
+    content_niche_list:        'Select niche(s)…',
+    sub_niches_list:           'Select tag(s)…',
+    audience_age_bracket_list: 'Select bracket(s)…',
+  };
+
   function updateMselLabel(panelId) {
     var selected = getSelectedPills(panelId);
     var toggle = document.querySelector('.msel-toggle[data-panel="' + panelId + '"]');
+    var placeholder = MSEL_PLACEHOLDERS[panelId] || 'Select option(s)…';
     toggle.innerHTML = selected.length
       ? selected.map(function(v) { return esc(v); }).join(', ')
-      : '<span class="placeholder">Select niche(s)…</span>';
+      : '<span class="placeholder">' + placeholder + '</span>';
   }
 
   function esc(s) {
