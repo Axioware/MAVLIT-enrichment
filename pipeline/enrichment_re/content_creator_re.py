@@ -44,7 +44,6 @@ from pipeline.helpers.prompts import BRAND_CHECK_PROMPT_NAME, BRAND_CHECK_DEFAUL
 from pipeline.helpers.social import normalize_handle
 from pipeline.enrichment.instagram_posts import _usernames_only
 from pipeline.enrichment.instagram_users import (
-    _COMMENTER_USERNAME_INDEX_WHERE,
     _build_post_row,
     _classify_demographics,
     _collect_commenter_records,
@@ -243,12 +242,17 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> int:
                 time.sleep(0.3)
 
                 if c_posts[0].get("id"):
+                    # No conflict target: this row could violate EITHER the
+                    # partial username-where-commenter index OR the global
+                    # post_id unique constraint (this commenter's own most
+                    # recent post may already be stored under a different
+                    # username's creator row) — see upsert_rows' docstring.
                     upsert_rows(db, InstagramUser, [
                         _build_post_row(
                             commenter, "commenter", c_profile, c_demo, c_posts[0],
                             is_content_creator_re=True,
                         )
-                    ], ["username"], index_where=_COMMENTER_USERNAME_INDEX_WHERE)
+                    ], None)
 
                 logger.info(
                     "Content creator RE:   commenter @%s stored — gender=%s country=%s",

@@ -42,7 +42,6 @@ Prompts (editable via /admin > Prompts):
 import logging
 import time
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, OPENAI_KEY
@@ -59,12 +58,6 @@ from pipeline.helpers.prompts import (
 logger = logging.getLogger(__name__)
 
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"
-
-# username is only unique for user_type="commenter" (see InstagramUser's
-# docstring in pipeline/db.py) — the commenter upsert_rows(..., ["username"])
-# call must pass this same predicate or Postgres can't infer which index
-# the ON CONFLICT targets.
-_COMMENTER_USERNAME_INDEX_WHERE = text("user_type = 'commenter'")
 
 #  Prompt helpers
 
@@ -637,9 +630,14 @@ def enrich_instagram_users(
                 time.sleep(0.3)
 
                 if c_posts[0].get("id"):
+                    # No conflict target: this row could violate EITHER the
+                    # partial username-where-commenter index OR the global
+                    # post_id unique constraint (this commenter's own most
+                    # recent post may already be stored under a different
+                    # username's creator row) — see upsert_rows' docstring.
                     upsert_rows(db, InstagramUser, [
                         _build_post_row(commenter, "commenter", c_profile, c_demo, c_posts[0])
-                    ], ["username"], index_where=_COMMENTER_USERNAME_INDEX_WHERE)
+                    ], None)
                 _link_to_brand(db, post.brand_raw_id, commenter)
                 for record in commenter_records:
                     if record["username"] == commenter:
