@@ -222,6 +222,7 @@ def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) 
         results.append({
             "brand_raw_id": brand.id,
             "brand_name":   brand.name,
+            "niche":        brand.niche,
             "total_score":  round(scored["total_score"], 4),
             "dimensions":   scored["dimensions"],
             "reasons":      reasons,

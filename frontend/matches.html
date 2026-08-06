@@ -76,6 +76,16 @@
     .btn-refresh:hover:not(:disabled) { background: #0369a1; }
     .btn-refresh:disabled { opacity: .6; cursor: not-allowed; }
 
+    .niche-filter {
+      padding: .45rem .65rem;
+      background: #0f172a;
+      color: #e2e8f0;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      font-size: .85rem;
+    }
+    .toolbar-actions { display: flex; align-items: center; gap: .6rem; }
+
     .card {
       background: #1e293b;
       border: 1px solid #334155;
@@ -157,7 +167,12 @@
 
       <div class="toolbar">
         <span class="subtitle" id="metaLine" style="margin:0;"></span>
-        <button class="btn-refresh" id="refreshBtn" onclick="refreshMatches()">Force refresh</button>
+        <div class="toolbar-actions">
+          <select class="niche-filter" id="nicheFilter" onchange="applyFilterAndRender()">
+            <option value="">All niches</option>
+          </select>
+          <button class="btn-refresh" id="refreshBtn" onclick="refreshMatches()">Force refresh</button>
+        </div>
       </div>
 
       <div id="matchList"></div>
@@ -174,19 +189,55 @@
     return Math.round((score || 0) * 100) + '%';
   }
 
-  function renderMatches(data) {
+  // Holds the last-loaded full match list so the niche filter can re-render
+  // instantly from memory instead of re-fetching on every selection change.
+  var currentMatches = [];
+
+  // Niche options come ONLY from the brands actually matched to this
+  // creator (currentMatches), not the full site-wide niche vocabulary —
+  // so the dropdown never offers a niche that would filter to zero results.
+  function populateNicheFilter(matches) {
+    var select = document.getElementById('nicheFilter');
+    var previousValue = select.value;
+
+    var niches = Array.from(new Set(
+      matches.map(function(m) { return m.niche; }).filter(function(n) { return n; })
+    )).sort(function(a, b) { return a.localeCompare(b); });
+
+    select.innerHTML = '<option value="">All niches</option>' +
+      niches.map(function(n) {
+        return '<option value="' + n.replace(/"/g, '&quot;') + '">' + n.replace(/</g, '&lt;') + '</option>';
+      }).join('');
+
+    // Keep the user's current filter selected across a refresh, as long as
+    // that niche is still present in the new results.
+    if (niches.indexOf(previousValue) !== -1) {
+      select.value = previousValue;
+    }
+  }
+
+  function applyFilterAndRender() {
+    var selected = document.getElementById('nicheFilter').value;
+    var filtered = selected
+      ? currentMatches.filter(function(m) { return m.niche === selected; })
+      : currentMatches;
+    renderMatchList(filtered, selected);
+  }
+
+  function renderMatchList(matches, selectedNiche) {
     var list = document.getElementById('matchList');
     list.innerHTML = '';
 
-    document.getElementById('metaLine').textContent =
-      (data.cached ? 'Cached' : 'Live') + ' — computed ' + new Date(data.computed_at).toLocaleString();
-
-    if (!data.matches || !data.matches.length) {
+    if (!currentMatches.length) {
       list.innerHTML = '<p class="empty-msg">No matches yet — make sure your creator profile is filled out and has been saved at least once.</p>';
       return;
     }
+    if (!matches.length) {
+      list.innerHTML = '<p class="empty-msg">No matches in "' + selectedNiche.replace(/</g, '&lt;') + '" — try a different niche.</p>';
+      return;
+    }
 
-    data.matches.forEach(function(m) {
+    matches.forEach(function(m) {
       var card = document.createElement('div');
       card.className = 'card';
 
@@ -203,6 +254,15 @@
 
       list.appendChild(card);
     });
+  }
+
+  function renderMatches(data) {
+    document.getElementById('metaLine').textContent =
+      (data.cached ? 'Cached' : 'Live') + ' — computed ' + new Date(data.computed_at).toLocaleString();
+
+    currentMatches = data.matches || [];
+    populateNicheFilter(currentMatches);
+    applyFilterAndRender();
   }
 
   function showError(message) {

@@ -1105,6 +1105,7 @@ class MatchDimension(BaseModel):
 class MatchResult(BaseModel):
     brand_raw_id: int
     brand_name:   str
+    niche:        str | None = None
     total_score:  float
     dimensions:   dict[str, MatchDimension]
     reasons:      list[str]
