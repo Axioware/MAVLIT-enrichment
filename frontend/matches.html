@@ -214,7 +214,7 @@
     fetch('/matches/me?limit=20', { credentials: 'include' })
       .then(function(r) {
         if (r.status === 401) {
-          window.location.href = '/auth/google?return_to=' + encodeURIComponent('/matches');
+          window.location.href = '/signin?return_to=' + encodeURIComponent('/matches');
           return null;
         }
         if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Failed to load matches'); });

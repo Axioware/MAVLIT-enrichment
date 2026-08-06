@@ -1,5 +1,6 @@
 import logging
 import uuid
+import wtforms
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
@@ -10,10 +11,11 @@ from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqlalchemy import text
 from config import FRONTEND_ORIGINS, IS_PRODUCTION, POSTHOG_PROJECT_TOKEN, POSTHOG_HOST
-from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, LoginCredential, MetaAd, Prompt, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
 from pipeline.matching.matcher import get_matches
 from pipeline.enrichment.creator_signals import compute_creator_signals
+from pipeline.helpers.passwords import hash_password
 from pipeline.helpers.prompts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
     COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT,
@@ -155,14 +157,16 @@ def _run_migrations() -> None:
         # creator_profiles absorbed the separate `users` table — auth fields
         # now live directly on creator_profiles (see backfill block below).
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS email TEXT",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS google_id TEXT",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true",
         "ALTER TABLE creator_profiles ALTER COLUMN full_name DROP NOT NULL",
         "ALTER TABLE creator_profiles ALTER COLUMN creator_handle DROP NOT NULL",
         "ALTER TABLE creator_profiles ALTER COLUMN content_niche DROP NOT NULL",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_profiles_email ON creator_profiles(email)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_profiles_google_id ON creator_profiles(google_id)",
+        # Google OAuth login retired in favor of login_credentials
+        # (email/password, admin-managed via /admin) — drop its columns.
+        "DROP INDEX IF EXISTS uq_creator_profiles_google_id",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS google_id",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS avatar_url",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS embedding vector(1024)",
         # (Previously stepped through an OpenAI-sized guess of 1536, then
         # sentence-transformers' 384 — both superseded, see below.)
@@ -267,35 +271,14 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_followers INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS facebook_followers INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS facebook_following INTEGER",
+        # See LoginCredential's password_hash comment in pipeline/db.py for
+        # why this is nullable at the DB level despite being required on create.
+        "ALTER TABLE login_credentials ALTER COLUMN password_hash DROP NOT NULL",
     ]
     with engine.connect() as conn:
         for sql in stmts:
             conn.execute(text(sql))
         conn.commit()
-
-        # One-time data migration: fold the old `users` table into
-        # creator_profiles, then drop it. Only runs if `users` still exists
-        # (no-op on fresh installs or after the first successful run).
-        users_table_exists = conn.execute(
-            text("SELECT to_regclass('public.users') IS NOT NULL")
-        ).scalar()
-        if users_table_exists:
-            conn.execute(text("""
-                UPDATE creator_profiles cp
-                SET email = u.email, google_id = u.google_id,
-                    avatar_url = u.avatar_url, is_active = u.is_active
-                FROM users u
-                WHERE cp.user_id = u.id AND cp.email IS NULL
-            """))
-            conn.execute(text("""
-                INSERT INTO creator_profiles (user_id, full_name, email, google_id, avatar_url, is_active, created_at)
-                SELECT u.id, u.name, u.email, u.google_id, u.avatar_url, u.is_active, u.created_at
-                FROM users u
-                WHERE NOT EXISTS (SELECT 1 FROM creator_profiles cp WHERE cp.user_id = u.id)
-            """))
-            conn.execute(text("ALTER TABLE creator_profiles DROP COLUMN IF EXISTS user_id"))
-            conn.execute(text("DROP TABLE IF EXISTS users"))
-            conn.commit()
 
     # Seed default prompts (on conflict = already exists, keep existing content)
     with SessionLocal() as db:
@@ -554,10 +537,45 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
     column_default_sort    = [(CreatorProfile.id, True)]
     page_size = 15
 
+
+class LoginCredentialAdmin(ModelView, model=LoginCredential):
+    """
+    Add/edit rows here to grant or change login access — POST /auth/login
+    checks against these. The password_hash field is rendered as a real
+    password input (browsers never echo its current value back, unlike a
+    normal text field) — type a new plain-text password to set/change it,
+    or leave it blank when editing to keep the existing password unchanged.
+    on_model_change hashes whatever's typed before it ever reaches the DB;
+    plain text is never stored.
+    """
+    name         = "Login Credential"
+    name_plural  = "Login Credentials"
+    icon         = "fa-solid fa-key"
+    column_list  = [LoginCredential.id, LoginCredential.email, LoginCredential.created_at]
+    form_columns = [LoginCredential.email, LoginCredential.password_hash]
+    form_overrides     = {"password_hash": wtforms.PasswordField}
+    form_labels        = {"password_hash": "Password"}
+    form_widget_args   = {"password_hash": {"placeholder": "Leave blank to keep the current password"}}
+    column_searchable_list = [LoginCredential.email]
+    column_sortable_list   = [c.name for c in LoginCredential.__table__.columns if c.name != "password_hash"]
+    column_default_sort    = [(LoginCredential.id, True)]
+    page_size = 25
+
+    async def on_model_change(self, data: dict, model, is_created: bool, request) -> None:
+        plaintext = (data.get("password_hash") or "").strip()
+        if plaintext:
+            data["password_hash"] = hash_password(plaintext)
+        elif is_created:
+            raise ValueError("Password is required when creating a login credential")
+        else:
+            # Blank on edit — leave the existing hash untouched.
+            data.pop("password_hash", None)
+
 # tables
 
 admin = Admin(app, engine)
 admin.add_view(CreatorProfileAdmin)
+admin.add_view(LoginCredentialAdmin)
 admin.add_view(BrandProfileAdmin)
 admin.add_view(BrandContactAdmin)
 admin.add_view(InitialBrandScoreAdmin)
@@ -681,7 +699,11 @@ def frontend():
 
 @app.get("/signin", include_in_schema=False)
 def signin_page():
-    return FileResponse("frontend/login.html")
+    # no-store: this page's markup/JS changed shape (Google button -> email/
+    # password form) during development — a stale cached copy would silently
+    # keep pointing at the removed /auth/google route. Auth pages shouldn't
+    # ever serve from cache regardless.
+    return FileResponse("frontend/login.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/login", include_in_schema=False)

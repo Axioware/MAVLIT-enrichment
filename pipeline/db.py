@@ -444,15 +444,44 @@ class BrandContact(Base):
         return f"{self.full_name or 'No contact found'} ({self.title or '-'}) — brand={self.brand_raw_id}"
 
 
+class LoginCredential(Base):
+    """
+    Gates access to the app — deliberately separate from CreatorProfile
+    (profile data) so "who can log in" isn't coupled to "creator profile
+    fields". Rows are added/edited via /admin (sqladmin hashes the
+    password on save — see LoginCredentialAdmin in api/app.py; the DB
+    itself only ever stores the bcrypt hash, never plain text).
+
+    On successful POST /auth/login, the matching CreatorProfile row is
+    found-or-created by email (see api/auth.py) — this table only decides
+    whether a login succeeds, it doesn't hold any profile data itself.
+    """
+    __tablename__ = "login_credentials"
+
+    id    = Column(Integer, primary_key=True)
+    email = Column(Text, unique=True, nullable=False)
+    # Nullable at the DB level so sqladmin's auto-generated form doesn't
+    # force a value on every edit (it adds an InputRequired validator to
+    # any NOT NULL column, which would reject leaving the password blank
+    # to keep it unchanged — before on_model_change even runs). "Required
+    # when creating a new row" is instead enforced there.
+    password_hash = Column(Text, nullable=True)
+    created_at    = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    def __str__(self) -> str:
+        return self.email
+
+
 class CreatorProfile(Base):
     __tablename__ = "creator_profiles"
 
     id = Column(Integer, primary_key=True)
 
-    #  Account / auth identity (formerly the separate `users` table)
+    #  Account / auth identity (formerly the separate `users` table). Login
+    # itself is handled by LoginCredential (matched by email) — this row is
+    # found-or-created by email on successful login, same as the old Google
+    # find-or-create flow, just without google_id/avatar_url.
     email      = Column(Text, unique=True, nullable=False)
-    google_id  = Column(Text, unique=True)
-    avatar_url = Column(Text)
     is_active  = Column(Boolean, nullable=False, server_default="true", default=True)
 
     #  Identity

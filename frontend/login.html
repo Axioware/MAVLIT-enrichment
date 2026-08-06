@@ -51,38 +51,53 @@
       line-height: 1.5;
     }
 
-    /* Google button */
-    .btn-google {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: .75rem;
+    /* Login form */
+    .field { text-align: left; margin-bottom: 1rem; }
+    .field label {
+      display: block;
+      font-size: .8rem;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-bottom: .35rem;
+    }
+    .field input {
+      width: 100%;
+      padding: .65rem .85rem;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: .95rem;
+    }
+    .field input:focus {
+      outline: none;
+      border-color: #38bdf8;
+    }
+
+    .btn-primary {
       width: 100%;
       padding: .75rem 1.25rem;
-      background: #fff;
-      color: #1f2937;
+      background: #38bdf8;
+      color: #0f172a;
       font-size: .95rem;
-      font-weight: 600;
+      font-weight: 700;
       border: none;
       border-radius: 8px;
       cursor: pointer;
-      text-decoration: none;
-      transition: background .15s, box-shadow .15s, opacity .15s;
+      margin-top: .5rem;
+      transition: background .15s, opacity .15s;
     }
-    .btn-google:hover:not([aria-disabled="true"]) {
-      background: #f1f5f9;
-      box-shadow: 0 2px 8px rgba(0,0,0,.25);
+    .btn-primary:hover:not(:disabled) { background: #7dd3fc; }
+    .btn-primary:disabled { opacity: .6; cursor: not-allowed; }
+
+    .form-error {
+      font-size: .825rem;
+      color: #fca5a5;
+      margin-top: -.4rem;
+      margin-bottom: 1rem;
+      text-align: left;
+      display: none;
     }
-    .btn-google:focus {
-      outline: 2px solid #38bdf8;
-      outline-offset: 2px;
-    }
-    .btn-google[aria-disabled="true"] {
-      opacity: .65;
-      cursor: not-allowed;
-      pointer-events: none;
-    }
-    .btn-google svg { flex-shrink: 0; }
 
     /* Spinner */
     .spinner-wrap {
@@ -105,7 +120,7 @@
       margin-top: .5rem;
     }
 
-    /* Error state */
+    /* Error state (connection failure, not login-form validation) */
     .error-icon {
       font-size: 1.75rem;
       margin-bottom: .6rem;
@@ -161,23 +176,19 @@
     <!-- Sign in -->
     <div class="section" id="loginSection">
       <h1>Sign in to MAVLIT</h1>
-      <p class="subtitle">Continue with Google to access your account.</p>
-      <a
-        class="btn-google"
-        id="googleBtn"
-        href="/auth/google"
-        aria-label="Sign in with Google"
-        onclick="handleGoogleClick(this)"
-      >
-        <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
-          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-          <path fill="none" d="M0 0h48v48H0z"/>
-        </svg>
-        <span id="googleBtnText">Continue with Google</span>
-      </a>
+      <p class="subtitle">Enter your email and password to continue.</p>
+      <form id="loginForm" onsubmit="return handleSubmit(event)">
+        <div class="field">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" required autocomplete="username" />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" required autocomplete="current-password" />
+        </div>
+        <p class="form-error" id="loginError"></p>
+        <button type="submit" class="btn-primary" id="submitBtn">Sign in</button>
+      </form>
     </div>
 
   </div>
@@ -192,13 +203,23 @@
     document.getElementById(name + 'Section').style.display = DISPLAY[name];
   }
 
+  // Only a same-origin relative path is ever honored — mirrors the old
+  // server-side _safe_return_to() open-redirect guard, just client-side
+  // now that login is a fetch() call instead of a server-driven redirect.
+  function safeReturnTo() {
+    var raw = new URLSearchParams(window.location.search).get('return_to');
+    if (!raw) return '/';
+    if (raw.charAt(0) === '/' && raw.charAt(1) !== '/' && raw.indexOf(':') === -1) return raw;
+    return '/';
+  }
+
   function checkAuth() {
     showSection('loading');
     fetch('/auth/me', { credentials: 'include' })
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(user) {
         if (user) {
-          window.location.replace('/');
+          window.location.replace(safeReturnTo());
         } else {
           showSection('login');
         }
@@ -209,28 +230,51 @@
       });
   }
 
-  function handleGoogleClick(btn) {
-    btn.setAttribute('aria-disabled', 'true');
-    document.getElementById('googleBtnText').textContent = 'Redirecting...';
+  function setLoginError(message) {
+    var el = document.getElementById('loginError');
+    if (message) {
+      el.textContent = message;
+      el.style.display = 'block';
+    } else {
+      el.style.display = 'none';
+    }
   }
 
-  function resetGoogleButton() {
-    var btn = document.getElementById('googleBtn');
-    btn.removeAttribute('aria-disabled');
-    document.getElementById('googleBtnText').textContent = 'Continue with Google';
+  function handleSubmit(event) {
+    event.preventDefault();
+    setLoginError('');
+
+    var email = document.getElementById('email').value.trim();
+    var password = document.getElementById('password').value;
+    var submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Signing in...';
+
+    fetch('/auth/login', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, password: password }),
+    })
+      .then(function(r) {
+        if (r.ok) {
+          window.location.replace(safeReturnTo());
+          return;
+        }
+        return r.json().then(function(data) {
+          throw new Error((data && data.detail) || 'Sign in failed — please try again.');
+        });
+      })
+      .catch(function(err) {
+        setLoginError(err.message || 'Sign in failed — please try again.');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Sign in';
+      });
+
+    return false;
   }
 
   checkAuth();
-
-  // Bfcache restore (e.g. user hit "back" from Google's account chooser) —
-  // the page reappears with its old DOM instead of re-running from scratch,
-  // so the button would stay stuck on "Redirecting..." without this.
-  window.addEventListener('pageshow', function(event) {
-    if (event.persisted) {
-      resetGoogleButton();
-      checkAuth();
-    }
-  });
 </script>
 </body>
 </html>

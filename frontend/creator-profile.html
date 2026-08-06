@@ -627,11 +627,11 @@
     if (isLoggedIn) {
       submitProfile(body);
     } else {
-      // Stash the filled-out form, then send the user through Google sign-in.
-      // /auth/google/callback reads return_to and lands them back here so
-      // this same page can finish the save once a session exists.
+      // Stash the filled-out form, then send the user to sign in.
+      // login.html reads return_to and lands them back here so this same
+      // page can finish the save once a session exists.
       localStorage.setItem(PENDING_KEY, JSON.stringify(body));
-      window.location.href = '/auth/google?return_to=' + encodeURIComponent('/creator-profile');
+      window.location.href = '/signin?return_to=' + encodeURIComponent('/creator-profile');
     }
     return false;
   }

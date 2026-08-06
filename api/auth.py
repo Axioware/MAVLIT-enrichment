@@ -1,49 +1,33 @@
-import hmac
 import logging
-import secrets
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode, urlparse
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
 from jose import JWTError, jwt
+from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from config import FRONTEND_ORIGINS, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, IS_PRODUCTION, JWT_SECRET, OAUTH_REDIRECT_URI
-from pipeline.db import CreatorProfile, get_db
+from config import IS_PRODUCTION, JWT_SECRET
+from pipeline.db import CreatorProfile, LoginCredential, get_db
+from pipeline.helpers.passwords import verify_password
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-_GOOGLE_AUTH_URL  = "https://accounts.google.com/o/oauth2/v2/auth"
-_GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
-_GOOGLE_USERINFO  = "https://www.googleapis.com/oauth2/v2/userinfo"
-_ALGORITHM        = "HS256"
-_TOKEN_DAYS       = 7
-_HTTP_TIMEOUT     = 10.0
+_ALGORITHM  = "HS256"
+_TOKEN_DAYS = 7
 
-# See the access_token set_cookie() call in google_callback() for why this
-# is conditional on IS_PRODUCTION.
+# SameSite=None is required for a cross-origin frontend's fetch() calls
+# (credentials: 'include') to carry this cookie back to the API — but
+# browsers reject SameSite=None without Secure, so this only takes effect
+# in production (HTTPS). In dev (IS_PRODUCTION=false) this stays "lax" so
+# the same-origin frontend/*.html pages keep working over plain
+# http://localhost.
 _CROSS_SITE_SAMESITE = "none" if IS_PRODUCTION else "lax"
 
 
-def _safe_return_to(path: str | None) -> str:
-    """
-    Allow a same-origin relative path (this API's own frontend/*.html pages),
-    or an absolute URL whose origin exactly matches one of FRONTEND_ORIGINS
-    (a separate cross-origin frontend app, configured in config.py). Rejects
-    everything else — protocol-relative ("//evil.com"), unlisted absolute
-    URLs, and backslash-based ("/\\evil.com") open-redirect tricks.
-    """
-    if not path:
-        return "/"
-    if path.startswith("/") and not path.startswith("//") and not path.startswith("/\\") and ":" not in path:
-        return path
-    parsed = urlparse(path)
-    if parsed.scheme in ("http", "https") and f"{parsed.scheme}://{parsed.netloc}" in FRONTEND_ORIGINS:
-        return path
-    return "/"
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
 
 #  JWT helpers
@@ -80,149 +64,33 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> Creator
 
 #  Routes
 
-@router.get("/google")
-def login_google(return_to: str | None = None):
-    """Step 1 — redirect the browser to Google's OAuth consent screen.
-
-    Pass ?return_to=/some/path to send the user back to that page after
-    login instead of the default dashboard — e.g. so a form filled out
-    before signing in can be resumed and saved once the session exists.
+@router.post("/login")
+def login(body: LoginRequest, response: Response, db: Session = Depends(get_db)):
     """
-    if not GOOGLE_CLIENT_ID:
-        raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID not configured")
+    Email/password login against login_credentials (managed via /admin —
+    see LoginCredentialAdmin in api/app.py). On success, finds-or-creates
+    the matching creator_profiles row by email (creator-specific fields
+    like creator_handle/content_niche stay NULL until the profile form is
+    filled out) and issues the same JWT cookie the rest of the app expects.
+    """
+    email = body.email.strip().lower()
 
-    state = secrets.token_urlsafe(32)
-    params = {
-        "client_id":     GOOGLE_CLIENT_ID,
-        "redirect_uri":  OAUTH_REDIRECT_URI,
-        "response_type": "code",
-        "scope":         "openid email profile",
-        "access_type":   "offline",
-        "state":         state,
-        "prompt":        "select_account",
-    }
-    response = RedirectResponse(url=f"{_GOOGLE_AUTH_URL}?{urlencode(params)}")
-    # Store state in a short-lived httpOnly cookie for CSRF verification
-    response.set_cookie(
-        "oauth_state", state,
-        httponly=True, max_age=600, samesite="lax", secure=IS_PRODUCTION,
-    )
-    response.set_cookie(
-        "oauth_return_to", _safe_return_to(return_to),
-        httponly=True, max_age=600, samesite="lax", secure=IS_PRODUCTION,
-    )
-    return response
+    credential = db.query(LoginCredential).filter(LoginCredential.email == email).first()
+    # Generic error either way — don't reveal whether the email exists.
+    if not credential or not verify_password(body.password, credential.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
 
-
-@router.get("/google/callback")
-async def google_callback(
-    request: Request,
-    db: Session = Depends(get_db),
-    code: str | None = None,
-    state: str | None = None,
-    error: str | None = None,
-):
-    """Step 2 — Google redirects here with ?code=&state= (or ?error= if user cancelled)."""
-    # User cancelled the Google consent screen
-    if error or not code:
-        response = RedirectResponse(url="/signin", status_code=302)
-        response.delete_cookie("oauth_state")
-        response.delete_cookie("oauth_return_to")
-        return response
-
-    # Verify CSRF state (constant-time compare)
-    cookie_state = request.cookies.get("oauth_state")
-    if not cookie_state or not state or not hmac.compare_digest(cookie_state, state):
-        raise HTTPException(status_code=400, detail="Invalid OAuth state")
-
-    # Exchange authorization code for access token
-    try:
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-            token_resp = await client.post(_GOOGLE_TOKEN_URL, data={
-                "code":          code,
-                "client_id":     GOOGLE_CLIENT_ID,
-                "client_secret": GOOGLE_CLIENT_SECRET,
-                "redirect_uri":  OAUTH_REDIRECT_URI,
-                "grant_type":    "authorization_code",
-            })
-            try:
-                token_data = token_resp.json()
-            except ValueError:
-                logger.error("Google token endpoint returned non-JSON response: %s", token_resp.text[:300])
-                raise HTTPException(status_code=502, detail="Google sign-in failed — please try again")
-
-            if token_resp.status_code != 200 or "error" in token_data:
-                logger.warning(
-                    "Google token exchange failed: HTTP %s — %s",
-                    token_resp.status_code, token_data.get("error_description", token_data.get("error")),
-                )
-                raise HTTPException(status_code=400, detail="Google sign-in failed — please try again")
-
-            access_token = token_data.get("access_token")
-            if not access_token:
-                logger.error("Google token response missing access_token")
-                raise HTTPException(status_code=502, detail="Google sign-in failed — please try again")
-
-            # Fetch Google profile using the access token
-            info_resp = await client.get(
-                _GOOGLE_USERINFO,
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            if info_resp.status_code != 200:
-                logger.error("Google userinfo request failed: HTTP %s", info_resp.status_code)
-                raise HTTPException(status_code=502, detail="Failed to fetch Google profile")
-
-            try:
-                g = info_resp.json()
-            except ValueError:
-                logger.error("Google userinfo returned non-JSON response")
-                raise HTTPException(status_code=502, detail="Failed to fetch Google profile")
-    except httpx.HTTPError as exc:
-        # Network-level failure (timeout, connection refused, DNS, etc.) reaching
-        # Google — not a bug in our logic, just a transient outbound call failing.
-        logger.error("Network error talking to Google during sign-in: %s", exc)
-        raise HTTPException(status_code=502, detail="Couldn't reach Google — please try again")
-
-    if not g.get("id") or not g.get("email"):
-        logger.error("Google userinfo response missing required fields: %s", list(g.keys()))
-        raise HTTPException(status_code=502, detail="Incomplete Google profile response")
-
-    # Reject unverified emails — prevents account-takeover via email-based
-    # auto-linking to an existing user that doesn't actually belong to this person.
-    if not g.get("verified_email", False):
-        logger.warning("Rejected Google sign-in with unverified email: %s", g.get("email"))
-        raise HTTPException(status_code=403, detail="Google account email is not verified")
-
-    # Find or create the creator's account row in DB
-    user = db.query(CreatorProfile).filter(CreatorProfile.google_id == g["id"]).first()
+    user = db.query(CreatorProfile).filter(CreatorProfile.email == email).first()
     if not user:
-        user = db.query(CreatorProfile).filter(CreatorProfile.email == g["email"]).first()
-        if user:
-            # Existing email — link Google account to it
-            user.google_id  = g["id"]
-            user.avatar_url = g.get("picture")
-        else:
-            # Brand-new account — create row. Creator-specific fields
-            # (creator_handle, content_niche, etc.) stay NULL until the
-            # user fills out the creator profile form.
-            user = CreatorProfile(
-                email=g["email"],
-                full_name=g.get("name"),
-                google_id=g["id"],
-                avatar_url=g.get("picture"),
-            )
-            db.add(user)
+        user = CreatorProfile(email=email)
+        db.add(user)
         try:
             db.commit()
         except IntegrityError:
-            # Concurrent request (double-click / duplicate tab) already created
-            # this account — roll back and re-fetch instead of erroring out.
+            # Concurrent request (double-click / duplicate tab) already
+            # created this row — roll back and re-fetch instead of erroring.
             db.rollback()
-            user = (
-                db.query(CreatorProfile)
-                .filter((CreatorProfile.google_id == g["id"]) | (CreatorProfile.email == g["email"]))
-                .first()
-            )
+            user = db.query(CreatorProfile).filter(CreatorProfile.email == email).first()
             if not user:
                 raise HTTPException(status_code=500, detail="Sign-in failed — please try again")
         else:
@@ -231,37 +99,28 @@ async def google_callback(
     if not user.is_active:
         raise HTTPException(status_code=403, detail="This account has been deactivated")
 
-    # Issue JWT in a secure httpOnly cookie and redirect back to where the
-    # user started (or the dashboard by default)
-    return_to = _safe_return_to(request.cookies.get("oauth_return_to"))
     token = _make_jwt(user.id, user.email)
-    response = RedirectResponse(url=return_to, status_code=302)
     response.set_cookie(
         "access_token", token,
         httponly=True,
         max_age=60 * 60 * 24 * _TOKEN_DAYS,
-        # SameSite=None is required for a cross-origin frontend's fetch()
-        # calls (credentials: 'include') to carry this cookie back to the
-        # API — but browsers reject SameSite=None without Secure, so this
-        # only takes effect in production (HTTPS). In dev (IS_PRODUCTION=
-        # false) this stays "lax" so the same-origin frontend/*.html pages
-        # keep working over plain http://localhost as before.
         samesite=_CROSS_SITE_SAMESITE,
         secure=IS_PRODUCTION,
     )
-    response.delete_cookie("oauth_state")
-    response.delete_cookie("oauth_return_to")
-    return response
+    return {
+        "id":    user.id,
+        "email": user.email,
+        "name":  user.full_name,
+    }
 
 
 @router.get("/me")
 def me(current_user: CreatorProfile = Depends(get_current_user)):
     """Return the logged-in user's profile."""
     return {
-        "id":         current_user.id,
-        "email":      current_user.email,
-        "name":       current_user.full_name,
-        "avatar_url": current_user.avatar_url,
+        "id":    current_user.id,
+        "email": current_user.email,
+        "name":  current_user.full_name,
     }
 
 

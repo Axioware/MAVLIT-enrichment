@@ -40,17 +40,13 @@ POSTHOG_HOST          = os.getenv("POSTHOG_HOST", "https://us.i.posthog.com")
 # When false: only coauthorProducers is LLM-checked (always on)
 ENABLE_INSTA_LLM  = os.getenv("ENABLE_INSTA_LLM", "false").strip().lower() == "true"
 
-# Google OAuth + JWT auth
-GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID") or os.getenv("CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET") or os.getenv("CLIENT_SECRET", "")
-OAUTH_REDIRECT_URI   = os.getenv("OAUTH_REDIRECT_URI", "http://127.0.0.1:8000/auth/google/callback")
-
 # Origins of separate frontend apps (different domain than this API) allowed
-# to: (1) call this API cross-origin with cookies via CORS, and (2) be used
-# as the post-login ?return_to= redirect target from /auth/google/callback.
-# Comma-separated, no trailing slash, e.g. "https://app.example.com,http://localhost:5173"
+# to call this API cross-origin with cookies via CORS. Comma-separated, no
+# trailing slash, e.g. "https://app.example.com,http://localhost:5173"
 FRONTEND_ORIGINS = [o.strip().rstrip("/") for o in os.getenv("FRONTEND_ORIGINS", "").split(",") if o.strip()]
 
+# JWT auth (login is email/password against login_credentials — see
+# api/auth.py and pipeline/db.py's LoginCredential)
 JWT_SECRET = os.getenv("JWT_SECRET")
 if not JWT_SECRET:
     raise RuntimeError("JWT_SECRET is not set in environment")
