@@ -14,7 +14,14 @@ fake-useragent>=1.5
 apscheduler>=3.10
 python-dotenv>=1.0
 python-jose[cryptography]>=3.3
-apify-client>=1.7
+# Pinned exact, not >= : apify-client 1.x returned a typed `Run` object from
+# actor .call()/.wait_for_finish() (pipeline/helpers/apify.py subscripts it
+# like a dict — run["status"], run["defaultDatasetId"] — which only works
+# on 2.x, where the SDK switched to returning plain dicts). An unpinned
+# install can silently resolve an old 1.x build depending on the local pip
+# resolver/index state, breaking every Apify call with "'Run' object is not
+# subscriptable" — confirmed exactly this on a fresh server install.
+apify-client==2.5.1
 pgvector>=0.4
 bcrypt>=4.0
 WTForms>=3.1

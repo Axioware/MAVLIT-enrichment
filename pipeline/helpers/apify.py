@@ -5,6 +5,20 @@ from config import APIFY_TOKEN
 logger = logging.getLogger(__name__)
 
 
+def _run_field(run, dict_key: str, attr_key: str):
+    """
+    apify-client's actor().call() has been observed to return a plain dict
+    on one environment (Python 3.10 here) and a typed, non-subscriptable
+    Run-like object on another (Python 3.14 on a fresh server, same
+    apify-client==2.5.1 and same declared dependencies — likely a
+    difference in the impit HTTP backend across Python versions) — support
+    both shapes rather than assuming one crashes the other.
+    """
+    if isinstance(run, dict):
+        return run.get(dict_key)
+    return getattr(run, attr_key, None)
+
+
 def run_apify_actor(
     actor_id: str,
     run_input: dict,
@@ -28,12 +42,17 @@ def run_apify_actor(
     client = ApifyClient(APIFY_TOKEN)
     try:
         run = client.actor(actor_id).call(run_input=run_input)
-        if require_success and run["status"] != "SUCCEEDED":
-            logger.error("%sApify actor failed — status: %s", prefix, run["status"])
+        status = _run_field(run, "status", "status")
+        if require_success and status != "SUCCEEDED":
+            logger.error("%sApify actor failed — status: %s", prefix, status)
             return None
-        items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+        dataset_id = _run_field(run, "defaultDatasetId", "default_dataset_id")
+        items = list(client.dataset(dataset_id).iterate_items())
         logger.info("%s%d items from Apify", prefix, len(items))
         return items
-    except Exception as exc:
-        logger.error("%sApify actor %s failed — %s", prefix, actor_id, exc)
+    except Exception:
+        # .exception() (not .error()) so a full traceback lands in the logs —
+        # a one-line summary wasn't enough to diagnose the dict-vs-object
+        # Run shape difference above when it first showed up.
+        logger.exception("%sApify actor %s failed", prefix, actor_id)
         return None if require_success else []
