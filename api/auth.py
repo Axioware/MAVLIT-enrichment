@@ -3,10 +3,9 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from config import IS_PRODUCTION, JWT_SECRET
-from pipeline.db import CreatorProfile, LoginCredential, get_db
+from pipeline.db import CreatorProfile, get_db
 from pipeline.helpers.passwords import verify_password
 
 logger = logging.getLogger(__name__)
@@ -67,34 +66,19 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> Creator
 @router.post("/login")
 def login(body: LoginRequest, response: Response, db: Session = Depends(get_db)):
     """
-    Email/password login against login_credentials (managed via /admin —
-    see LoginCredentialAdmin in api/app.py). On success, finds-or-creates
-    the matching creator_profiles row by email (creator-specific fields
-    like creator_handle/content_niche stay NULL until the profile form is
-    filled out) and issues the same JWT cookie the rest of the app expects.
+    Email/password login directly against creator_profiles.password_hash.
+    Accounts are admin-provisioned — an admin sets email + password on a
+    creator's row via /admin (see CreatorProfileAdmin in api/app.py) and
+    hands those credentials to the creator; there's no self-service
+    sign-up, so a login for an email with no matching row (or no password
+    set on it) is simply rejected rather than auto-creating anything.
     """
     email = body.email.strip().lower()
 
-    credential = db.query(LoginCredential).filter(LoginCredential.email == email).first()
-    # Generic error either way — don't reveal whether the email exists.
-    if not credential or not verify_password(body.password, credential.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
     user = db.query(CreatorProfile).filter(CreatorProfile.email == email).first()
-    if not user:
-        user = CreatorProfile(email=email)
-        db.add(user)
-        try:
-            db.commit()
-        except IntegrityError:
-            # Concurrent request (double-click / duplicate tab) already
-            # created this row — roll back and re-fetch instead of erroring.
-            db.rollback()
-            user = db.query(CreatorProfile).filter(CreatorProfile.email == email).first()
-            if not user:
-                raise HTTPException(status_code=500, detail="Sign-in failed — please try again")
-        else:
-            db.refresh(user)
+    # Generic error either way — don't reveal whether the email exists.
+    if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if not user.is_active:
         raise HTTPException(status_code=403, detail="This account has been deactivated")

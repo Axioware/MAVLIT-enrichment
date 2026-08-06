@@ -3,15 +3,16 @@ import uuid
 import wtforms
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqladmin import Admin, ModelView
+from sqladmin.authentication import AuthenticationBackend
 from sqlalchemy import text
-from config import FRONTEND_ORIGINS, IS_PRODUCTION, POSTHOG_PROJECT_TOKEN, POSTHOG_HOST
-from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, LoginCredential, MetaAd, Prompt, YoutubeSponsorship, SessionLocal, engine
+from config import ADMIN_PASSKEY, FRONTEND_ORIGINS, IS_PRODUCTION, JWT_SECRET, POSTHOG_PROJECT_TOKEN, POSTHOG_HOST
+from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
 from pipeline.matching.matcher import get_matches
 from pipeline.enrichment.creator_signals import compute_creator_signals
@@ -271,14 +272,36 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_followers INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS facebook_followers INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS facebook_following INTEGER",
-        # See LoginCredential's password_hash comment in pipeline/db.py for
-        # why this is nullable at the DB level despite being required on create.
-        "ALTER TABLE login_credentials ALTER COLUMN password_hash DROP NOT NULL",
+        # login_credentials (a separate login table) retired in favor of a
+        # password_hash column straight on creator_profiles — see the
+        # backfill block below for migrating any existing rows across
+        # before the old table is dropped. Nullable at the DB level so
+        # sqladmin's auto-generated form doesn't force a value on every
+        # edit (see CreatorProfileAdmin's on_model_change in this file).
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS password_hash TEXT",
     ]
     with engine.connect() as conn:
         for sql in stmts:
             conn.execute(text(sql))
         conn.commit()
+
+        # One-time data migration: carry any existing login_credentials
+        # rows' password_hash across to the matching creator_profiles row
+        # (by email) before dropping the old table. Only runs if
+        # login_credentials still exists (no-op on fresh installs or after
+        # the first successful run).
+        login_credentials_exists = conn.execute(
+            text("SELECT to_regclass('public.login_credentials') IS NOT NULL")
+        ).scalar()
+        if login_credentials_exists:
+            conn.execute(text("""
+                UPDATE creator_profiles cp
+                SET password_hash = lc.password_hash
+                FROM login_credentials lc
+                WHERE cp.email = lc.email AND cp.password_hash IS NULL
+            """))
+            conn.execute(text("DROP TABLE IF EXISTS login_credentials"))
+            conn.commit()
 
     # Seed default prompts (on conflict = already exists, keep existing content)
     with SessionLocal() as db:
@@ -526,56 +549,83 @@ class BrandContactAdmin(ModelView, model=BrandContact):
 
 
 class CreatorProfileAdmin(ModelView, model=CreatorProfile):
+    """
+    Accounts are admin-provisioned: set email + password here and hand
+    those credentials to the creator — POST /auth/login checks straight
+    against this row's password_hash, there's no separate login table.
+    The password field renders as a real password input (browsers never
+    echo its current value back, unlike a normal text field) — type a new
+    plain-text password to set/change it, or leave it blank when editing
+    to keep the existing password unchanged. on_model_change hashes
+    whatever's typed before it ever reaches the DB; plain text is never
+    stored.
+    """
     name         = "Creator Profile"
     name_plural  = "Creator Profiles"
     icon         = "fa-solid fa-id-badge"
     # embedding is a pgvector column (numpy array) — see BrandProfileAdmin's
-    # comment above for why it must be excluded from list/sort.
-    column_exclude_list = [CreatorProfile.embedding]
+    # comment above for why it must be excluded from list/sort. It must
+    # ALSO be excluded from the form (sqladmin has no form converter for
+    # pgvector's type and hard-crashes create/edit with NoConverterFound
+    # otherwise — column_exclude_list alone only hides it from list/detail).
+    column_exclude_list = [CreatorProfile.embedding, CreatorProfile.password_hash]
     column_searchable_list = [CreatorProfile.email, CreatorProfile.full_name, CreatorProfile.creator_handle, CreatorProfile.content_niche]
-    column_sortable_list    = [c.name for c in CreatorProfile.__table__.columns if c.name != "embedding"]
+    column_sortable_list    = [c.name for c in CreatorProfile.__table__.columns if c.name not in ("embedding", "password_hash")]
     column_default_sort    = [(CreatorProfile.id, True)]
+    form_excluded_columns = [CreatorProfile.embedding]
+    form_overrides   = {"password_hash": wtforms.PasswordField}
+    form_labels      = {"password_hash": "Password"}
+    form_widget_args = {"password_hash": {"placeholder": "Leave blank to keep the current password"}}
     page_size = 15
-
-
-class LoginCredentialAdmin(ModelView, model=LoginCredential):
-    """
-    Add/edit rows here to grant or change login access — POST /auth/login
-    checks against these. The password_hash field is rendered as a real
-    password input (browsers never echo its current value back, unlike a
-    normal text field) — type a new plain-text password to set/change it,
-    or leave it blank when editing to keep the existing password unchanged.
-    on_model_change hashes whatever's typed before it ever reaches the DB;
-    plain text is never stored.
-    """
-    name         = "Login Credential"
-    name_plural  = "Login Credentials"
-    icon         = "fa-solid fa-key"
-    column_list  = [LoginCredential.id, LoginCredential.email, LoginCredential.created_at]
-    form_columns = [LoginCredential.email, LoginCredential.password_hash]
-    form_overrides     = {"password_hash": wtforms.PasswordField}
-    form_labels        = {"password_hash": "Password"}
-    form_widget_args   = {"password_hash": {"placeholder": "Leave blank to keep the current password"}}
-    column_searchable_list = [LoginCredential.email]
-    column_sortable_list   = [c.name for c in LoginCredential.__table__.columns if c.name != "password_hash"]
-    column_default_sort    = [(LoginCredential.id, True)]
-    page_size = 25
 
     async def on_model_change(self, data: dict, model, is_created: bool, request) -> None:
         plaintext = (data.get("password_hash") or "").strip()
         if plaintext:
             data["password_hash"] = hash_password(plaintext)
         elif is_created:
-            raise ValueError("Password is required when creating a login credential")
+            raise ValueError("Password is required when creating a creator profile")
         else:
             # Blank on edit — leave the existing hash untouched.
             data.pop("password_hash", None)
 
+class AdminAuth(AuthenticationBackend):
+    """
+    Gates /admin behind a single shared passkey (config.ADMIN_PASSKEY) —
+    not per-person accounts, just one secret set in .env. The built-in
+    sqladmin login form has "Username" + "Password" fields; there's no
+    custom template here, so Username is unused (leave it blank) and the
+    passkey goes in the Password field.
+
+    Only ever instantiated when ADMIN_PASSKEY is actually set (see below) —
+    sqladmin requires *every* request to pass authenticate() once a backend
+    is attached at all, so there's no in-backend way to "leave it open" if
+    unset. Not attaching the backend in the first place is what does that.
+    """
+    async def login(self, request: Request) -> bool:
+        form = await request.form()
+        if form.get("password") != ADMIN_PASSKEY:
+            return False
+        request.session["admin_authenticated"] = True
+        return True
+
+    async def logout(self, request: Request) -> bool:
+        request.session.clear()
+        return True
+
+    async def authenticate(self, request: Request) -> bool:
+        return bool(request.session.get("admin_authenticated"))
+
 # tables
 
-admin = Admin(app, engine)
+# ADMIN_PASSKEY unset (local dev default) -> no authentication_backend at
+# all, so /admin stays open exactly like before this feature existed. Set
+# ADMIN_PASSKEY in .env to require it — required before deploying anywhere
+# reachable outside your own machine.
+admin = Admin(
+    app, engine,
+    authentication_backend=AdminAuth(secret_key=JWT_SECRET, https_only=IS_PRODUCTION) if ADMIN_PASSKEY else None,
+)
 admin.add_view(CreatorProfileAdmin)
-admin.add_view(LoginCredentialAdmin)
 admin.add_view(BrandProfileAdmin)
 admin.add_view(BrandContactAdmin)
 admin.add_view(InitialBrandScoreAdmin)

@@ -45,11 +45,16 @@ ENABLE_INSTA_LLM  = os.getenv("ENABLE_INSTA_LLM", "false").strip().lower() == "t
 # trailing slash, e.g. "https://app.example.com,http://localhost:5173"
 FRONTEND_ORIGINS = [o.strip().rstrip("/") for o in os.getenv("FRONTEND_ORIGINS", "").split(",") if o.strip()]
 
-# JWT auth (login is email/password against login_credentials — see
-# api/auth.py and pipeline/db.py's LoginCredential)
+# JWT auth (login is email/password against creator_profiles.password_hash
+# — see api/auth.py and pipeline/db.py's CreatorProfile)
 JWT_SECRET = os.getenv("JWT_SECRET")
 if not JWT_SECRET:
     raise RuntimeError("JWT_SECRET is not set in environment")
+
+# /admin (sqladmin) gate — a single shared passkey, not a per-person account.
+# Left empty, /admin is unprotected — set this before deploying anywhere
+# reachable outside your own machine. See AdminAuth in api/app.py.
+ADMIN_PASSKEY = os.getenv("ADMIN_PASSKEY", "")
 
 # Controls cookie Secure flag + HSTS header. Set ENVIRONMENT=production when
 # deploying behind HTTPS — cookies must never be sent unencrypted in prod.
