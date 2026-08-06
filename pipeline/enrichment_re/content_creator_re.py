@@ -123,14 +123,19 @@ def _get_or_create_brand_id(db: Session, brand_username: str) -> int | None:
     return row.id if row else None
 
 
-def enrich_content_creator_re(db: Session, limit: int = 1) -> int:
+def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int]]:
     """
     Process up to `limit` content_creator_re rows where is_scraped=False.
-    Returns number of rows processed.
+    Returns (rows_processed, brand_raw_ids) — the second element is the
+    union of every brands_raw.id confirmed/linked across all processed rows
+    in this call (new bare rows this discovered, or existing brands a
+    confirmed collab post pointed at), for callers that want to chain
+    further enrichment onto exactly the brands this call touched rather
+    than sweeping the whole brands_raw table.
     """
     if not APIFY_TOKEN:
         logger.warning("APIFY_TOKEN not set — skipping content_creator_re enrichment")
-        return 0
+        return 0, set()
 
     rows: list[ContentCreatorRE] = (
         db.query(ContentCreatorRE)
@@ -141,10 +146,11 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> int:
 
     if not rows:
         logger.info("Content creator RE: no pending rows")
-        return 0
+        return 0, set()
 
     logger.info("Content creator RE: processing %d row(s)", len(rows))
     processed = 0
+    all_confirmed_brand_ids: set[int] = set()
 
     for row in rows:
         username = normalize_handle(row.username or "")
@@ -268,10 +274,15 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> int:
                 for record in commenter_records:
                     _link_commenter_to_creator(db, brand_id, username, record)
 
+        all_confirmed_brand_ids |= confirmed_brand_ids
+
         row.is_scraped = True
         db.commit()
         processed += 1
         logger.info("Content creator RE: @%s done", username)
 
-    logger.info("Content creator RE: %d row(s) processed", processed)
-    return processed
+    logger.info(
+        "Content creator RE: %d row(s) processed, %d brand(s) confirmed",
+        processed, len(all_confirmed_brand_ids),
+    )
+    return processed, all_confirmed_brand_ids

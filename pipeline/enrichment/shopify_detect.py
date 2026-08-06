@@ -287,7 +287,7 @@ def _update_brand_niche_description_and_tags(db: Session, brand: BrandRaw, descr
         _upsert_brand_niche(db, brand.id, effective_niche, description, tags or None)
 
 
-def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None) -> int:
+def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None, brand_id: int | None = None) -> int:
     """
     Fetch homepage for each brand with a website URL and shopify_checked=False.
     Sets is_shopify / is_woocommerce and fills any NULL social URL columns from
@@ -296,13 +296,19 @@ def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None) -> i
     Pass niche to scope the run to brands.niche matching that value exactly
     (case-insensitive) — brands_raw.niche is stored verbatim as typed at
     seed time (see pipeline/seed.py), so this must match that same string.
+    Ignored if brand_id is also given.
+
+    Pass brand_id to target one specific brand directly — this bypasses the
+    shopify_checked filter (so you can re-run/test a brand that was already
+    processed), but website must still be set.
     """
-    query = db.query(BrandRaw).filter(
-        BrandRaw.website.isnot(None),
-        BrandRaw.shopify_checked == False,
-    )
-    if niche:
-        query = query.filter(func.lower(BrandRaw.niche) == niche.strip().lower())
+    query = db.query(BrandRaw).filter(BrandRaw.website.isnot(None))
+    if brand_id is not None:
+        query = query.filter(BrandRaw.id == brand_id)
+    else:
+        query = query.filter(BrandRaw.shopify_checked == False)
+        if niche:
+            query = query.filter(func.lower(BrandRaw.niche) == niche.strip().lower())
 
     brands: list[BrandRaw] = query.limit(limit).all()
 
