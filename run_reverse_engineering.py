@@ -47,7 +47,7 @@ import logging
 from dotenv import load_dotenv
 load_dotenv()
 
-from pipeline.db import SessionLocal
+from pipeline.db import BrandRaw, SessionLocal
 from pipeline.enrichment_re.content_creator_re import enrich_content_creator_re
 from pipeline.enrichment_re.brand_wikidata_lookup import enrich_brand_wikidata_lookup
 from pipeline.enrichment.wikidata_socials import enrich_wikidata_socials
@@ -176,7 +176,21 @@ def main() -> None:
         run_per_brand("5/10 tranco",                 enrich_tranco,                db, brand_ids)
         run_per_brand("6/10 youtube_sponsorship",    enrich_youtube_sponsorships,  db, brand_ids)
         run_per_brand("7/10 meta_ads",                enrich_meta_ads,             db, brand_ids)
-        run_per_brand("8/10 instagram_posts",        enrich_instagram_posts,       db, brand_ids)
+
+        website_brand_ids = {
+            row.id
+            for (row,) in db.query(BrandRaw.id)
+            .filter(
+                BrandRaw.id.in_(brand_ids),
+                BrandRaw.has_official_website.is_(True),
+            )
+            .all()
+        }
+        if not website_brand_ids:
+            logger.info("No discovered brands with has_official_website=True — skipping instagram_posts.")
+        else:
+            run_per_brand("8/10 instagram_posts", enrich_instagram_posts, db, website_brand_ids)
+
         run_instagram_users_per_brand("9/10 instagram_users", db, brand_ids, batch_limit=5)
         run_per_brand("10/10 initial_brand_scoring", run_brand_scoring,            db, brand_ids)
     finally:
@@ -189,3 +203,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
