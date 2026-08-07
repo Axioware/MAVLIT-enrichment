@@ -18,12 +18,11 @@ is_scraped=False:
      name/niche/source are nullable for exactly this case — see pipeline/db.py)
      and is linked to this creator via brand_instagram_users. One creator_re
      row can end up linked to several different brands across its 5 posts.
-  4. Collect up to 5 commenters per post (same _collect_commenter_records
-     function), scrape 1 post each for profile data, store them in
-     instagram_users (user_type="commenter") with is_content_creator_re=True,
-     and link every commenter to every brand confirmed in step 3
-     (brand_instagram_users) as well as to the creator itself
-     (instagram_creator_commenters, scoped per confirmed brand).
+  4. For posts where step 3 confirmed at least one brand, collect up to 5
+     commenters for that post only, scrape 1 post each for profile data, store
+     them in instagram_users (user_type="commenter") with
+     is_content_creator_re=True, and link those commenters only to the brand(s)
+     confirmed on that same source post.
   5. Mark content_creator_re.is_scraped=True.
 
 Prompts (editable via /admin > Prompts):
@@ -196,16 +195,23 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int
             profile.get("followersCount"),
         )
 
-        #  Check each post's collaboration signals for real brand accounts
+        #  Check each post's collaboration signals for real brand accounts.
+        #  Keep post-specific brand IDs so commenter scraping/linking only
+        #  runs for posts where the LLM confirmed a brand partnership.
         confirmed_brand_ids: set[int] = set()
+        branded_posts: list[tuple[dict, set[int]]] = []
         for item in raw_posts:
             brand_usernames = _check_post_for_brands(db, username, profile.get("fullName"), item)
             if brand_usernames:
                 time.sleep(0.3)
+            post_brand_ids: set[int] = set()
             for brand_username in brand_usernames:
                 brand_id = _get_or_create_brand_id(db, brand_username)
                 if brand_id:
+                    post_brand_ids.add(brand_id)
                     confirmed_brand_ids.add(brand_id)
+            if post_brand_ids:
+                branded_posts.append((item, post_brand_ids))
 
         for brand_id in confirmed_brand_ids:
             _link_to_brand(db, brand_id, username)
@@ -216,9 +222,15 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int
                 username, len(confirmed_brand_ids),
             )
 
-        #  Collect unique commenters from the 5 posts (up to 5/post)
-        commenter_records = _collect_commenter_records(raw_posts, n_per_post=5)
-        commenter_usernames = sorted({record["username"] for record in commenter_records})
+        #  Collect unique commenters only from posts with confirmed brands
+        #  (up to 5/post). Each record carries the brand IDs confirmed on
+        #  that same post so links stay scoped to the evidence source.
+        commenter_links: list[tuple[dict, set[int]]] = []
+        for item, post_brand_ids in branded_posts:
+            for record in _collect_commenter_records([item], n_per_post=5):
+                commenter_links.append((record, post_brand_ids))
+
+        commenter_usernames = sorted({record["username"] for record, _ in commenter_links})
 
         if commenter_usernames:
             existing_c = {
@@ -267,11 +279,14 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int
                 time.sleep(1.0)
 
             #  Link every commenter (existing + new) to every confirmed
-            #  brand, plus creator <-> commenter itself (instagram_creator_commenters)
-            for brand_id in confirmed_brand_ids:
-                for commenter in commenter_usernames:
+            #  brand on the same post, plus creator <-> commenter itself
+            #  (instagram_creator_commenters) scoped per confirmed brand.
+            for record, post_brand_ids in commenter_links:
+                commenter = record.get("username")
+                if not commenter:
+                    continue
+                for brand_id in post_brand_ids:
                     _link_to_brand(db, brand_id, commenter)
-                for record in commenter_records:
                     _link_commenter_to_creator(db, brand_id, username, record)
 
         all_confirmed_brand_ids |= confirmed_brand_ids
