@@ -86,6 +86,8 @@ def _resolve_page_id(slug: str) -> str | None:
             logger.debug("Resolved page ID: %s → %s", slug, pid)
             return pid
         err = resp.json().get("error", {})
+        if err.get("code") == 190:
+            raise _AuthError(err.get("message", "token expired/invalid"))
         logger.warning(
             "Page ID resolution failed for '%s': HTTP %s — %s (code %s)",
             slug, resp.status_code, err.get("message"), err.get("code"),
@@ -97,6 +99,10 @@ def _resolve_page_id(slug: str) -> str | None:
 
 class _AuthError(Exception):
     """Raised when the Meta token is expired or invalid — aborts the whole run."""
+
+
+class _FetchError(Exception):
+    """Raised when a brand-specific Meta Ads fetch fails but token is still valid."""
 
 
 def _fetch_ads(*, page_id: str | None, brand_name: str) -> list[dict]:
@@ -141,26 +147,21 @@ def _fetch_ads(*, page_id: str | None, brand_name: str) -> list[dict]:
                 time.sleep(60)
                 resp = httpx.get(url, params=params, timeout=20)
             if resp.status_code >= 400:
-                try:
-                    body_err = resp.json()
-                    err = body_err.get("error", {})
-                    # Auth errors (expired/invalid token) — abort the entire run
-                    # Only code 190 = token expired/invalid; other OAuthException
-                    # codes (e.g. 100 = invalid parameter) are non-fatal per-brand errors.
-                    if err.get("code") == 190:
-                        raise _AuthError(err.get("message", "token expired/invalid"))
-                    logger.error("Meta Ads API %s for '%s' — %s", resp.status_code, brand_name, body_err)
-                except _AuthError:
-                    raise
-                except Exception:
-                    logger.error("Meta Ads API %s for '%s' — %s", resp.status_code, brand_name, resp.text[:300])
-                break
+                body_err = resp.json()
+                err = body_err.get("error", {})
+                # Auth errors (expired/invalid token) — abort the entire run.
+                # Any other HTTP error is a brand-specific fetch failure.
+                if err.get("code") == 190:
+                    raise _AuthError(err.get("message", "token expired/invalid"))
+                message = body_err if isinstance(body_err, dict) else resp.text[:300]
+                logger.error("Meta Ads API %s for '%s' — %s", resp.status_code, brand_name, message)
+                raise _FetchError(f"Meta Ads API {resp.status_code} for '{brand_name}'")
             body = resp.json()
         except _AuthError:
             raise
         except Exception:
             logger.exception("Meta Ads API call failed for '%s'", brand_name)
-            break
+            raise _FetchError(f"Meta Ads API call failed for '{brand_name}'")
 
         page_ads = body.get("data", [])
         all_ads.extend(page_ads)
@@ -247,15 +248,23 @@ def enrich_meta_ads(db: Session, limit: int = 200, niche: str | None = None, bra
         return 0
 
     logger.info("Meta Ads: processing %d brands", len(brands))
-    total_ads    = 0
-    resolved_ids = 0
+    total_ads      = 0
+    resolved_ids   = 0
+    successful_brands = 0
 
     for brand in brands:
         #  Step 1: resolve facebook_page_id from URL if not already known
         if not brand.facebook_page_id and brand.facebook_page:
             slug = _slug_from_url(brand.facebook_page)
             if slug:
-                pid = _resolve_page_id(slug)
+                try:
+                    pid = _resolve_page_id(slug)
+                except _AuthError as exc:
+                    logger.error(
+                        "Meta Ads: token expired/invalid during page ID resolution — aborting Meta Ads step. "
+                        "Update META_ACCESS_TOKEN and re-run. (%s)", exc
+                    )
+                    return len(brands) - brands.index(brand)
                 if pid:
                     brand.facebook_page_id = pid
                     resolved_ids += 1
@@ -263,26 +272,36 @@ def enrich_meta_ads(db: Session, limit: int = 200, niche: str | None = None, bra
             time.sleep(0.3)
 
         if not brand.facebook_page_id:
-            # Could not resolve a page ID — skip without marking as fetched
+            # Could not resolve a page ID — skip this brand without
+            # marking it fetched, so it can be retried later if needed.
             logger.warning(
                 "Meta Ads: could not resolve page_id for '%s' (facebook_page=%s) — skipping",
                 brand.name, brand.facebook_page,
             )
             continue
 
-        #  Step 2: fetch ads by page_id only 
+        #  Step 2: fetch ads by page_id only
         try:
             ads = _fetch_ads(page_id=brand.facebook_page_id, brand_name=brand.name)
+            inserted = _insert_ads(db, brand.id, ads)
         except _AuthError as exc:
             logger.error(
                 "Meta Ads: token expired/invalid — aborting run. "
                 "Update META_ACCESS_TOKEN and re-run. (%s)", exc
             )
             return len(brands) - brands.index(brand)
+        except _FetchError as exc:
+            logger.error(
+                "Meta Ads: failed for '%s' — skipping brand. (%s)",
+                brand.name, exc,
+            )
+            continue
+        except Exception:
+            logger.exception("Meta Ads: unexpected failure for '%s' — skipping brand", brand.name)
+            continue
 
-        inserted = _insert_ads(db, brand.id, ads)
         total_ads += inserted
-
+        successful_brands += 1
         brand.meta_ads_fetched = True
         db.commit()
         logger.debug("Meta Ads: '%s' (page_id=%s) → %d ads",
@@ -291,6 +310,6 @@ def enrich_meta_ads(db: Session, limit: int = 200, niche: str | None = None, bra
 
     logger.info(
         "Meta Ads: %d brands processed, %d page IDs resolved, %d ads stored",
-        len(brands), resolved_ids, total_ads,
+        successful_brands, resolved_ids, total_ads,
     )
-    return len(brands)
+    return successful_brands
