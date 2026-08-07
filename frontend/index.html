@@ -398,6 +398,14 @@
       <option value="Health & Wellness">Health &amp; Wellness</option>
     </select>
 
+    <div class="form-group" style="margin-top:.6rem;">
+      <label for="seedLimit">
+        Limit
+        <span style="color:#475569;text-transform:none;font-size:.7rem;margin-left:.25rem">(optional — max rows to insert, e.g. 100)</span>
+      </label>
+      <input id="seedLimit" type="number" min="1" placeholder="e.g. 100" />
+    </div>
+
     <!-- Geographic filters -->
     <div class="geo-section">
       <div class="geo-toggle" id="geoToggle" onclick="toggleGeo()">
@@ -588,6 +596,8 @@
     const location      = document.getElementById('location').value.trim() || null;
     const operatingArea = document.getElementById('operatingArea').value || null;
     const nicheLabel    = document.getElementById('nicheLabel').value || null;
+    const limitRaw      = (document.getElementById('seedLimit') && document.getElementById('seedLimit').value) || '';
+    const limit         = limitRaw ? parseInt(limitRaw, 10) : null;
 
     document.getElementById('seedBtn').disabled = true;
 
@@ -601,6 +611,7 @@
         location,
         operating_area: operatingArea,
         niche_label: nicheLabel,
+        limit: limit,
       }),
     })
       .then(r => r.json())
