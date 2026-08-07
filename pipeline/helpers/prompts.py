@@ -28,53 +28,169 @@ Prompt name -> which enrichment module actually calls it:
 #  instagram_posts.py
 
 FULL_PROMPT_NAME = "instagram_post_full_check"
-FULL_DEFAULT_PROMPT = """\
-You are filtering an Instagram post's collaboration signals to remove false positives.
-Only keep users/accounts that are REAL paid or gifted content creators working with the brand.
+FULL_DEFAULT_PROMPT = """You are an Instagram creator-partnership detection system.
 
-Brand: {brand_name}
-Post caption: {caption}
+Your task is NOT to identify whether an account is a creator.
+
+Your task is ONLY to identify creators who are very likely participating in a brand collaboration, sponsorship, ambassador campaign, gifted promotion, paid partnership, or other promotional relationship with the brand in THIS specific Instagram post.
+
+Brand:
+{brand_name}
+
+Post caption:
+{caption}
 
 Signals found in this post:
-paid_partnership: {paid_partnership}
-sponsors: {sponsors}
-tagged_users: {tagged_users}
-mentions: {mentions}
-coauthor_producers: {coauthor_producers}
 
-REMOVE from each list:
-- Regional or sister accounts of "{brand_name}" (brand_uk, brand_us, brand_official, etc.)
-- The brand's own accounts in any form
-- Automated, bot, or spam accounts
-- People tagged who are clearly not independent content creators or influencers
+paid_partnership:
+{paid_partnership}
 
-KEEP:
-- Real influencers, bloggers, or content creators with their own audience
-- Brand ambassadors who were paid or gifted
-- Genuine paid partnership or sponsorship markers
+sponsors:
+{sponsors}
 
-Reply ONLY with this JSON object (use empty list or false for fields with nothing left):
-{"paid_partnership": true or false, "sponsors": [], "tagged_users": [], "mentions": [], "coauthor_producers": []}\
+tagged_users:
+{tagged_users}
+
+mentions:
+{mentions}
+
+coauthor_producers:
+{coauthor_producers}
+
+IMPORTANT RULES
+
+1. Only keep accounts when there is evidence they are participating in the brand's promotional activity for THIS post.
+
+2. Being a creator or influencer is NOT sufficient.
+
+3. Do NOT keep accounts that are merely:
+
+   * customers
+   * friends
+   * employees
+   * photographers
+   * videographers
+   * event attendees
+   * models with no evidence of partnership
+   * celebrities being referenced
+   * giveaway participants
+   * contest winners
+   * unrelated tagged people
+   * fan accounts
+   * community accounts
+
+4. Remove:
+
+   * the brand's own account
+   * regional brand accounts
+   * local brand accounts
+   * franchise accounts
+   * sister brand accounts
+   * company-owned accounts
+   * reseller accounts
+   * distributor accounts
+
+5. Do NOT infer a collaboration simply because:
+
+   * an account is tagged
+   * an account is mentioned
+   * an account appears as coauthor
+   * an account appears in the photo or video
+   * an account appears in a giveaway announcement
+
+6. Strong evidence includes:
+
+   * Instagram paid partnership marker
+   * explicit sponsorship language
+   * ambassador language
+   * creator discount code
+   * affiliate code
+   * gifted collaboration language
+   * campaign language
+   * creator being thanked for collaborating
+   * creator being featured as part of a promotional partnership
+
+7. If the evidence is ambiguous, uncertain, weak, or missing, remove the account.
+
+8. Treat false positives as much worse than false negatives.
+
+9. Return only accounts that are likely independent creators working with the brand on THIS post.
+
+Reply ONLY with valid JSON:
+
+{
+"paid_partnership": true,
+"sponsors": [],
+"tagged_users": [],
+"mentions": [],
+"coauthor_producers": []
+}
 """
 
 COAUTHOR_PROMPT_NAME = "instagram_coauthor_check"
-COAUTHOR_DEFAULT_PROMPT = """\
-You are evaluating Instagram co-authors of a post to identify real paid content creators.
+COAUTHOR_DEFAULT_PROMPT = """You are an Instagram creator-partnership detection system.
 
-Brand: {brand_name}
-Post caption: {caption}
-Co-authors (coauthorProducers): {coauthor_producers}
+Your task is to evaluate Instagram co-authors and determine which accounts are likely independent content creators who are collaborating with the brand on THIS specific post.
 
-Keep ONLY the co-authors who are real independent content creators or influencers
-who were paid or gifted by "{brand_name}".
+Brand:
+{brand_name}
 
-REMOVE:
-- Regional or sister accounts of "{brand_name}" (brand_uk, brand_us, brand_official, etc.)
-- The brand's own accounts in any form
-- Any account that is clearly not an independent creator
+Post caption:
+{caption}
 
-Reply ONLY with this JSON object (empty list if none confirmed):
-{"coauthor_producers": [...]}\
+Co-authors (coauthor_producers):
+{coauthor_producers}
+
+IMPORTANT RULES
+
+1. Only keep a co-author if there is evidence that the account is an independent creator, influencer, ambassador, sponsored creator, or promotional partner working with the brand on THIS post.
+
+2. Being a co-author is NOT sufficient evidence.
+
+3. Being a creator is NOT sufficient evidence.
+
+4. Remove:
+
+   * the brand's own account
+   * regional brand accounts
+   * local brand accounts
+   * franchise accounts
+   * sister brand accounts
+   * company-owned accounts
+   * reseller accounts
+   * distributor accounts
+   * agencies
+   * organizations
+   * businesses
+   * media companies
+   * sports teams
+   * charities
+   * community accounts
+
+5. Strong evidence includes:
+
+   * Instagram paid partnership marker associated with the collaboration
+   * sponsorship or ambassador language in the caption
+   * campaign participation
+   * creator promotion of the brand's product or service
+   * clear creator-brand collaboration language
+   * gifted partnership language
+   * affiliate or creator code promotion
+
+6. If the caption only shows a general collaboration, event participation, repost, announcement, partnership between organizations, or other non-creator relationship, remove the account.
+
+7. If the evidence is ambiguous, uncertain, weak, or missing, remove the account.
+
+8. Treat false positives as much worse than false negatives.
+
+9. Return only co-authors that are likely independent creators collaborating with the brand on THIS post.
+
+Reply ONLY with valid JSON:
+
+{
+"coauthor_producers": ["username1", "username2"]
+}
+
 """
 
 
@@ -217,20 +333,97 @@ Use an empty list for tags if the description doesn't give enough information â€
 #  content_creator_re.py
 
 BRAND_CHECK_PROMPT_NAME = "brand_check"
-BRAND_CHECK_DEFAULT_PROMPT = """\
-You are checking whether a content creator's Instagram post involves a genuine brand or company account, for a reverse-engineering pipeline that discovers which brands a creator has worked with.
+BRAND_CHECK_DEFAULT_PROMPT = """
+You are an Instagram sponsorship detection system.
 
-Creator: {creator_username} ({creator_full_name})
-Post caption: {caption}
-Paid partnership marker: {paid_partnership}
+Your task is NOT to identify whether an account is a brand.
+
+Your task is ONLY to identify brands that are very likely sponsoring, partnering with, paying for, officially collaborating on, or being promoted in THIS specific Instagram post.
+
+Creator:
+Username: {creator_username}
+Full name: {creator_full_name}
+
+Post caption:
+{caption}
+
+Paid partnership marker:
+{paid_partnership}
 
 Accounts referenced in this post:
-mentions: {mentions}
-tagged_users: {tagged_users}
-coauthor_producers: {coauthor_producers}
 
-For each account listed above, decide whether it is a real BRAND or COMPANY account â€” not another individual creator, influencer, personal account, or unrelated person.
+mentions:
+{mentions}
 
-Reply ONLY with this JSON object (empty list if none are brands):
-{"brands": ["username1", "username2", ...]}\
+tagged_users:
+{tagged_users}
+
+coauthor_producers:
+{coauthor_producers}
+
+IMPORTANT RULES
+
+1. Only return a username if there is strong evidence that the account is the sponsoring, advertising, promotional, ambassador, gifted, paid-partnership, official collaboration, or campaign brand for this post.
+
+2. A username being a brand account is NOT sufficient.
+
+3. Do NOT return accounts that are merely:
+
+   * friends
+   * family members
+   * photographers
+   * videographers
+   * editors
+   * stylists
+   * makeup artists
+   * event organizers
+   * venues
+   * musicians
+   * athletes
+   * influencers
+   * creators
+   * fan pages
+   * communities
+   * podcasts
+   * media pages
+   * charities
+   * personal accounts
+
+4. Do NOT infer sponsorship simply because:
+
+   * the account is tagged
+   * the account is mentioned
+   * the account is a coauthor
+   * the account appears in the photo
+   * the creator follows or collaborates with the account
+
+5. If the evidence is ambiguous, uncertain, weak, or missing, return an empty list.
+
+6. Treat false positives as much worse than false negatives.
+
+7. Strong evidence includes:
+
+   * paid partnership marker is true and a referenced account appears to be the partnered brand
+   * explicit sponsorship language such as:
+     "ad"
+     "#ad"
+     "#sponsored"
+     "#paidpartnership"
+     "partnered with"
+     "in partnership with"
+     "thanks to"
+     "gifted by"
+     "sponsored by"
+     "ambassador for"
+     "working with"
+     "campaign with"
+   * clear promotion of a company's product, service, app, store, brand, or commercial offering
+
+8. If multiple brands appear, only return those that are clearly being promoted or sponsoring the post.
+
+9. If you cannot confidently conclude that a referenced account is a sponsor/brand partner for THIS post, return an empty list.
+
+Return ONLY valid JSON:
+
+{"brands":["username1","username2"]}
 """

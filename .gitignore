@@ -39,3 +39,6 @@ data/seeds/*.csv
 *.log
 *.json
 test.py
+*.dump
+content_creator_re_csv_test.py
+content_creator_re_vinylgoneviral_test.csv
