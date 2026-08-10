@@ -68,10 +68,22 @@ def _slug_from_url(url: str) -> str | None:
         return None
 
 
+# Distinctive substrings from Meta's own error message for "this app isn't
+# approved for the permission/feature this call needs" — seen under both
+# error code 10 and code 100 for the same underlying gap (Page Public
+# Metadata Access / Page Public Content Access / pages_read_engagement),
+# so matched on message text rather than a specific code.
+_PERMISSION_SIGNATURES = ("Page Public Metadata Access", "pages_read_engagement", "Page Public Content Access")
+
+
 def _resolve_page_id(slug: str) -> str | None:
     """
     Call Graph API to get the numeric Page ID for a vanity slug or numeric ID.
-    Returns None on any error or if token is missing.
+    Returns None on any ordinary error or if token is missing.
+    Raises _AuthError if the token itself is invalid/expired, or
+    _PermissionError if this app lacks a required permission/feature — see
+    both classes below for why callers should treat these differently from
+    a plain per-brand resolution failure.
     """
     if not META_ACCESS_TOKEN:
         return None
@@ -88,10 +100,15 @@ def _resolve_page_id(slug: str) -> str | None:
         err = resp.json().get("error", {})
         if err.get("code") == 190:
             raise _AuthError(err.get("message", "token expired/invalid"))
+        message = err.get("message", "")
+        if any(sig in message for sig in _PERMISSION_SIGNATURES):
+            raise _PermissionError(message)
         logger.warning(
             "Page ID resolution failed for '%s': HTTP %s — %s (code %s)",
             slug, resp.status_code, err.get("message"), err.get("code"),
         )
+    except (_AuthError, _PermissionError):
+        raise
     except Exception as exc:
         logger.debug("Page ID resolution error for '%s': %s", slug, exc)
     return None
@@ -99,6 +116,22 @@ def _resolve_page_id(slug: str) -> str | None:
 
 class _AuthError(Exception):
     """Raised when the Meta token is expired or invalid — aborts the whole run."""
+
+
+class _PermissionError(Exception):
+    """
+    Raised when Meta rejects a call because this app lacks a required
+    permission/feature (e.g. Page Public Metadata Access) — the token
+    itself is fine, the APP just isn't approved for this capability yet
+    (see Meta App Review). Distinct from _AuthError because the fix is
+    different (approval, not a new token), and distinct from a per-brand
+    _FetchError because this affects EVERY page-ID resolution call
+    identically, not just this one brand's — so enrich_meta_ads() stops
+    attempting further resolutions for the rest of this run instead of
+    repeating the same doomed call for every remaining brand. Brands that
+    already have a facebook_page_id are unaffected, since search_page_ids
+    doesn't require this permission (verified separately).
+    """
 
 
 class _FetchError(Exception):
@@ -251,25 +284,49 @@ def enrich_meta_ads(db: Session, limit: int = 200, niche: str | None = None, bra
     total_ads      = 0
     resolved_ids   = 0
     successful_brands = 0
+    # Set on the first _PermissionError from _resolve_page_id() (see that
+    # class for why) — once true, resolution is skipped for every
+    # remaining brand needing it, without wasting an API call to
+    # rediscover the same app-wide permission gap. Brands that already
+    # have a facebook_page_id skip resolution entirely anyway and are
+    # unaffected — they still go through the normal ad-fetch below.
+    resolution_permission_denied = False
 
     for brand in brands:
         #  Step 1: resolve facebook_page_id from URL if not already known
         if not brand.facebook_page_id and brand.facebook_page:
-            slug = _slug_from_url(brand.facebook_page)
-            if slug:
-                try:
-                    pid = _resolve_page_id(slug)
-                except _AuthError as exc:
-                    logger.error(
-                        "Meta Ads: token expired/invalid during page ID resolution — aborting Meta Ads step. "
-                        "Update META_ACCESS_TOKEN and re-run. (%s)", exc
-                    )
-                    return len(brands) - brands.index(brand)
-                if pid:
-                    brand.facebook_page_id = pid
-                    resolved_ids += 1
-                    db.commit()
-            time.sleep(0.3)
+            if resolution_permission_denied:
+                logger.debug(
+                    "Meta Ads: skipping page-ID resolution for '%s' — already confirmed "
+                    "permission-blocked earlier this run", brand.name,
+                )
+            else:
+                slug = _slug_from_url(brand.facebook_page)
+                if slug:
+                    try:
+                        pid = _resolve_page_id(slug)
+                    except _AuthError as exc:
+                        logger.error(
+                            "Meta Ads: token expired/invalid during page ID resolution — aborting Meta Ads step. "
+                            "Update META_ACCESS_TOKEN and re-run. (%s)", exc
+                        )
+                        return len(brands) - brands.index(brand)
+                    except _PermissionError as exc:
+                        resolution_permission_denied = True
+                        logger.warning(
+                            "Meta Ads: page-ID resolution is blocked for this app (%s) — this is an "
+                            "app-wide permission gap (needs Meta App Review), not specific to '%s', "
+                            "so no further resolution attempts will be made for the rest of this run. "
+                            "Brands with an already-known facebook_page_id are unaffected and will "
+                            "still be processed normally.",
+                            exc, brand.name,
+                        )
+                    else:
+                        if pid:
+                            brand.facebook_page_id = pid
+                            resolved_ids += 1
+                            db.commit()
+                    time.sleep(0.3)
 
         if not brand.facebook_page_id:
             # Could not resolve a page ID — skip this brand without
