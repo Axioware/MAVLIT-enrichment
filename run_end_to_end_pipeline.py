@@ -39,6 +39,12 @@ from pipeline.db import BrandProfile, BrandRaw, InitialBrandScore, SessionLocal
 from pipeline.enrichment.shopify_detect import enrich_shopify
 from pipeline.enrichment.wikidata_socials import enrich_wikidata_socials
 from pipeline.enrichment.tranco import enrich_tranco
+# Imported as a module (not "from ... import enrich_youtube_sponsorships")
+# because drain_youtube_sponsorships() below also reads
+# youtube_sponsorship.quota_fully_exhausted, a flag that mutates at runtime
+# — a `from...import` of just the function wouldn't see later changes to
+# that module attribute.
+from pipeline.enrichment import youtube_sponsorship
 from pipeline.enrichment.youtube_sponsorship import enrich_youtube_sponsorships
 from pipeline.enrichment.meta_ads import enrich_meta_ads
 from pipeline.enrichment.instagram_posts import enrich_instagram_posts
@@ -156,6 +162,20 @@ def drain_youtube_sponsorships(label: str, db, batch_limit: int = 50) -> None:
                 total_processed += enrich_youtube_sponsorships(db, brand_id=bid)
             except Exception:
                 logger.exception("[%s] brand_id=%d — failed, continuing", label, bid)
+
+            # Once every YOUTUBE_API_KEY* is exhausted, every remaining brand
+            # would fail the exact same way — stop this whole step now and
+            # move on, instead of looping through the rest of pending_youtube_ids
+            # (each costing ~2 doomed calls to rediscover the same thing).
+            if youtube_sponsorship.quota_fully_exhausted:
+                logger.warning(
+                    "[%s] YouTube quota fully exhausted — stopping this step early and "
+                    "moving to the next one. Remaining brands stay youtube_checked=False "
+                    "and will be picked up on the next run.",
+                    label,
+                )
+                _step_end(label, f"{total_processed} brand(s) processed (stopped early — quota exhausted)")
+                return
 
     _step_end(label, f"{total_processed} brand(s) processed")
 

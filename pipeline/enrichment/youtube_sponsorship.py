@@ -201,6 +201,21 @@ _key_index: int = 0
 # and never be retried — see _yt_get().
 _transient_failures: int = 0
 
+# True once every configured YOUTUBE_API_KEY* has hit _QuotaExhausted during
+# the CURRENT enrich_youtube_sponsorships() call — reset at the top of that
+# function. No underscore prefix: this is deliberately public so an
+# orchestrator driving many brand_id= calls in a loop (e.g.
+# run_end_to_end_pipeline.py) can check it after each call and stop
+# retrying further brands for the rest of today, instead of burning ~13
+# doomed API calls per remaining brand only to leave every one of them
+# youtube_checked=False anyway.
+# Named distinctly from the *local* `quota_exhausted` variable already used
+# inside enrich_youtube_sponsorships() for unrelated per-brand bookkeeping
+# (whether to break the brand loop early after partial video processing) —
+# same name, different scope, would've silently collided once `global` made
+# every assignment to that local name write through to this one instead.
+quota_fully_exhausted: bool = False
+
 
 def _active_key() -> str:
     global _API_KEYS
@@ -226,25 +241,54 @@ def _rotate_key() -> None:
     )
 
 
+# YouTube Data API v3 signals daily-quota exhaustion inconsistently — the
+# documented reason strings are quotaExceeded/dailyLimitExceeded/
+# rateLimitExceeded/userRateLimitExceeded, but in practice a fully-exhausted
+# key has also been observed returning the generic "forbidden" reason on
+# every call instead. Treating "forbidden" as quota-like too means a truly
+# dead/restricted key still gets the same safe behavior (rotate, and stop
+# entirely once every key does this) instead of being retried 13 times per
+# brand for every remaining brand in the run.
+_QUOTA_403_REASONS = {"quotaExceeded", "dailyLimitExceeded", "rateLimitExceeded", "userRateLimitExceeded", "forbidden"}
+
+
+def _403_reason(resp: httpx.Response) -> str:
+    try:
+        return resp.json().get("error", {}).get("errors", [{}])[0].get("reason", "")
+    except Exception:
+        return ""
+
+
+def _looks_quota_exhausted(resp: httpx.Response) -> bool:
+    """True if this response means 'stop using this key' — either the
+    documented 429, or a 403 whose reason matches _QUOTA_403_REASONS."""
+    if resp.status_code == 429:
+        return True
+    return resp.status_code == 403 and _403_reason(resp) in _QUOTA_403_REASONS
+
+
 def _yt_get(url: str, params: dict) -> dict | None:
     global _transient_failures
     params["key"] = _active_key()
     try:
         resp = httpx.get(url, params=params, timeout=15)
-        if resp.status_code == 429:
+        if _looks_quota_exhausted(resp):
+            logger.warning(
+                "YouTube key exhausted/rejected (HTTP %s, reason=%s) — rotating to next key.",
+                resp.status_code, _403_reason(resp) or "n/a",
+            )
             _rotate_key()                       # logs which key ran out and which is next
             params["key"] = _active_key()
             resp = httpx.get(url, params=params, timeout=15)
-            if resp.status_code == 429:
+            if _looks_quota_exhausted(resp):
                 next_name = _KEY_NAMES[_key_index] if _key_index < len(_KEY_NAMES) else f"key_{_key_index}"
-                logger.warning("YouTube quota exhausted — %s daily limit also reached. All keys used up.", next_name)
+                logger.warning(
+                    "YouTube quota exhausted — %s daily limit also reached (HTTP %s, reason=%s). All keys used up.",
+                    next_name, resp.status_code, _403_reason(resp) or "n/a",
+                )
                 raise _QuotaExhausted("All YouTube API keys exhausted for today")
         if resp.status_code == 403:
-            reason = ""
-            try:
-                reason = resp.json().get("error", {}).get("errors", [{}])[0].get("reason", "")
-            except Exception:
-                pass
+            reason = _403_reason(resp)
             if reason == "commentsDisabled":
                 # Expected, per-video condition (uploader turned comments off) —
                 # not an API key/permissions problem, so don't warn about it
@@ -522,6 +566,9 @@ def enrich_youtube_sponsorships(
         logger.warning("YOUTUBE_API_KEY not set — skipping YouTube sponsorship detection")
         return 0
 
+    global quota_fully_exhausted
+    quota_fully_exhausted = False
+
     # name is required — this module's whole methodology embeds the brand
     # name in every search query (_build_queries), which a bare brand (from
     # content_creator_re / brand_wikidata_lookup, name IS NULL) has none of.
@@ -559,6 +606,7 @@ def enrich_youtube_sponsorships(
                     logger.debug("YouTube: '%s' [%s] → %d new videos", name, tier, len(new_ids))
                 time.sleep(0.3)
         except _QuotaExhausted:
+            quota_fully_exhausted = True
             logger.warning(
                 "YouTube daily quota exhausted — stopping. "
                 "'%s' and remaining brands left as youtube_checked=False and will retry tomorrow.",
@@ -646,6 +694,7 @@ def enrich_youtube_sponsorships(
                 })
         except _QuotaExhausted:
             quota_exhausted = True
+            quota_fully_exhausted = True
             logger.warning(
                 "YouTube daily quota exhausted while fetching comments for '%s' — "
                 "storing what's already been built; brand stays unchecked and the "
