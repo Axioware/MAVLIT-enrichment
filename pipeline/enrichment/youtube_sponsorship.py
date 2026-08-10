@@ -40,7 +40,7 @@ import httpx
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, OPENAI_KEY, ENABLE_LLM
+from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2, OPENAI_KEY, ENABLE_LLM
 from pipeline.db import BrandRaw, Prompt, YoutubeSponsorship
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
@@ -186,7 +186,7 @@ class _QuotaExhausted(Exception):
 
 
 # Maps key index → env var name for clear log messages
-_KEY_NAMES = ["YOUTUBE_API_KEY", "YOUTUBE_API_KEY_1"]
+_KEY_NAMES = ["YOUTUBE_API_KEY", "YOUTUBE_API_KEY_1", "YOUTUBE_API_KEY_2"]
 
 # Populated lazily so config is read after load_dotenv()
 _API_KEYS: list[str] = []
@@ -220,7 +220,7 @@ quota_fully_exhausted: bool = False
 def _active_key() -> str:
     global _API_KEYS
     if not _API_KEYS:
-        _API_KEYS = [k for k in [YOUTUBE_API_KEY, YOUTUBE_API_KEY_1] if k]
+        _API_KEYS = [k for k in [YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2] if k]
     if not _API_KEYS:
         raise _QuotaExhausted("No YouTube API keys configured — set YOUTUBE_API_KEY in .env")
     return _API_KEYS[_key_index]
@@ -303,6 +303,22 @@ def _yt_get(url: str, params: dict) -> dict | None:
     except _QuotaExhausted:
         raise
     except Exception as exc:
+        # A brand makes 50-90+ calls (14 searches + video/channel/comment
+        # lookups), so a single flaky network blip (SSL handshake timeout,
+        # connection reset) is common, not rare. Retry it inline a couple
+        # times before counting it as a real transient failure — otherwise
+        # one-off blips were routinely blocking youtube_checked=True on
+        # brands that had already been fully, correctly processed.
+        for attempt in range(2):
+            time.sleep(1 + attempt)
+            try:
+                resp = httpx.get(url, params=params, timeout=15)
+                if _looks_quota_exhausted(resp) or resp.status_code == 403:
+                    break  # let the normal quota/403 handling above apply on a fresh call
+                resp.raise_for_status()
+                return resp.json()
+            except Exception:
+                continue
         logger.warning("YouTube API call failed: %s", exc)
         _transient_failures += 1
         return None
