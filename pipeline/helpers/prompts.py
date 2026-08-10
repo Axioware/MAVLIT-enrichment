@@ -23,6 +23,9 @@ Prompt name -> which enrichment module actually calls it:
   creator_content_tags          — pipeline/enrichment/creator_signals.py
   brand_niche_tags              — pipeline/enrichment/shopify_detect.py
   brand_check                   — pipeline/enrichment/content_creator_re.py
+  brand_pitch_generation        — pipeline/pitching.py
+  rate_intelligence_estimate    — pipeline/rate_intelligence.py
+  contract_advice_review        — pipeline/contract_advice.py
 """
 
 #  instagram_posts.py
@@ -426,4 +429,102 @@ IMPORTANT RULES
 Return ONLY valid JSON:
 
 {"brands":["username1","username2"]}
+"""
+
+
+#  pitching.py
+
+PITCH_PROMPT_NAME = "brand_pitch_generation"
+PITCH_DEFAULT_PROMPT = """\
+You are writing a short outreach email FROM a content creator TO a brand, pitching a sponsorship/partnership. Write it in the creator's own voice, as if they wrote it themselves.
+
+Creator:
+Name: {creator_name}
+Handle: {creator_handle}
+Niche: {creator_niche}
+Follower count: {creator_follower_count}
+
+Brand:
+Name: {brand_name}
+Niche: {brand_niche}
+Description: {brand_description}
+
+Contact you're writing to: {contact_name} ({contact_title})
+
+What the creator wants to say:
+Their story / why this brand: {story}
+Product or line they're interested in: {product_reference}
+Past brand partnerships worth mentioning: {past_brand_partnership}
+Link to relevant content: {content_link}
+
+RULES
+
+1. Write ONLY the email body — no subject line, no "Subject:", no placeholders like [Name].
+2. Address the contact by first name if one was given; otherwise open naturally without a name.
+3. Sound like a real person emailing another real person — warm, specific, genuinely interested in the brand, not salesy or generic.
+4. Do NOT use em dashes anywhere. Use commas, periods, or separate sentences instead.
+5. Do NOT use AI-sounding phrases like "I hope this email finds you well", "I'm reaching out because", "in today's digital landscape", "I wanted to touch base", or similar stock filler.
+6. Weave in the creator's story and why THIS brand specifically — avoid generic praise that could apply to any brand.
+7. Mention the product/line and past partnerships only if they were actually given above — do not invent details.
+8. Include the content link naturally if one was given.
+9. End with a soft, low-pressure call to action (e.g. suggesting a quick chat), not a hard ask.
+10. Keep it tight — a few short paragraphs, not a wall of text.
+
+Reply with the email body only, plain text, no markdown formatting.\
+"""
+
+
+#  rate_intelligence.py
+
+RATE_INTEL_PROMPT_NAME = "rate_intelligence_estimate"
+RATE_INTEL_DEFAULT_PROMPT = """\
+You are a creator-economy rate consultant, estimating a fair market rate range for a sponsorship deliverable.
+
+Creator:
+Tier: {creator_tier}
+Follower count: {creator_follower_count}
+Primary platform: {creator_primary_platform}
+
+Brand:
+Name: {brand_name}
+Sponsorship activity score (0-100): {sponsorship_activity_score}
+Meta ads active: {meta_ads_active}
+
+Deal being estimated:
+Platform: {platform}
+Deliverable type: {deliverable_type}
+Exclusivity: {exclusivity}
+Usage rights: {usage}
+Duration (months): {duration_months}
+
+Estimate a realistic USD rate range for this specific deliverable, given the creator's tier/following and the brand's apparent sponsorship budget/activity level. Wider exclusivity, broader usage rights, and longer durations should push the range higher.
+
+Reply ONLY with this JSON object, no extra text:
+{"rate_min": 0, "rate_max": 0, "currency": "USD", "reasoning": "..."}
+rate_min and rate_max must be plain integers (whole dollars, no commas or symbols). Keep reasoning to 2-3 sentences explaining the key factors.\
+"""
+
+
+#  contract_advice.py
+
+CONTRACT_ADVICE_PROMPT_NAME = "contract_advice_review"
+CONTRACT_ADVICE_DEFAULT_PROMPT = """\
+You are a contract-review assistant for content creators, helping them spot red flags in brand-sponsorship agreements before signing. You are not a lawyer and this is not legal advice — flag concerns in plain language a creator can understand.
+
+Contract text:
+{contract_text}
+
+Review this contract for common creator-sponsorship red flags, including but not limited to:
+- Exclusivity terms that are broader or longer than the payment justifies
+- Vague or open-ended usage rights (e.g. "in perpetuity", "any media now known or later invented") without extra compensation
+- Missing or unclear payment terms/timeline
+- No kill fee or cancellation terms
+- Automatic renewal clauses
+- Unreasonable revision/approval cycles
+- Ownership of content/IP being fully assigned away
+- Missing FTC disclosure requirements
+
+Reply ONLY with this JSON object, no extra text:
+{"looks_good": true, "issues": ["...", "..."], "summary": "..."}
+Set looks_good to false if there is at least one real concern worth flagging. issues should be short, specific, plain-language bullet points (empty list if none found). summary should be 2-3 sentences giving the creator an overall read.\
 """

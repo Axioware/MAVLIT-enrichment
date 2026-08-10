@@ -12,8 +12,14 @@ from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
 from sqlalchemy import text
 from config import ADMIN_PASSKEY, FRONTEND_ORIGINS, IS_PRODUCTION, JWT_SECRET, POSTHOG_PROJECT_TOKEN, POSTHOG_HOST
-from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Prompt, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, ContractReview, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Pitch, Prompt, RateEstimate, SavedBrand, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
+from api.schemas import CreatorProfileResponse, profile_to_response as _profile_to_response
+from api.advisory import router as advisory_router
+from api.brands import router as brands_router
+from api.dashboard import router as dashboard_api_router
+from api.pitches import router as pitches_router
+from api.saved_brands import router as saved_brands_router
 from pipeline.matching.matcher import get_matches
 from pipeline.enrichment.creator_signals import compute_creator_signals
 from pipeline.helpers.passwords import hash_password
@@ -28,6 +34,9 @@ from pipeline.helpers.prompts import (
     TAGS_PROMPT_NAME, TAGS_DEFAULT_PROMPT,
     BRAND_NICHE_TAGS_PROMPT_NAME, BRAND_NICHE_TAGS_DEFAULT_PROMPT,
     BRAND_CHECK_PROMPT_NAME, BRAND_CHECK_DEFAULT_PROMPT,
+    PITCH_PROMPT_NAME, PITCH_DEFAULT_PROMPT,
+    RATE_INTEL_PROMPT_NAME, RATE_INTEL_DEFAULT_PROMPT,
+    CONTRACT_ADVICE_PROMPT_NAME, CONTRACT_ADVICE_DEFAULT_PROMPT,
 )
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.enrichment.orchestrator import run_signal_enrichment
@@ -316,6 +325,9 @@ def _run_migrations() -> None:
             (APOLLO_RANK_PROMPT_NAME,   APOLLO_RANK_DEFAULT_PROMPT),
             (BRAND_NICHE_TAGS_PROMPT_NAME, BRAND_NICHE_TAGS_DEFAULT_PROMPT),
             (BRAND_CHECK_PROMPT_NAME,   BRAND_CHECK_DEFAULT_PROMPT),
+            (PITCH_PROMPT_NAME,         PITCH_DEFAULT_PROMPT),
+            (RATE_INTEL_PROMPT_NAME,    RATE_INTEL_DEFAULT_PROMPT),
+            (CONTRACT_ADVICE_PROMPT_NAME, CONTRACT_ADVICE_DEFAULT_PROMPT),
         ]:
             if not db.query(Prompt).filter(Prompt.name == name).first():
                 db.add(Prompt(name=name, content=content))
@@ -336,6 +348,11 @@ app = FastAPI(
 )
 
 app.include_router(auth_router)
+app.include_router(brands_router)
+app.include_router(saved_brands_router)
+app.include_router(pitches_router)
+app.include_router(dashboard_api_router)
+app.include_router(advisory_router)
 
 # Lets a separate frontend app (different domain, see FRONTEND_ORIGINS in
 # config.py) call this API with credentials (cookies) from the browser.
@@ -509,6 +526,51 @@ class PromptAdmin(ModelView, model=Prompt):
     page_size = 20
 
 
+class SavedBrandAdmin(ModelView, model=SavedBrand):
+    name         = "Saved Brand"
+    name_plural  = "Saved Brands"
+    icon         = "fa-solid fa-bookmark"
+    column_list  = "__all__"
+    column_labels = {SavedBrand.creator: "Creator", SavedBrand.brand_raw: "Brand"}
+    column_sortable_list = [c.name for c in SavedBrand.__table__.columns]
+    column_default_sort  = [(SavedBrand.created_at, True)]
+    page_size = 15
+
+
+class PitchAdmin(ModelView, model=Pitch):
+    name         = "Pitch"
+    name_plural  = "Pitches"
+    icon         = "fa-solid fa-paper-plane"
+    column_list  = "__all__"
+    column_labels = {Pitch.creator: "Creator", Pitch.brand_raw: "Brand"}
+    column_searchable_list = [Pitch.brand_name, Pitch.status]
+    column_sortable_list    = [c.name for c in Pitch.__table__.columns]
+    column_default_sort    = [(Pitch.id, True)]
+    page_size = 15
+
+
+class RateEstimateAdmin(ModelView, model=RateEstimate):
+    name         = "Rate Estimate"
+    name_plural  = "Rate Estimates"
+    icon         = "fa-solid fa-money-bill-trend-up"
+    column_list  = "__all__"
+    column_labels = {RateEstimate.creator: "Creator", RateEstimate.brand_raw: "Brand"}
+    column_sortable_list = [c.name for c in RateEstimate.__table__.columns]
+    column_default_sort  = [(RateEstimate.id, True)]
+    page_size = 15
+
+
+class ContractReviewAdmin(ModelView, model=ContractReview):
+    name         = "Contract Review"
+    name_plural  = "Contract Reviews"
+    icon         = "fa-solid fa-file-contract"
+    column_list  = "__all__"
+    column_labels = {ContractReview.creator: "Creator"}
+    column_sortable_list = [c.name for c in ContractReview.__table__.columns]
+    column_default_sort  = [(ContractReview.id, True)]
+    page_size = 15
+
+
 class InitialBrandScoreAdmin(ModelView, model=InitialBrandScore):
     name         = "Initial Brand Score"
     name_plural  = "Initial Brand Scores"
@@ -639,6 +701,10 @@ admin.add_view(ContentCreatorREAdmin)
 admin.add_view(BrandInstagramUserAdmin)
 admin.add_view(InstagramCreatorCommenterAdmin)
 admin.add_view(PromptAdmin)
+admin.add_view(SavedBrandAdmin)
+admin.add_view(PitchAdmin)
+admin.add_view(RateEstimateAdmin)
+admin.add_view(ContractReviewAdmin)
 
 # 
 # API models
@@ -967,89 +1033,6 @@ class CreatorProfileRequest(BaseModel):
     audience_age_min:           int | None = None
     audience_age_max:           int | None = None
     audience_top_countries:     list[dict] | None = None
-
-
-class CreatorProfileResponse(BaseModel):
-    id:         int
-    email:      str
-    is_active:  bool
-
-    full_name:        str | None = None
-    creator_handle:   str | None = None
-    location_city:    str | None = None
-    location_country: str | None = None
-    bio_tagline:      str | None = None
-
-    content_niche:       str | None = None
-    sub_niches:          list[str] | None = None
-    content_description: str | None = None
-    excluded_categories:  list[str] | None = None
-
-    instagram_handle: str | None = None
-    youtube_channel:   str | None = None
-    facebook_page:     str | None = None
-    substack_url:      str | None = None
-    substack_subscribers: int | None = None
-
-    instagram_followers: int | None = None
-    instagram_following: int | None = None
-    youtube_followers:   int | None = None
-    facebook_followers:  int | None = None
-    facebook_following:  int | None = None
-
-    primary_platform: str | None = None
-    follower_count:   int | None = None
-
-    audience_gender_male_pct:   float | None = None
-    audience_gender_female_pct: float | None = None
-    audience_age_bracket:       str | None = None
-    audience_age_min:           int | None = None
-    audience_age_max:           int | None = None
-    audience_top_countries:     list[dict] | None = None
-
-    creator_tier: str | None = None
-    content_tags: list[str] | None = None
-    created_at: str
-    updated_at: str | None = None
-
-
-def _profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
-    return CreatorProfileResponse(
-        id=row.id,
-        email=row.email,
-        is_active=row.is_active,
-        full_name=row.full_name,
-        creator_handle=row.creator_handle,
-        location_city=row.location_city,
-        location_country=row.location_country,
-        bio_tagline=row.bio_tagline,
-        content_niche=row.content_niche,
-        sub_niches=row.sub_niches,
-        content_description=row.content_description,
-        excluded_categories=row.excluded_categories,
-        instagram_handle=row.instagram_handle,
-        youtube_channel=row.youtube_channel,
-        facebook_page=row.facebook_page,
-        substack_url=row.substack_url,
-        substack_subscribers=row.substack_subscribers,
-        instagram_followers=row.instagram_followers,
-        instagram_following=row.instagram_following,
-        youtube_followers=row.youtube_followers,
-        facebook_followers=row.facebook_followers,
-        facebook_following=row.facebook_following,
-        primary_platform=row.primary_platform,
-        follower_count=row.follower_count,
-        audience_gender_male_pct=row.audience_gender_male_pct,
-        audience_gender_female_pct=row.audience_gender_female_pct,
-        audience_age_bracket=row.audience_age_bracket,
-        audience_age_min=row.audience_age_min,
-        audience_age_max=row.audience_age_max,
-        audience_top_countries=row.audience_top_countries,
-        creator_tier=row.creator_tier,
-        content_tags=row.content_tags,
-        created_at=str(row.created_at) if row.created_at else "",
-        updated_at=str(row.updated_at) if row.updated_at else None,
-    )
 
 
 @app.get("/brand-niches")

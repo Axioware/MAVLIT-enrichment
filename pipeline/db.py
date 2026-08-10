@@ -448,20 +448,7 @@ class CreatorProfile(Base):
     __tablename__ = "creator_profiles"
 
     id = Column(Integer, primary_key=True)
-
-    #  Account / auth identity (formerly the separate `users` table, then
-    # briefly a separate login_credentials table — both folded in here so
-    # login lives directly on the creator's own row). Accounts are
-    # admin-provisioned: an admin sets email + password on a row via
-    # /admin (sqladmin hashes it on save — see CreatorProfileAdmin in
-    # api/app.py; the DB only ever stores the bcrypt hash) and hands those
-    # credentials to the creator. POST /auth/login looks up this table by
-    # email directly.
     email         = Column(Text, unique=True, nullable=False)
-    # Nullable at the DB level so sqladmin's auto-generated form doesn't
-    # force a value on every edit (it adds an InputRequired validator to
-    # any NOT NULL column, which would reject leaving the password blank
-    # to keep it unchanged — before on_model_change even runs).
     password_hash = Column(Text, nullable=True)
     is_active     = Column(Boolean, nullable=False, server_default="true", default=True)
 
@@ -518,6 +505,98 @@ class CreatorProfile(Base):
 
     def __str__(self) -> str:
         return self.creator_handle or self.email or f"Creator #{self.id}"
+
+
+class SavedBrand(Base):
+    """A creator's save-for-later list — a brand they want to keep track of."""
+    __tablename__ = "saved_brands"
+
+    creator_profile_id = Column(Integer, ForeignKey("creator_profiles.id"), primary_key=True)
+    brand_raw_id        = Column(Integer, ForeignKey("brands_raw.id"), primary_key=True)
+    created_at           = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    creator   = relationship("CreatorProfile", lazy="selectin", foreign_keys=[creator_profile_id])
+    brand_raw = relationship("BrandRaw",       lazy="selectin", foreign_keys=[brand_raw_id])
+
+
+class Pitch(Base):
+    """
+    A creator's outreach pitch for a brand — either an existing brands_raw
+    row (brand_raw_id set) or a brand they typed in themselves (is_custom,
+    brand_raw_id NULL). brand_name/contact_name/contact_email are snapshots
+    taken at generation time so a pitch's record stays stable even if the
+    underlying brand/contact data is re-enriched later.
+    """
+    __tablename__ = "pitches"
+
+    id                  = Column(Integer, primary_key=True)
+    creator_profile_id  = Column(Integer, ForeignKey("creator_profiles.id"), nullable=False, index=True)
+    brand_raw_id        = Column(Integer, ForeignKey("brands_raw.id"), index=True)
+    is_custom           = Column(Boolean, nullable=False, server_default="false", default=False)
+    brand_name          = Column(Text, nullable=False)
+
+    story                   = Column(Text, nullable=False)
+    product_reference       = Column(Text)
+    past_brand_partnership  = Column(Text)
+    content_link            = Column(Text)
+
+    contact_name  = Column(Text)
+    contact_email = Column(Text)
+
+    pitch_text = Column(Text)
+    # Free text, not a DB enum — same convention as InitialBrandScore.score_band,
+    # so new lifecycle values can be introduced later without a migration.
+    status     = Column(Text, nullable=False, server_default="proposal_sent", default="proposal_sent")
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    creator   = relationship("CreatorProfile", lazy="selectin", foreign_keys=[creator_profile_id])
+    brand_raw = relationship("BrandRaw",       lazy="selectin", foreign_keys=[brand_raw_id])
+
+    def __str__(self) -> str:
+        return f"Pitch#{self.id} {self.brand_name} ({self.status})"
+
+
+class RateEstimate(Base):
+    """A saved LLM rate-intelligence estimate for a creator/brand/deliverable combo."""
+    __tablename__ = "rate_estimates"
+
+    id                  = Column(Integer, primary_key=True)
+    creator_profile_id  = Column(Integer, ForeignKey("creator_profiles.id"), nullable=False, index=True)
+    brand_raw_id        = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
+
+    platform         = Column(Text, nullable=False)
+    deliverable_type = Column(Text, nullable=False)
+    exclusivity      = Column(Text)
+    usage            = Column(Text)
+    duration_months  = Column(Integer)
+
+    rate_min  = Column(Integer)
+    rate_max  = Column(Integer)
+    currency  = Column(Text)
+    reasoning = Column(Text)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    creator   = relationship("CreatorProfile", lazy="selectin", foreign_keys=[creator_profile_id])
+    brand_raw = relationship("BrandRaw",       lazy="selectin", foreign_keys=[brand_raw_id])
+
+
+class ContractReview(Base):
+    """A saved LLM contract-advice review for a creator."""
+    __tablename__ = "contract_reviews"
+
+    id                  = Column(Integer, primary_key=True)
+    creator_profile_id  = Column(Integer, ForeignKey("creator_profiles.id"), nullable=False, index=True)
+
+    contract_text = Column(Text, nullable=False)
+    looks_good    = Column(Boolean)
+    issues        = Column(JSONB)
+    summary       = Column(Text)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    creator = relationship("CreatorProfile", lazy="selectin", foreign_keys=[creator_profile_id])
 
 
 class Prompt(Base):

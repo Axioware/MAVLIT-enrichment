@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from config import IS_PRODUCTION, JWT_SECRET
 from pipeline.db import CreatorProfile, get_db
 from pipeline.helpers.passwords import verify_password
+from api.schemas import CreatorProfileResponse, profile_to_response
 
 logger = logging.getLogger(__name__)
 
@@ -63,16 +64,8 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> Creator
 
 #  Routes
 
-@router.post("/login")
+@router.post("/login", response_model=CreatorProfileResponse)
 def login(body: LoginRequest, response: Response, db: Session = Depends(get_db)):
-    """
-    Email/password login directly against creator_profiles.password_hash.
-    Accounts are admin-provisioned — an admin sets email + password on a
-    creator's row via /admin (see CreatorProfileAdmin in api/app.py) and
-    hands those credentials to the creator; there's no self-service
-    sign-up, so a login for an email with no matching row (or no password
-    set on it) is simply rejected rather than auto-creating anything.
-    """
     email = body.email.strip().lower()
 
     user = db.query(CreatorProfile).filter(CreatorProfile.email == email).first()
@@ -91,11 +84,7 @@ def login(body: LoginRequest, response: Response, db: Session = Depends(get_db))
         samesite=_CROSS_SITE_SAMESITE,
         secure=IS_PRODUCTION,
     )
-    return {
-        "id":    user.id,
-        "email": user.email,
-        "name":  user.full_name,
-    }
+    return profile_to_response(user)
 
 
 @router.get("/me")
