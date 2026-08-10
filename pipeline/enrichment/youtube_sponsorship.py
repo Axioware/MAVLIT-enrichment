@@ -192,6 +192,15 @@ _KEY_NAMES = ["YOUTUBE_API_KEY", "YOUTUBE_API_KEY_1"]
 _API_KEYS: list[str] = []
 _key_index: int = 0
 
+# Counts transient API failures (network errors, timeouts, non-quota 403s)
+# during the CURRENT brand's processing — reset at the start of each brand
+# in enrich_youtube_sponsorships() and checked before marking
+# youtube_checked=True. Without this, a search query that failed due to a
+# timeout looked identical to one that legitimately found zero videos, so
+# a brand could get marked "checked" off the back of a dropped connection
+# and never be retried — see _yt_get().
+_transient_failures: int = 0
+
 
 def _active_key() -> str:
     global _API_KEYS
@@ -218,6 +227,7 @@ def _rotate_key() -> None:
 
 
 def _yt_get(url: str, params: dict) -> dict | None:
+    global _transient_failures
     params["key"] = _active_key()
     try:
         resp = httpx.get(url, params=params, timeout=15)
@@ -237,10 +247,12 @@ def _yt_get(url: str, params: dict) -> dict | None:
                 pass
             if reason == "commentsDisabled":
                 # Expected, per-video condition (uploader turned comments off) —
-                # not an API key/permissions problem, so don't warn about it.
+                # not an API key/permissions problem, so don't warn about it
+                # or count it as a transient failure.
                 logger.debug("YouTube API: comments disabled for this video — skipping")
             else:
                 logger.warning("YouTube API forbidden (403) reason=%s — check API key or permissions", reason or "unknown")
+                _transient_failures += 1
             return None
         resp.raise_for_status()
         return resp.json()
@@ -248,6 +260,7 @@ def _yt_get(url: str, params: dict) -> dict | None:
         raise
     except Exception as exc:
         logger.warning("YouTube API call failed: %s", exc)
+        _transient_failures += 1
         return None
 
 
@@ -533,6 +546,9 @@ def enrich_youtube_sponsorships(
         name = brand.name
         queries = _build_queries(name)
 
+        global _transient_failures
+        _transient_failures = 0
+
         seen_video_ids: set[str] = set()
         try:
             for query, tier in queries:
@@ -551,6 +567,14 @@ def enrich_youtube_sponsorships(
             break  # exit brand loop; brand stays unchecked
 
         if not seen_video_ids:
+            if _transient_failures:
+                logger.warning(
+                    "YouTube: '%s' — no videos found, but %d search call(s) failed "
+                    "(timeout/network/API error) — leaving youtube_checked=False so "
+                    "this brand is retried instead of wrongly treated as a real zero-result search",
+                    name, _transient_failures,
+                )
+                continue
             brand.youtube_checked = True
             db.commit()
             logger.debug("YouTube: '%s' — no videos found", name)
@@ -637,6 +661,17 @@ def enrich_youtube_sponsorships(
         if quota_exhausted:
             db.commit()
             break  # exit brand loop; brand stays unchecked, no point trying the next one either
+
+        if _transient_failures:
+            db.commit()  # keep whatever rows_to_insert already stored above
+            logger.warning(
+                "YouTube: '%s' — %d API call(s) failed (timeout/network/API error) while "
+                "fetching video/channel/comment details — leaving youtube_checked=False so "
+                "this brand is retried instead of being treated as fully processed",
+                name, _transient_failures,
+            )
+            time.sleep(0.5)
+            continue
 
         brand.youtube_checked = True
         db.commit()
