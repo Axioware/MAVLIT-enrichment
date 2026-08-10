@@ -11,18 +11,23 @@ ENABLE_INSTA_LLM = True  (full LLM mode)
   • LLM filters out false positives and returns trimmed versions of each field.
   • Filtered values are stored back into their own columns.
   • llm_checked = True
-  • Post is skipped if LLM removes all signals.
+  • Post is skipped unless a real creator survives filtering — sponsors,
+    tagged_users, mentions, or coauthor_producers. paid_partnership is just
+    a boolean flag and does not count as a creator on its own.
 
 ENABLE_INSTA_LLM = False  (coauthor-only LLM mode)
   • paid_partnership, sponsors, taggedUsers, mentions → saved as-is from Apify.
   • coauthorProducers → ALWAYS filtered through the LLM (even when flag is off).
   • Filtered coauthors stored in coauthor_producers column.
   • llm_checked = False  (never True in this mode)
-  • Post is skipped only if the ONLY signal is coauthorProducers AND LLM rejects all.
+  • Post is skipped unless a real creator is present — sponsors, tagged_users,
+    mentions, or a confirmed coauthor. paid_partnership alone is not enough.
 
- Prompts (editable via /admin > Prompts) 
-  instagram_post_full_check   — used when ENABLE_INSTA_LLM=True
-  instagram_coauthor_check    — always used for coauthorProducers filtering
+ Prompts (editable via /admin > Prompts)
+  instagram_post_full_check   — used when ENABLE_INSTA_LLM=True; this already
+                                 covers coauthorProducers as one of its signals
+  instagram_coauthor_check    — only used when ENABLE_INSTA_LLM=False, since
+                                 instagram_post_full_check doesn't run then
 """
 
 import json
@@ -324,13 +329,17 @@ def enrich_instagram_posts(
                 dropped_cap += 1
                 continue
 
-            has_paid   = bool(item.get("paidPartnership") or item.get("sponsors"))
-            has_coauth = bool(_real_coauthors(item, handle))
-            has_social = bool(item.get("taggedUsers") or item.get("mentions"))
+            # sponsors/tagged_users/mentions/coauthor_producers are the only
+            # fields that actually name a creator — paid_partnership is just
+            # a boolean flag Apify sets on the post and never identifies who
+            # the partner is, so it must never by itself justify saving a row.
+            has_sponsors = bool(item.get("sponsors"))
+            has_coauth   = bool(_real_coauthors(item, handle))
+            has_social   = bool(item.get("taggedUsers") or item.get("mentions"))
 
             if ENABLE_INSTA_LLM:
                 #  Full LLM mode: all signals filtered
-                if not (has_paid or has_coauth or has_social):
+                if not (has_sponsors or has_coauth or has_social):
                     skipped_no_signal += 1
                     continue
 
@@ -339,14 +348,13 @@ def enrich_instagram_posts(
                     skipped_llm += 1
                     continue
 
-                any_remaining = (
-                    filtered.get("paid_partnership")
-                    or filtered.get("sponsors")
+                has_creator = (
+                    filtered.get("sponsors")
                     or filtered.get("tagged_users")
                     or filtered.get("mentions")
                     or filtered.get("coauthor_producers")
                 )
-                if not any_remaining:
+                if not has_creator:
                     skipped_llm += 1
                     continue
 
@@ -369,10 +377,10 @@ def enrich_instagram_posts(
                 time.sleep(0.3)
 
             else:
-                #  Coauthor-only LLM mode 
-                # Direct signals (paid/sponsors/tagged/mentions) saved as-is.
+                #  Coauthor-only LLM mode
+                # Direct signals (sponsors/tagged/mentions) saved as-is.
                 # coauthorProducers always goes through LLM.
-                has_direct = has_paid or has_social
+                has_direct = has_sponsors or has_social
 
                 filtered_coauthors: list | None = None
                 if has_coauth:
