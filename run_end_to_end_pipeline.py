@@ -28,12 +28,28 @@ is_users_scraped=False, and Apollo only processes brands with no contact rows.
 
 Run with:
     python3 run_end_to_end_pipeline.py
+    python3 run_end_to_end_pipeline.py --niche beauty --limit 20
+
+--niche scopes the run to brands_raw.niche matching that value exactly
+(case-insensitive) — brands_raw.niche is stored verbatim as typed at seed
+time, so this must match that stored string. When given, this switches to
+the same per-brand_id pattern run_reverse_engineering.py uses: resolves
+exactly that many matching brand IDs up front, then runs all 10 steps one
+brand_id at a time for that exact set — brand_id is the only scoping
+mechanism every enrich_*/run_* function in this file supports uniformly
+(several, like wikidata_socials/apollo_contacts/brand_signals, have no
+native niche= parameter of their own). Without --niche, behavior is
+unchanged from before: the whole brands_raw table, batch-drained per step.
+--limit defaults to 50 when --niche is given without it.
 """
 
+import argparse
 import logging
 
 from dotenv import load_dotenv
 load_dotenv()
+
+from sqlalchemy import func
 
 from pipeline.db import BrandProfile, BrandRaw, InitialBrandScore, SessionLocal
 from pipeline.enrichment.shopify_detect import enrich_shopify
@@ -52,6 +68,7 @@ from pipeline.enrichment.instagram_users import enrich_instagram_users
 from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 from pipeline.enrichment.apollo_contacts import run_apollo_contacts
 from pipeline.enrichment.brand_signals import run_brand_signals
+from run_reverse_engineering import run_per_brand, run_instagram_users_per_brand
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s")
@@ -74,6 +91,34 @@ def _step_end(label: str, summary: str) -> None:
 def load_brand_ids(db) -> list[int]:
     """Return every existing brands_raw.id in stable order."""
     return [row.id for row in db.query(BrandRaw.id).order_by(BrandRaw.id).all()]
+
+
+def load_niche_brand_ids(db, niche: str, limit: int) -> list[int]:
+    """brands_raw.id matching niche (case-insensitive exact match), ordered, capped at limit."""
+    return [
+        row.id
+        for row in (
+            db.query(BrandRaw.id)
+            .filter(func.lower(BrandRaw.niche) == niche.strip().lower())
+            .order_by(BrandRaw.id)
+            .limit(limit)
+            .all()
+        )
+    ]
+
+
+def run_all_steps_for_brand_ids(db, brand_ids: set[int]) -> None:
+    """Run the full 10-step stack for exactly this set of brand_ids, one brand_id at a time per step."""
+    run_per_brand("1/10 shopify_detect",        enrich_shopify,              db, brand_ids)
+    run_per_brand("2/10 wikidata_socials",      enrich_wikidata_socials,     db, brand_ids)
+    run_per_brand("3/10 tranco",                enrich_tranco,               db, brand_ids)
+    run_per_brand("4/10 youtube_sponsorship",   enrich_youtube_sponsorships, db, brand_ids)
+    run_per_brand("5/10 meta_ads",              enrich_meta_ads,             db, brand_ids)
+    run_per_brand("6/10 instagram_posts",       enrich_instagram_posts,      db, brand_ids)
+    run_instagram_users_per_brand("7/10 instagram_users", db, brand_ids, batch_limit=5)
+    run_per_brand("8/10 initial_brand_scoring", run_brand_scoring,           db, brand_ids)
+    run_per_brand("9/10 apollo_contacts",       run_apollo_contacts,         db, brand_ids)
+    run_per_brand("10/10 brand_signals",        run_brand_signals,           db, brand_ids)
 
 
 def drain_pending_step(label: str, fn, db, batch_limit: int, **kwargs) -> None:
@@ -203,26 +248,38 @@ def drain_brand_signals(label: str, db, batch_limit: int = 500) -> None:
     _step_end(label, f"{total_processed} brand(s) processed")
 
 
-def main() -> None:
+def main(niche: str | None = None, limit: int | None = None) -> None:
     db = SessionLocal()
     try:
-        brand_ids = load_brand_ids(db)
-        if not brand_ids:
-            logger.info("No rows found in brands_raw — nothing to run.")
-            return
+        if niche:
+            scoped_limit = limit or 50
+            brand_ids = set(load_niche_brand_ids(db, niche, scoped_limit))
+            if not brand_ids:
+                logger.info("No brands_raw rows found for niche '%s' — nothing to run.", niche)
+                return
+            logger.info(
+                "Scoped run: niche='%s' limit=%d — %d brand(s): %s",
+                niche, scoped_limit, len(brand_ids), sorted(brand_ids),
+            )
+            run_all_steps_for_brand_ids(db, brand_ids)
+        else:
+            brand_ids = load_brand_ids(db)
+            if not brand_ids:
+                logger.info("No rows found in brands_raw — nothing to run.")
+                return
 
-        logger.info("Loaded %d brands_raw row(s): %s", len(brand_ids), brand_ids)
+            logger.info("Loaded %d brands_raw row(s): %s", len(brand_ids), brand_ids)
 
-        drain_pending_step("1/10 shopify_detect",        enrich_shopify,              db, batch_limit=300)
-        drain_pending_step("2/10 wikidata_socials",      enrich_wikidata_socials,     db, batch_limit=500)
-        drain_pending_step("3/10 tranco",                enrich_tranco,               db, batch_limit=500)
-        drain_youtube_sponsorships("4/10 youtube_sponsorship", db, batch_limit=50)
-        drain_pending_step("5/10 meta_ads",              enrich_meta_ads,             db, batch_limit=200)
-        drain_pending_step("6/10 instagram_posts",       enrich_instagram_posts,      db, batch_limit=50)
-        drain_instagram_users("7/10 instagram_users", db, batch_limit=5)
-        drain_pending_step("8/10 initial_brand_scoring", run_brand_scoring,           db, batch_limit=500)
-        drain_pending_step("9/10 apollo_contacts",       run_apollo_contacts,         db, batch_limit=20)
-        drain_brand_signals("10/10 brand_signals", db, batch_limit=500)
+            drain_pending_step("1/10 shopify_detect",        enrich_shopify,              db, batch_limit=300)
+            drain_pending_step("2/10 wikidata_socials",      enrich_wikidata_socials,     db, batch_limit=500)
+            drain_pending_step("3/10 tranco",                enrich_tranco,               db, batch_limit=500)
+            drain_youtube_sponsorships("4/10 youtube_sponsorship", db, batch_limit=50)
+            drain_pending_step("5/10 meta_ads",              enrich_meta_ads,             db, batch_limit=200)
+            drain_pending_step("6/10 instagram_posts",       enrich_instagram_posts,      db, batch_limit=50)
+            drain_instagram_users("7/10 instagram_users", db, batch_limit=5)
+            drain_pending_step("8/10 initial_brand_scoring", run_brand_scoring,           db, batch_limit=500)
+            drain_pending_step("9/10 apollo_contacts",       run_apollo_contacts,         db, batch_limit=20)
+            drain_brand_signals("10/10 brand_signals", db, batch_limit=500)
     finally:
         db.close()
 
@@ -232,4 +289,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="End-to-end enrichment pipeline for brands_raw.")
+    parser.add_argument("--niche", type=str, default=None, help="Scope the run to brands_raw.niche matching this value exactly (case-insensitive).")
+    parser.add_argument("--limit", type=int, default=None, help="Max brands to process when --niche is given (default 50).")
+    args = parser.parse_args()
+    main(niche=args.niche, limit=args.limit)
