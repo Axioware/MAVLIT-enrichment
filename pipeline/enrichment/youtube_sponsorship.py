@@ -40,7 +40,7 @@ import httpx
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2, OPENAI_KEY, ENABLE_LLM
+from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2, YOUTUBE_API_KEY_3, YOUTUBE_API_KEY_4, YOUTUBE_API_KEY_5, YOUTUBE_API_KEY_6, OPENAI_KEY, ENABLE_LLM
 from pipeline.db import BrandRaw, Prompt, YoutubeSponsorship
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
@@ -186,7 +186,7 @@ class _QuotaExhausted(Exception):
 
 
 # Maps key index → env var name for clear log messages
-_KEY_NAMES = ["YOUTUBE_API_KEY", "YOUTUBE_API_KEY_1", "YOUTUBE_API_KEY_2"]
+_KEY_NAMES = ["YOUTUBE_API_KEY", "YOUTUBE_API_KEY_1", "YOUTUBE_API_KEY_2", "YOUTUBE_API_KEY_3", "YOUTUBE_API_KEY_4", "YOUTUBE_API_KEY_5", "YOUTUBE_API_KEY_6"]
 
 # Populated lazily so config is read after load_dotenv()
 _API_KEYS: list[str] = []
@@ -220,7 +220,7 @@ quota_fully_exhausted: bool = False
 def _active_key() -> str:
     global _API_KEYS
     if not _API_KEYS:
-        _API_KEYS = [k for k in [YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2] if k]
+        _API_KEYS = [k for k in [YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2, YOUTUBE_API_KEY_3, YOUTUBE_API_KEY_4, YOUTUBE_API_KEY_5, YOUTUBE_API_KEY_6] if k]
     if not _API_KEYS:
         raise _QuotaExhausted("No YouTube API keys configured — set YOUTUBE_API_KEY in .env")
     return _API_KEYS[_key_index]
@@ -259,6 +259,30 @@ def _403_reason(resp: httpx.Response) -> str:
         return ""
 
 
+def _key_invalid_reason(resp: httpx.Response) -> str:
+    """
+    Returns the ErrorInfo.reason (e.g. API_KEY_INVALID) for a 400 caused by
+    a bad/expired/revoked key, or '' if this 400 is something else (a real
+    malformed-request bug in our own params, which should NOT be treated
+    the same way — that needs fixing in code, not key rotation).
+    """
+    try:
+        for d in resp.json().get("error", {}).get("details", []):
+            if d.get("@type", "").endswith("ErrorInfo"):
+                return d.get("reason", "")
+    except Exception:
+        pass
+    return ""
+
+
+def _looks_key_dead(resp: httpx.Response) -> bool:
+    """True for a 400 caused by an invalid/expired API key — distinct from
+    quota exhaustion (429/403) but needs the same response: retrying it is
+    pointless, and unlike quota it will never start working again on its
+    own (the key has to be renewed/replaced in .env)."""
+    return resp.status_code == 400 and _key_invalid_reason(resp) == "API_KEY_INVALID"
+
+
 def _looks_quota_exhausted(resp: httpx.Response) -> bool:
     """True if this response means 'stop using this key' — either the
     documented 429, or a 403 whose reason matches _QUOTA_403_REASONS."""
@@ -268,25 +292,58 @@ def _looks_quota_exhausted(resp: httpx.Response) -> bool:
 
 
 def _yt_get(url: str, params: dict) -> dict | None:
+    """
+    GET against a YouTube endpoint, rotating through every configured
+    YOUTUBE_API_KEY* in turn on quota exhaustion or an invalid/expired key
+    (loops via _rotate_key(), which itself raises _QuotaExhausted once every
+    key has been tried — not just a single fallback, so this scales to
+    however many keys are configured, not just two).
+    """
     global _transient_failures
-    params["key"] = _active_key()
-    try:
-        resp = httpx.get(url, params=params, timeout=15)
-        if _looks_quota_exhausted(resp):
-            logger.warning(
-                "YouTube key exhausted/rejected (HTTP %s, reason=%s) — rotating to next key.",
-                resp.status_code, _403_reason(resp) or "n/a",
-            )
-            _rotate_key()                       # logs which key ran out and which is next
-            params["key"] = _active_key()
+    while True:
+        params["key"] = _active_key()
+        try:
             resp = httpx.get(url, params=params, timeout=15)
-            if _looks_quota_exhausted(resp):
-                next_name = _KEY_NAMES[_key_index] if _key_index < len(_KEY_NAMES) else f"key_{_key_index}"
+        except _QuotaExhausted:
+            raise
+        except Exception as exc:
+            # A brand makes 50-90+ calls (14 searches + video/channel/comment
+            # lookups), so a single flaky network blip (SSL handshake timeout,
+            # connection reset) is common, not rare. Retry it inline a couple
+            # times before counting it as a real transient failure — otherwise
+            # one-off blips were routinely blocking youtube_checked=True on
+            # brands that had already been fully, correctly processed.
+            resp = None
+            for attempt in range(2):
+                time.sleep(1 + attempt)
+                try:
+                    resp = httpx.get(url, params=params, timeout=15)
+                    break
+                except Exception:
+                    resp = None
+                    continue
+            if resp is None:
+                logger.warning("YouTube API call failed: %s", exc)
+                _transient_failures += 1
+                return None
+            # resp now holds a real response from the retry — fall through
+            # to the normal response handling below instead of duplicating it.
+
+        if _looks_quota_exhausted(resp) or _looks_key_dead(resp):
+            if _looks_key_dead(resp):
                 logger.warning(
-                    "YouTube quota exhausted — %s daily limit also reached (HTTP %s, reason=%s). All keys used up.",
-                    next_name, resp.status_code, _403_reason(resp) or "n/a",
+                    "YouTube key invalid/expired (HTTP %s: %s) — rotating to next key. "
+                    "This key needs to be renewed/replaced in .env, it won't recover on its own.",
+                    resp.status_code, resp.json().get("error", {}).get("message", ""),
                 )
-                raise _QuotaExhausted("All YouTube API keys exhausted for today")
+            else:
+                logger.warning(
+                    "YouTube key exhausted/rejected (HTTP %s, reason=%s) — rotating to next key.",
+                    resp.status_code, _403_reason(resp) or "n/a",
+                )
+            _rotate_key()  # raises _QuotaExhausted once every configured key has been tried
+            continue        # retry this same call with the newly-active key
+
         if resp.status_code == 403:
             reason = _403_reason(resp)
             if reason == "commentsDisabled":
@@ -298,30 +355,14 @@ def _yt_get(url: str, params: dict) -> dict | None:
                 logger.warning("YouTube API forbidden (403) reason=%s — check API key or permissions", reason or "unknown")
                 _transient_failures += 1
             return None
-        resp.raise_for_status()
-        return resp.json()
-    except _QuotaExhausted:
-        raise
-    except Exception as exc:
-        # A brand makes 50-90+ calls (14 searches + video/channel/comment
-        # lookups), so a single flaky network blip (SSL handshake timeout,
-        # connection reset) is common, not rare. Retry it inline a couple
-        # times before counting it as a real transient failure — otherwise
-        # one-off blips were routinely blocking youtube_checked=True on
-        # brands that had already been fully, correctly processed.
-        for attempt in range(2):
-            time.sleep(1 + attempt)
-            try:
-                resp = httpx.get(url, params=params, timeout=15)
-                if _looks_quota_exhausted(resp) or resp.status_code == 403:
-                    break  # let the normal quota/403 handling above apply on a fresh call
-                resp.raise_for_status()
-                return resp.json()
-            except Exception:
-                continue
-        logger.warning("YouTube API call failed: %s", exc)
-        _transient_failures += 1
-        return None
+
+        try:
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            logger.warning("YouTube API call failed: %s", exc)
+            _transient_failures += 1
+            return None
 
 
 def _search_videos(query: str) -> list[str]:

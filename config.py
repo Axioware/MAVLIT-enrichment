@@ -21,6 +21,10 @@ META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN", "")
 YOUTUBE_API_KEY   = os.getenv("YOUTUBE_API_KEY", "")
 YOUTUBE_API_KEY_1 = os.getenv("YOUTUBE_API_KEY_1", "")
 YOUTUBE_API_KEY_2 = os.getenv("YOUTUBE_API_KEY_2", "")
+YOUTUBE_API_KEY_3 = os.getenv("YOUTUBE_API_KEY_3", "")
+YOUTUBE_API_KEY_4 = os.getenv("YOUTUBE_API_KEY_4", "")
+YOUTUBE_API_KEY_5 = os.getenv("YOUTUBE_API_KEY_5", "")
+YOUTUBE_API_KEY_6 = os.getenv("YOUTUBE_API_KEY_6", "")
 APIFY_TOKEN       = os.getenv("APIFY_TOKEN", "")
 
 # LLM verification (Claude) — set ENABLE_LLM=true to activate
