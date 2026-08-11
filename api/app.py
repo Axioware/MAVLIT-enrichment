@@ -12,7 +12,7 @@ from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
 from sqlalchemy import text
 from config import ADMIN_PASSKEY, FRONTEND_ORIGINS, IS_PRODUCTION, JWT_SECRET, POSTHOG_PROJECT_TOKEN, POSTHOG_HOST
-from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, ContractReview, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Pitch, Prompt, RateEstimate, SavedBrand, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, ContractReview, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Pitch, Prompt, RateEstimate, SavedBrand, TestBrandsWithInstagramPosts, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
 from api.schemas import CreatorProfileResponse, profile_to_response as _profile_to_response
 from api.advisory import router as advisory_router
@@ -455,6 +455,18 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
     page_size = 15
 
 
+class TestBrandsWithInstagramPostsAdmin(ModelView, model=TestBrandsWithInstagramPosts):
+    name         = "Brand w/ IG Posts (test)"
+    name_plural  = "Brands w/ IG Posts (test)"
+    category     = "Test"
+    icon         = "fa-solid fa-flask"
+    column_list  = "__all__"
+    column_searchable_list = [TestBrandsWithInstagramPosts.brand_name]
+    column_sortable_list   = [c.name for c in TestBrandsWithInstagramPosts.__table__.columns]
+    column_default_sort    = [(TestBrandsWithInstagramPosts.instagram_post_count, True)]
+    page_size = 15
+
+
 class InstagramUserAdmin(ModelView, model=InstagramUser):
     name         = "Instagram User"
     name_plural  = "Instagram Users"
@@ -696,6 +708,7 @@ admin.add_view(BrandNicheAdmin)
 admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
 admin.add_view(InstagramPostAdmin)
+admin.add_view(TestBrandsWithInstagramPostsAdmin)
 admin.add_view(InstagramUserAdmin)
 admin.add_view(ContentCreatorREAdmin)
 admin.add_view(BrandInstagramUserAdmin)

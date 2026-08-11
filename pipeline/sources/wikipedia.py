@@ -109,7 +109,28 @@ def _extract_domain(url: str) -> str:
         return ""
 
 
-#  Category / noise filters 
+def _website_score(url: str) -> int:
+    """
+    Wikidata sometimes lists multiple P856 (official website) values for one
+    entity with no reliable rank/language distinction — e.g. Maybelline
+    (Q1351054) has both maybelline.com and the Brazil-specific
+    maybelline.com.br at the same "normal" rank. Prefer a generic top-level
+    domain (.com/.org/.net/.io) over one with a country-code suffix
+    (.com.br, .co.uk, etc.), which is almost always the brand's global site
+    rather than a regional mirror.
+    """
+    domain = _extract_domain(url)
+    if not domain:
+        return -1
+    parts = domain.split(".")
+    if len(parts) == 2 and parts[-1] in ("com", "org", "net", "io"):
+        return 2
+    if len(parts) == 2:
+        return 1
+    return 0
+
+
+#  Category / noise filters
 
 def _is_person(categories: list[str]) -> bool:
     for cat in categories:
@@ -237,14 +258,16 @@ def _fetch_wikidata_for_titles(titles: list[str]) -> dict[str, dict]:
                 entity_id = entity.get("id", "")
 
                 p856_claims = entity.get("claims", {}).get("P856", [])
-                url = ""
-                if p856_claims:
-                    url = (
-                        p856_claims[0]
-                        .get("mainsnak", {})
-                        .get("datavalue", {})
-                        .get("value", "")
-                    )
+                candidates = [
+                    claim.get("mainsnak", {}).get("datavalue", {}).get("value", "")
+                    for claim in p856_claims
+                ]
+                candidates = [c for c in candidates if c]
+                # Multiple P856 values can exist at the same rank with no
+                # reliable way to tell them apart except domain shape (see
+                # _website_score) — claims[0] isn't necessarily the global
+                # site, e.g. it picked Maybelline's .com.br mirror before.
+                url = max(candidates, key=_website_score) if candidates else ""
 
                 description = (
                     entity.get("descriptions", {})

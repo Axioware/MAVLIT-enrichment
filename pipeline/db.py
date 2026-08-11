@@ -599,6 +599,26 @@ class ContractReview(Base):
     creator = relationship("CreatorProfile", lazy="selectin", foreign_keys=[creator_profile_id])
 
 
+class TestBrandsWithInstagramPosts(Base):
+    """
+    Scratch/test table — see test_active_sponsorships.py. Every eligible
+    brand with at least one instagram_posts row, plus post/active-creator
+    counts. Broader net than TestActiveSponsorship. Not part of the core
+    enrichment pipeline.
+    """
+    __tablename__ = "test_brands_with_instagram_posts"
+
+    id                      = Column(Integer, primary_key=True)
+    brand_raw_id            = Column(Integer, nullable=False, unique=True)
+    brand_name              = Column(Text)
+    brand_niche             = Column(Text)
+    brand_website           = Column(Text)
+    brand_instagram_handle  = Column(Text)
+    instagram_post_count    = Column(Integer)
+    active_creator_count    = Column(Integer)
+    generated_at            = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class Prompt(Base):
     __tablename__ = "prompts"
 

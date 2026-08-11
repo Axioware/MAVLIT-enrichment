@@ -35,7 +35,7 @@ FULL_DEFAULT_PROMPT = """You are an Instagram creator-partnership detection syst
 
 Your task is NOT to identify whether an account is a creator.
 
-Your task is ONLY to identify creators who are very likely participating in a brand collaboration, sponsorship, ambassador campaign, gifted promotion, paid partnership, or other promotional relationship with the brand in THIS specific Instagram post.
+Your task is ONLY to identify creators who are very likely participating in a brand collaboration, sponsorship, paid partnership, in THIS specific Instagram post.
 
 Brand:
 {brand_name}
