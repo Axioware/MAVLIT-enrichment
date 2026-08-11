@@ -118,6 +118,7 @@ def pending_brand_signal_ids(db, limit: int) -> list[int]:
             .join(InitialBrandScore, InitialBrandScore.brand_raw_id == BrandRaw.id)
             .outerjoin(BrandProfile, BrandProfile.brand_raw_id == BrandRaw.id)
             .filter(InitialBrandScore.total_score >= 50)
+            .filter(BrandRaw.has_official_website == True)
             .filter(BrandProfile.brand_raw_id.is_(None))
             .order_by(BrandRaw.id)
             .limit(limit)
@@ -134,7 +135,7 @@ def pending_youtube_ids(db, limit: int) -> list[int]:
             db.query(BrandRaw.id)
             .filter(
                 BrandRaw.name.isnot(None),
-                BrandRaw.website.isnot(None),
+                BrandRaw.has_official_website == True,
                 BrandRaw.youtube_checked == False,
             )
             .order_by(BrandRaw.id)

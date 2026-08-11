@@ -97,15 +97,18 @@ SELECT ?entity ?ig ?yt ?fb ?li WHERE {{
 
 def enrich_wikidata_socials(db: Session, limit: int = 500, brand_id: int | None = None) -> int:
     """
-    Find brands_raw rows with wikidata_id and wikidata_enriched=False,
-    fetch their social handles, write back, mark wikidata_enriched=True.
-    Returns the number of rows updated.
+    Find brands_raw rows with wikidata_id, has_official_website=True, and
+    wikidata_enriched=False, fetch their social handles, write back, mark
+    wikidata_enriched=True. Returns the number of rows updated.
 
     Pass brand_id to target one specific brand directly — this bypasses the
-    wikidata_enriched filter (so you can re-run/test a brand that was already
-    processed), but wikidata_id must still be set.
+    has_official_website/wikidata_enriched filters (so you can re-run/test a
+    brand that was already processed), but wikidata_id must still be set.
     """
-    query = db.query(BrandRaw).filter(BrandRaw.wikidata_id.isnot(None))
+    query = db.query(BrandRaw).filter(
+        BrandRaw.wikidata_id.isnot(None),
+        BrandRaw.has_official_website.is_(True),
+    )
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:

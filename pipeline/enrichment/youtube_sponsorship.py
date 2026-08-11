@@ -40,7 +40,7 @@ import httpx
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2, YOUTUBE_API_KEY_3, YOUTUBE_API_KEY_4, YOUTUBE_API_KEY_5, YOUTUBE_API_KEY_6, OPENAI_KEY, ENABLE_LLM
+from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2, YOUTUBE_API_KEY_3, YOUTUBE_API_KEY_4, YOUTUBE_API_KEY_5, YOUTUBE_API_KEY_6, YOUTUBE_API_KEY_7, YOUTUBE_API_KEY_8, YOUTUBE_API_KEY_9, YOUTUBE_API_KEY_10, YOUTUBE_API_KEY_11, YOUTUBE_API_KEY_12, OPENAI_KEY, ENABLE_LLM
 from pipeline.db import BrandRaw, Prompt, YoutubeSponsorship
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
@@ -186,7 +186,7 @@ class _QuotaExhausted(Exception):
 
 
 # Maps key index → env var name for clear log messages
-_KEY_NAMES = ["YOUTUBE_API_KEY", "YOUTUBE_API_KEY_1", "YOUTUBE_API_KEY_2", "YOUTUBE_API_KEY_3", "YOUTUBE_API_KEY_4", "YOUTUBE_API_KEY_5", "YOUTUBE_API_KEY_6"]
+_KEY_NAMES = ["YOUTUBE_API_KEY", "YOUTUBE_API_KEY_1", "YOUTUBE_API_KEY_2", "YOUTUBE_API_KEY_3", "YOUTUBE_API_KEY_4", "YOUTUBE_API_KEY_5", "YOUTUBE_API_KEY_6", "YOUTUBE_API_KEY_7", "YOUTUBE_API_KEY_8", "YOUTUBE_API_KEY_9", "YOUTUBE_API_KEY_10", "YOUTUBE_API_KEY_11", "YOUTUBE_API_KEY_12"]
 
 # Populated lazily so config is read after load_dotenv()
 _API_KEYS: list[str] = []
@@ -220,7 +220,7 @@ quota_fully_exhausted: bool = False
 def _active_key() -> str:
     global _API_KEYS
     if not _API_KEYS:
-        _API_KEYS = [k for k in [YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2, YOUTUBE_API_KEY_3, YOUTUBE_API_KEY_4, YOUTUBE_API_KEY_5, YOUTUBE_API_KEY_6] if k]
+        _API_KEYS = [k for k in [YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2, YOUTUBE_API_KEY_3, YOUTUBE_API_KEY_4, YOUTUBE_API_KEY_5, YOUTUBE_API_KEY_6, YOUTUBE_API_KEY_7, YOUTUBE_API_KEY_8, YOUTUBE_API_KEY_9, YOUTUBE_API_KEY_10, YOUTUBE_API_KEY_11, YOUTUBE_API_KEY_12] if k]
     if not _API_KEYS:
         raise _QuotaExhausted("No YouTube API keys configured — set YOUTUBE_API_KEY in .env")
     return _API_KEYS[_key_index]
@@ -629,7 +629,10 @@ def enrich_youtube_sponsorships(
     # name is required — this module's whole methodology embeds the brand
     # name in every search query (_build_queries), which a bare brand (from
     # content_creator_re / brand_wikidata_lookup, name IS NULL) has none of.
-    query = db.query(BrandRaw).filter(BrandRaw.name.isnot(None))
+    query = db.query(BrandRaw).filter(
+        BrandRaw.name.isnot(None),
+        BrandRaw.has_official_website.is_(True),
+    )
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:

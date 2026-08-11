@@ -266,7 +266,7 @@ def enrich_meta_ads(db: Session, limit: int = 200, niche: str | None = None, bra
     query = db.query(BrandRaw).filter(
         BrandRaw.facebook_page.isnot(None) |
         BrandRaw.facebook_page_id.isnot(None)
-    )
+    ).filter(BrandRaw.has_official_website.is_(True))
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:

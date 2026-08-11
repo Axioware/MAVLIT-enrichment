@@ -25,6 +25,12 @@ YOUTUBE_API_KEY_3 = os.getenv("YOUTUBE_API_KEY_3", "")
 YOUTUBE_API_KEY_4 = os.getenv("YOUTUBE_API_KEY_4", "")
 YOUTUBE_API_KEY_5 = os.getenv("YOUTUBE_API_KEY_5", "")
 YOUTUBE_API_KEY_6 = os.getenv("YOUTUBE_API_KEY_6", "")
+YOUTUBE_API_KEY_7 = os.getenv("YOUTUBE_API_KEY_7", "")
+YOUTUBE_API_KEY_8 = os.getenv("YOUTUBE_API_KEY_8", "")
+YOUTUBE_API_KEY_9 = os.getenv("YOUTUBE_API_KEY_9", "")
+YOUTUBE_API_KEY_10 = os.getenv("YOUTUBE_API_KEY_10", "")
+YOUTUBE_API_KEY_11 = os.getenv("YOUTUBE_API_KEY_11", "")
+YOUTUBE_API_KEY_12 = os.getenv("YOUTUBE_API_KEY_12", "")
 APIFY_TOKEN       = os.getenv("APIFY_TOKEN", "")
 
 # LLM verification (Claude) — set ENABLE_LLM=true to activate

@@ -289,9 +289,10 @@ def _update_brand_niche_description_and_tags(db: Session, brand: BrandRaw, descr
 
 def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None, brand_id: int | None = None) -> int:
     """
-    Fetch homepage for each brand with a website URL and shopify_checked=False.
-    Sets is_shopify / is_woocommerce and fills any NULL social URL columns from
-    links found on the page. Returns number of rows updated.
+    Fetch homepage for each brand with has_official_website=True and
+    shopify_checked=False. Sets is_shopify / is_woocommerce and fills any
+    NULL social URL columns from links found on the page. Returns number of
+    rows updated.
 
     Pass niche to scope the run to brands.niche matching that value exactly
     (case-insensitive) — brands_raw.niche is stored verbatim as typed at
@@ -299,10 +300,13 @@ def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None, bran
     Ignored if brand_id is also given.
 
     Pass brand_id to target one specific brand directly — this bypasses the
-    shopify_checked filter (so you can re-run/test a brand that was already
-    processed), but website must still be set.
+    has_official_website/shopify_checked filters (so you can re-run/test a
+    brand that was already processed), but website must still be set.
     """
-    query = db.query(BrandRaw).filter(BrandRaw.website.isnot(None))
+    query = db.query(BrandRaw).filter(
+        BrandRaw.website.isnot(None),
+        BrandRaw.has_official_website.is_(True),
+    )
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:
