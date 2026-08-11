@@ -313,10 +313,21 @@ def enrich_instagram_posts(
         len(brands), ENABLE_INSTA_LLM, max_creators or "disabled",
     )
     total_posts = 0
+    checked_count = 0
 
     for brand in brands:
         handle = normalize_handle(brand.instagram_handle)
         items  = _scrape_handle(handle, posts_limit)
+
+        if items is None:
+            logger.warning(
+                "Instagram: '%s' (@%s) — Apify scrape failed (actor limit reached, network "
+                "error, etc.) — leaving instagram_checked=False so this brand is retried "
+                "instead of being treated as fully processed",
+                brand.name, handle,
+            )
+            time.sleep(1.0)
+            continue
 
         inserted          = 0
         skipped_no_signal = 0
@@ -412,14 +423,27 @@ def enrich_instagram_posts(
 
         brand.instagram_checked = True
         db.commit()
+        checked_count += 1
         time.sleep(1.0)
 
-    logger.info("Instagram: %d brands processed, %d posts stored", len(brands), total_posts)
-    return len(brands)
+    logger.info("Instagram: %d/%d brands checked, %d posts stored", checked_count, len(brands), total_posts)
+    # checked_count, not len(brands) — a batch where every brand hits an
+    # Apify failure (e.g. actor limit reached) must return 0 so
+    # drain_pending_step's `while True: ... if not processed: break` stops
+    # this step instead of looping forever re-selecting the same still-
+    # unchecked brands every batch.
+    return checked_count
 
 
-def _scrape_handle(handle: str, posts_limit: int) -> list[dict]:
-    """Run Apify actor for one Instagram handle and return raw items."""
+def _scrape_handle(handle: str, posts_limit: int) -> list[dict] | None:
+    """
+    Run Apify actor for one Instagram handle and return raw items.
+    require_success=True so a failed run (actor limit reached, network
+    error, actor crash, etc.) returns None — distinguishable from a
+    genuinely empty [] result, which enrich_instagram_posts() needs to
+    avoid marking a brand instagram_checked=True off the back of a call
+    that never actually ran.
+    """
     logger.info("Instagram: scraping @%s (last %d posts)", handle, posts_limit)
     run_input = {
         "addParentData": True,
@@ -427,4 +451,4 @@ def _scrape_handle(handle: str, posts_limit: int) -> list[dict]:
         "resultsLimit":  posts_limit,
         "resultsType":   _RESULTS_TYPE,
     }
-    return run_apify_actor(_ACTOR_ID, run_input, label=f"Instagram @{handle}")
+    return run_apify_actor(_ACTOR_ID, run_input, label=f"Instagram @{handle}", require_success=True)

@@ -228,11 +228,17 @@ def _collect_commenter_records(posts: list[dict], n_per_post: int = 5) -> list[d
 
 #  Apify helpers 
 
-def _scrape_posts(username: str, n: int = 5) -> list[dict]:
+def _scrape_posts(username: str, n: int = 5) -> list[dict] | None:
     """
     Scrape n posts for a profile. addParentData=True embeds profile fields
     (fullName, biography, externalUrl, followersCount, businessAddress, etc.)
     into every post item so one call gets both posts AND profile data.
+
+    require_success=True so a failed run (actor limit reached, network
+    error, actor crash, etc.) returns None — distinguishable from a
+    genuinely empty [] result (e.g. a private/deleted account), which
+    callers need in order to avoid marking a row fully processed off the
+    back of a call that never actually ran.
     """
     items = run_apify_actor(
         _ACTOR_ID,
@@ -243,8 +249,9 @@ def _scrape_posts(username: str, n: int = 5) -> list[dict]:
             "resultsLimit":  n,
         },
         label=f"IGUsers @{username} (n={n})",
+        require_success=True,
     )
-    return (items or [])[:n]
+    return None if items is None else items[:n]
 
 
 def _profile_from_posts(posts: list[dict]) -> dict:
@@ -538,6 +545,12 @@ def enrich_instagram_users(
             processed += 1
             continue
 
+        # Set once any _scrape_posts() call for this post fails (actor limit
+        # reached, network error, etc.) — gates is_users_scraped below so a
+        # failed Apify run isn't indistinguishable from "nothing to scrape"
+        # and doesn't get silently treated as fully processed.
+        scrape_failed = False
+
         # Filter creators already in DB
         existing = {
             r.username for r in
@@ -558,8 +571,13 @@ def enrich_instagram_users(
         for username, user_type in new_creators.items():
             logger.info("Instagram users: scraping creator @%s (%s)", username, user_type)
 
-            #  a. Scrape top 5 posts (addParentData gets profile info too) 
+            #  a. Scrape top 5 posts (addParentData gets profile info too)
             raw_posts = _scrape_posts(username, n=5)
+            if raw_posts is None:
+                logger.warning("Instagram users: Apify scrape failed for @%s — will retry", username)
+                scrape_failed = True
+                time.sleep(0.5)
+                continue
             if not raw_posts:
                 logger.warning("Instagram users: no posts returned for @%s", username)
                 time.sleep(0.5)
@@ -621,6 +639,11 @@ def enrich_instagram_users(
                 logger.info("Instagram users:   commenter @%s", commenter)
 
                 c_posts = _scrape_posts(commenter, n=1)
+                if c_posts is None:
+                    logger.warning("Instagram users: Apify scrape failed for commenter @%s — will retry", commenter)
+                    scrape_failed = True
+                    time.sleep(0.5)
+                    continue
                 if not c_posts:
                     time.sleep(0.5)
                     continue
@@ -650,6 +673,16 @@ def enrich_instagram_users(
                 time.sleep(1.0)
 
             time.sleep(1.0)
+
+        if scrape_failed:
+            db.commit()  # keep whatever rows were already stored above
+            logger.warning(
+                "Instagram users: post %s — at least one Apify scrape failed — "
+                "leaving is_users_scraped=False so this post is retried instead "
+                "of being treated as fully processed",
+                post.post_id,
+            )
+            continue
 
         post.is_users_scraped = True
         db.commit()

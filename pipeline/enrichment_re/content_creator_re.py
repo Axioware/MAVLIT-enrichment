@@ -166,12 +166,25 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int
 
         #  Scrape top 5 posts (addParentData gets profile info too)
         raw_posts = _scrape_posts(username, n=40)
+        if raw_posts is None:
+            logger.warning(
+                "Content creator RE: Apify scrape failed for @%s (actor limit reached, "
+                "network error, etc.) — leaving is_scraped=False so this row is retried",
+                username,
+            )
+            time.sleep(0.5)
+            continue
         if not raw_posts:
             logger.warning("Content creator RE: no posts returned for @%s", username)
             row.is_scraped = True
             db.commit()
             processed += 1
             continue
+
+        # Set once any commenter _scrape_posts() call below fails (actor
+        # limit reached, network error, etc.) — gates is_scraped at the end
+        # so a failed Apify run isn't silently treated as fully processed.
+        scrape_failed = False
 
         #  Extract profile data + classify demographics via LLM
         profile = _profile_from_posts(raw_posts)
@@ -251,6 +264,14 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int
                 logger.info("Content creator RE:   commenter @%s", commenter)
 
                 c_posts = _scrape_posts(commenter, n=1)
+                if c_posts is None:
+                    logger.warning(
+                        "Content creator RE: Apify scrape failed for commenter @%s — will retry",
+                        commenter,
+                    )
+                    scrape_failed = True
+                    time.sleep(0.5)
+                    continue
                 if not c_posts:
                     time.sleep(0.5)
                     continue
@@ -290,6 +311,16 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int
                     _link_commenter_to_creator(db, brand_id, username, record)
 
         all_confirmed_brand_ids |= confirmed_brand_ids
+
+        if scrape_failed:
+            db.commit()  # keep whatever rows/links were already stored above
+            logger.warning(
+                "Content creator RE: @%s — at least one commenter Apify scrape failed — "
+                "leaving is_scraped=False so this row is retried instead of being "
+                "treated as fully processed",
+                username,
+            )
+            continue
 
         row.is_scraped = True
         db.commit()
