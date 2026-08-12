@@ -51,7 +51,7 @@ load_dotenv()
 
 from sqlalchemy import func
 
-from pipeline.db import BrandProfile, BrandRaw, InitialBrandScore, SessionLocal
+from pipeline.db import BrandContact, BrandProfile, BrandRaw, InitialBrandScore, SessionLocal
 from pipeline.enrichment.shopify_detect import enrich_shopify
 from pipeline.enrichment.wikidata_socials import enrich_wikidata_socials
 from pipeline.enrichment.tranco import enrich_tranco
@@ -107,18 +107,91 @@ def load_niche_brand_ids(db, niche: str, limit: int) -> list[int]:
     ]
 
 
+def _pending_by_flag(db, brand_ids: set[int], flag_column) -> set[int]:
+    """Subset of brand_ids where the given brands_raw boolean column is not True."""
+    done = {
+        row.id for row in
+        db.query(BrandRaw.id).filter(BrandRaw.id.in_(brand_ids), flag_column == True).all()
+    }
+    return brand_ids - done
+
+
+def _pending_for_scoring(db, brand_ids: set[int]) -> set[int]:
+    """
+    Mirrors run_brand_scoring's own batch-mode (brand_id=None) filter exactly
+    — score a brand only once EVERY prior step is done, not just because
+    initial_brand_scored=False. Needed because brand_id= (what run_per_brand
+    always passes) bypasses run_brand_scoring's own prerequisite check by
+    design (it's meant to let you force-rescore one brand for testing) — so
+    without this, the scoped --niche path could score a brand before
+    meta_ads/youtube/instagram had actually finished for it.
+    """
+    return {
+        row.id for row in
+        db.query(BrandRaw.id).filter(
+            BrandRaw.id.in_(brand_ids),
+            BrandRaw.has_official_website == True,
+            BrandRaw.wikidata_enriched  == True,
+            BrandRaw.shopify_checked    == True,
+            BrandRaw.tranco_checked     == True,
+            BrandRaw.meta_ads_fetched   == True,
+            BrandRaw.youtube_checked    == True,
+            BrandRaw.instagram_checked  == True,
+            BrandRaw.initial_brand_scored == False,
+        ).all()
+    }
+
+
+def _pending_scored_and_absent(db, brand_ids: set[int], absent_model, absent_fk) -> set[int]:
+    """
+    Shared shape for apollo_contacts/brand_signals: both only apply to brands
+    already scored >=50 by initial_brand_scoring, and both treat "already has
+    a row in [brand_contacts / brand_match_profile]" as done.
+    """
+    scored = {
+        row.id for row in
+        db.query(BrandRaw.id)
+        .join(InitialBrandScore, InitialBrandScore.brand_raw_id == BrandRaw.id)
+        .filter(BrandRaw.id.in_(brand_ids), InitialBrandScore.total_score >= 50)
+        .all()
+    }
+    already_done = {
+        row[0] for row in
+        db.query(absent_fk).filter(absent_fk.in_(brand_ids)).all()
+    }
+    return scored - already_done
+
+
+def run_per_brand_if_pending(label: str, fn, db, brand_ids: set[int], pending_ids: set[int], **kwargs) -> None:
+    """Like run_per_brand, but only for brand_ids in pending_ids — skips the rest (already done) with a log line."""
+    skipped = brand_ids - pending_ids
+    if skipped:
+        logger.info("[%s] skipping %d brand(s) already done: %s", label, len(skipped), sorted(skipped))
+    if not pending_ids:
+        _step_start(label)
+        _step_end(label, "0 brand(s) processed (all already done)")
+        return
+    run_per_brand(label, fn, db, pending_ids, **kwargs)
+
+
 def run_all_steps_for_brand_ids(db, brand_ids: set[int]) -> None:
-    """Run the full 10-step stack for exactly this set of brand_ids, one brand_id at a time per step."""
-    run_per_brand("1/10 shopify_detect",        enrich_shopify,              db, brand_ids)
-    run_per_brand("2/10 wikidata_socials",      enrich_wikidata_socials,     db, brand_ids)
-    run_per_brand("3/10 tranco",                enrich_tranco,               db, brand_ids)
-    run_per_brand("4/10 youtube_sponsorship",   enrich_youtube_sponsorships, db, brand_ids)
-    run_per_brand("5/10 meta_ads",              enrich_meta_ads,             db, brand_ids)
-    run_per_brand("6/10 instagram_posts",       enrich_instagram_posts,      db, brand_ids)
+    """
+    Run the full 10-step stack for exactly this set of brand_ids, one
+    brand_id at a time per step — skipping any step already done for a
+    given brand (mirroring each function's own batch-mode "pending" filter)
+    so re-running this command is idempotent instead of redoing completed
+    work every time.
+    """
+    run_per_brand_if_pending("1/10 shopify_detect",        enrich_shopify,              db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.shopify_checked))
+    run_per_brand_if_pending("2/10 wikidata_socials",      enrich_wikidata_socials,     db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.wikidata_enriched))
+    run_per_brand_if_pending("3/10 tranco",                enrich_tranco,               db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.tranco_checked))
+    run_per_brand_if_pending("4/10 youtube_sponsorship",   enrich_youtube_sponsorships, db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.youtube_checked))
+    run_per_brand_if_pending("5/10 meta_ads",              enrich_meta_ads,             db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.meta_ads_fetched))
+    run_per_brand_if_pending("6/10 instagram_posts",       enrich_instagram_posts,      db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.instagram_checked))
     run_instagram_users_per_brand("7/10 instagram_users", db, brand_ids, batch_limit=5)
-    run_per_brand("8/10 initial_brand_scoring", run_brand_scoring,           db, brand_ids)
-    run_per_brand("9/10 apollo_contacts",       run_apollo_contacts,         db, brand_ids)
-    run_per_brand("10/10 brand_signals",        run_brand_signals,           db, brand_ids)
+    run_per_brand_if_pending("8/10 initial_brand_scoring", run_brand_scoring,           db, brand_ids, _pending_for_scoring(db, brand_ids))
+    run_per_brand_if_pending("9/10 apollo_contacts",       run_apollo_contacts,         db, brand_ids, _pending_scored_and_absent(db, brand_ids, BrandContact, BrandContact.brand_raw_id))
+    run_per_brand_if_pending("10/10 brand_signals",        run_brand_signals,           db, brand_ids, _pending_scored_and_absent(db, brand_ids, BrandProfile, BrandProfile.brand_raw_id))
 
 
 def drain_pending_step(label: str, fn, db, batch_limit: int, **kwargs) -> None:
