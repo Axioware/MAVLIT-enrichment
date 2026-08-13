@@ -41,6 +41,11 @@ mechanism every enrich_*/run_* function in this file supports uniformly
 native niche= parameter of their own). Without --niche, behavior is
 unchanged from before: the whole brands_raw table, batch-drained per step.
 --limit defaults to 50 when --niche is given without it.
+
+The brand_ids resolved for --niche are ordered instagram_checked=False first
+(see load_niche_brand_ids) — so re-running the same --niche/--limit picks up
+new brands still pending instagram_posts instead of always landing on the
+same lowest-id brands and finding nothing new to do.
 """
 
 import argparse
@@ -94,13 +99,32 @@ def load_brand_ids(db) -> list[int]:
 
 
 def load_niche_brand_ids(db, niche: str, limit: int) -> list[int]:
-    """brands_raw.id matching niche (case-insensitive exact match), ordered, capped at limit."""
+    """
+    brands_raw.id matching niche (case-insensitive exact match), capped at limit.
+
+    Ordered instagram_checked=False first, then (among those) brands that
+    already have an instagram_handle before ones that don't, then by id — so
+    a small --limit makes forward progress on REAL instagram_posts work
+    instead of re-resolving the same already-processed low-id brands (plain
+    `ORDER BY id LIMIT N` is a fixed window: once those N are done, repeating
+    the same --limit finds nothing new) or landing on handle-less brands that
+    enrich_instagram_posts silently no-ops on (no handle -> nothing to scrape,
+    and instagram_checked never gets set, so they'd keep resurfacing as
+    "pending" forever without ever doing anything). Once every
+    not-yet-instagram-checked, handle-having brand in the niche is included,
+    this falls back to id order so remaining slots still advance brands
+    through the later steps (scoring/apollo/brand_signals) as before.
+    """
     return [
         row.id
         for row in (
             db.query(BrandRaw.id)
             .filter(func.lower(BrandRaw.niche) == niche.strip().lower())
-            .order_by(BrandRaw.id)
+            .order_by(
+                BrandRaw.instagram_checked.asc(),
+                BrandRaw.instagram_handle.is_(None).asc(),
+                BrandRaw.id.asc(),
+            )
             .limit(limit)
             .all()
         )
