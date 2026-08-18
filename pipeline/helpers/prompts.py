@@ -548,6 +548,8 @@ Classify this URL into exactly one category:
 3. "linktree" — a link-in-bio aggregator page (e.g. Linktree, Beacons, Milkshake, Later, Campsite, Lnk.bio, Direct.me, and similar tools) that itself contains a list of other links
 4. "unknown" — cannot confidently tell from the URL/bio alone
 
+Judge "website" by the DOMAIN, not the specific path or query string — a URL like "https://brand.com/register?ref=800000016" or "https://brand.com/shop/product123" is still the brand's own website (category "website"); a tracking parameter, referral code, or deep link does not make it a linktree or unknown. Only the domain root is kept once classified, so don't let the path/query change your answer.
+
 Reply ONLY with this JSON object, no extra text:
 {"category": "website", "reason": "short one-line reason"}\
 """
@@ -564,6 +566,8 @@ Search results for "{query}":
 {results}
 
 Decide which ONE of the search results above (if any) is most likely the brand's own official website — not a marketplace listing (Amazon, Etsy shop page, etc.), not a social media profile, not a press/news article, not an unrelated business that happens to share a similar name.
+
+Judge by the DOMAIN of each result, not its specific path or query string — a result URL like "https://brand.com/register?ref=800000016" is still a valid pick if brand.com is genuinely the brand's own domain; a tracking parameter or deep link doesn't disqualify it. Only the domain root is kept once picked.
 
 Reply ONLY with this JSON object, no extra text:
 {"index": 0, "reason": "short one-line reason"}
