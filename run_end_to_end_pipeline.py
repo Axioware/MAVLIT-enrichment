@@ -14,12 +14,16 @@ standard enrichment stack in this order:
   2. wikidata_socials.py
   3. tranco.py
   4. youtube_sponsorship.py
-  5. meta_ads.py
-  6. instagram_posts.py
-  7. instagram_users.py
-  8. initial_brand_scoring.py
-  9. apollo_contacts.py
- 10. brand_signals.py
+  5. instagram_posts.py
+  6. instagram_users.py
+  7. initial_brand_scoring.py
+  8. apollo_contacts.py
+  9. brand_signals.py
+
+meta_ads.py is temporarily removed from this stack — re-add its
+drain_pending_step/run_per_brand_if_pending call (see git history for the
+exact lines) and its BrandRaw.meta_ads_fetched prerequisite in
+_pending_for_scoring() to bring it back.
 
 Each step is called without brand_id so the module's normal "already done"
 filters are respected. For example, shopify_detect only processes rows where
@@ -67,7 +71,6 @@ from pipeline.enrichment.tranco import enrich_tranco
 # that module attribute.
 from pipeline.enrichment import youtube_sponsorship
 from pipeline.enrichment.youtube_sponsorship import enrich_youtube_sponsorships
-from pipeline.enrichment.meta_ads import enrich_meta_ads
 from pipeline.enrichment.instagram_posts import enrich_instagram_posts
 from pipeline.enrichment.instagram_users import enrich_instagram_users
 from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
@@ -148,7 +151,12 @@ def _pending_for_scoring(db, brand_ids: set[int]) -> set[int]:
     always passes) bypasses run_brand_scoring's own prerequisite check by
     design (it's meant to let you force-rescore one brand for testing) — so
     without this, the scoped --niche path could score a brand before
-    meta_ads/youtube/instagram had actually finished for it.
+    youtube/instagram had actually finished for it.
+
+    meta_ads_fetched is deliberately NOT required here while meta_ads.py is
+    removed from this pipeline's step list (see module docstring) — brands
+    would never satisfy it otherwise and scoring would never run at all.
+    Add it back alongside meta_ads.py's step being restored.
     """
     return {
         row.id for row in
@@ -158,7 +166,6 @@ def _pending_for_scoring(db, brand_ids: set[int]) -> set[int]:
             BrandRaw.wikidata_enriched  == True,
             BrandRaw.shopify_checked    == True,
             BrandRaw.tranco_checked     == True,
-            BrandRaw.meta_ads_fetched   == True,
             BrandRaw.youtube_checked    == True,
             BrandRaw.instagram_checked  == True,
             BrandRaw.initial_brand_scored == False,
@@ -206,16 +213,15 @@ def run_all_steps_for_brand_ids(db, brand_ids: set[int]) -> None:
     so re-running this command is idempotent instead of redoing completed
     work every time.
     """
-    run_per_brand_if_pending("1/10 shopify_detect",        enrich_shopify,              db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.shopify_checked))
-    run_per_brand_if_pending("2/10 wikidata_socials",      enrich_wikidata_socials,     db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.wikidata_enriched))
-    run_per_brand_if_pending("3/10 tranco",                enrich_tranco,               db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.tranco_checked))
-    run_per_brand_if_pending("4/10 youtube_sponsorship",   enrich_youtube_sponsorships, db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.youtube_checked))
-    run_per_brand_if_pending("5/10 meta_ads",              enrich_meta_ads,             db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.meta_ads_fetched))
-    run_per_brand_if_pending("6/10 instagram_posts",       enrich_instagram_posts,      db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.instagram_checked))
-    run_instagram_users_per_brand("7/10 instagram_users", db, brand_ids, batch_limit=5)
-    run_per_brand_if_pending("8/10 initial_brand_scoring", run_brand_scoring,           db, brand_ids, _pending_for_scoring(db, brand_ids))
-    run_per_brand_if_pending("9/10 apollo_contacts",       run_apollo_contacts,         db, brand_ids, _pending_scored_and_absent(db, brand_ids, BrandContact, BrandContact.brand_raw_id))
-    run_per_brand_if_pending("10/10 brand_signals",        run_brand_signals,           db, brand_ids, _pending_scored_and_absent(db, brand_ids, BrandProfile, BrandProfile.brand_raw_id))
+    run_per_brand_if_pending("1/9 shopify_detect",        enrich_shopify,              db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.shopify_checked))
+    run_per_brand_if_pending("2/9 wikidata_socials",      enrich_wikidata_socials,     db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.wikidata_enriched))
+    run_per_brand_if_pending("3/9 tranco",                enrich_tranco,               db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.tranco_checked))
+    run_per_brand_if_pending("4/9 youtube_sponsorship",   enrich_youtube_sponsorships, db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.youtube_checked))
+    run_per_brand_if_pending("5/9 instagram_posts",       enrich_instagram_posts,      db, brand_ids, _pending_by_flag(db, brand_ids, BrandRaw.instagram_checked))
+    run_instagram_users_per_brand("6/9 instagram_users", db, brand_ids, batch_limit=5)
+    run_per_brand_if_pending("7/9 initial_brand_scoring", run_brand_scoring,           db, brand_ids, _pending_for_scoring(db, brand_ids))
+    run_per_brand_if_pending("8/9 apollo_contacts",       run_apollo_contacts,         db, brand_ids, _pending_scored_and_absent(db, brand_ids, BrandContact, BrandContact.brand_raw_id))
+    run_per_brand_if_pending("9/9 brand_signals",         run_brand_signals,           db, brand_ids, _pending_scored_and_absent(db, brand_ids, BrandProfile, BrandProfile.brand_raw_id))
 
 
 def drain_pending_step(label: str, fn, db, batch_limit: int, **kwargs) -> None:
@@ -367,16 +373,15 @@ def main(niche: str | None = None, limit: int | None = None) -> None:
 
             logger.info("Loaded %d brands_raw row(s): %s", len(brand_ids), brand_ids)
 
-            drain_pending_step("1/10 shopify_detect",        enrich_shopify,              db, batch_limit=300)
-            drain_pending_step("2/10 wikidata_socials",      enrich_wikidata_socials,     db, batch_limit=500)
-            drain_pending_step("3/10 tranco",                enrich_tranco,               db, batch_limit=500)
-            drain_youtube_sponsorships("4/10 youtube_sponsorship", db, batch_limit=50)
-            drain_pending_step("5/10 meta_ads",              enrich_meta_ads,             db, batch_limit=200)
-            drain_pending_step("6/10 instagram_posts",       enrich_instagram_posts,      db, batch_limit=50)
-            drain_instagram_users("7/10 instagram_users", db, batch_limit=5)
-            drain_pending_step("8/10 initial_brand_scoring", run_brand_scoring,           db, batch_limit=500)
-            drain_pending_step("9/10 apollo_contacts",       run_apollo_contacts,         db, batch_limit=20)
-            drain_brand_signals("10/10 brand_signals", db, batch_limit=500)
+            drain_pending_step("1/9 shopify_detect",        enrich_shopify,              db, batch_limit=300)
+            drain_pending_step("2/9 wikidata_socials",      enrich_wikidata_socials,     db, batch_limit=500)
+            drain_pending_step("3/9 tranco",                enrich_tranco,               db, batch_limit=500)
+            drain_youtube_sponsorships("4/9 youtube_sponsorship", db, batch_limit=50)
+            drain_pending_step("5/9 instagram_posts",       enrich_instagram_posts,      db, batch_limit=50)
+            drain_instagram_users("6/9 instagram_users", db, batch_limit=5)
+            drain_pending_step("7/9 initial_brand_scoring", run_brand_scoring,           db, batch_limit=500)
+            drain_pending_step("8/9 apollo_contacts",       run_apollo_contacts,         db, batch_limit=20)
+            drain_brand_signals("9/9 brand_signals", db, batch_limit=500)
     finally:
         db.close()
 
