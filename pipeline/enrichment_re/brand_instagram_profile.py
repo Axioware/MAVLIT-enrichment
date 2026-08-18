@@ -88,6 +88,24 @@ def _extract_domain(url: str) -> str:
         return ""
 
 
+def _normalize_website(url: str) -> str:
+    """
+    Strip a resolved website down to just its domain root — a bio link,
+    linktree entry, or search result is often a specific landing/referral
+    page (e.g. "https://jpfans.com/register?ref=800000016"), not the
+    brand's actual homepage, and downstream steps (shopify_detect.py etc.)
+    expect a plain root URL to crawl. Falls back to the original url
+    unchanged if it doesn't parse into a scheme+netloc.
+    """
+    try:
+        p = urlparse(url)
+        if not p.scheme or not p.netloc:
+            return url
+        return f"{p.scheme}://{p.netloc}/"
+    except Exception:
+        return url
+
+
 #  Instagram profile scrape
 
 def _scrape_profile(handle: str) -> dict | None:
@@ -251,6 +269,7 @@ def _apply_result(
         brand.name_normalized = normalize(full_name)
 
     if website:
+        website = _normalize_website(website)
         brand.website = website
         brand.domain = _extract_domain(website)
         brand.has_official_website = True
