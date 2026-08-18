@@ -543,12 +543,13 @@ Bio: {bio}
 URL being classified: {url}
 
 Classify this URL into exactly one category:
-1. "website" — the brand's own official website/domain (online store, company site, product page) — not a social platform or link-aggregator tool
+1. "website" — the brand's own official website/domain (online store, company site, product page hosted on the BRAND'S OWN domain) — not a social platform, link-aggregator tool, or third-party marketplace
 2. "social" — a profile on another social media platform (Facebook, TikTok, YouTube, Twitter/X, Pinterest, Threads, WhatsApp, Discord, etc.), or Instagram itself
 3. "linktree" — a link-in-bio aggregator page (e.g. Linktree, Beacons, Milkshake, Later, Campsite, Lnk.bio, Direct.me, and similar tools) that itself contains a list of other links
-4. "unknown" — cannot confidently tell from the URL/bio alone
+4. "marketplace" — a listing, storefront, or store page for this brand hosted on a third-party marketplace/retail platform (Amazon — including Amazon Storefronts like "amazon.com/stores/page/...", Etsy, eBay, Walmart, AliExpress, Shopee, Temu, etc.). This is NOT the brand's own website, even if it's a dedicated branded page on that platform.
+5. "unknown" — cannot confidently tell from the URL/bio alone
 
-Judge "website" by the DOMAIN, not the specific path or query string — a URL like "https://brand.com/register?ref=800000016" or "https://brand.com/shop/product123" is still the brand's own website (category "website"); a tracking parameter, referral code, or deep link does not make it a linktree or unknown. Only the domain root is kept once classified, so don't let the path/query change your answer.
+Judge "website" by the DOMAIN, not the specific path or query string — a URL like "https://brand.com/register?ref=800000016" or "https://brand.com/shop/product123" is still the brand's own website (category "website"); a tracking parameter, referral code, or deep link does not make it a linktree or unknown. But a URL whose domain is a third-party marketplace (amazon.com, etsy.com, ebay.com, walmart.com, etc.) is ALWAYS "marketplace", never "website" — no matter how specific or branded-looking the path is (e.g. "amazon.com/stores/page/8A8B3EB2-E356-4C27-B4B2-12EEFCEB05CF" is "marketplace", not "website"). Only the domain root is kept once classified as "website", so don't let the path/query change your answer for a genuine brand domain.
 
 Reply ONLY with this JSON object, no extra text:
 {"category": "website", "reason": "short one-line reason"}\

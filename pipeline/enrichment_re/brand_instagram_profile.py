@@ -161,14 +161,14 @@ def _scrape_profile(handle: str) -> dict | None:
 #  Link classification (bio URL, and linktree outbound links)
 
 def _classify_link(db: Session, handle: str, bio: str, url: str) -> str:
-    """Returns one of 'website' / 'social' / 'linktree' / 'unknown'."""
+    """Returns one of 'website' / 'social' / 'linktree' / 'marketplace' / 'unknown'."""
     prompt = fill_template(
         _get_prompt(db, LINK_CLASSIFY_PROMPT_NAME, LINK_CLASSIFY_DEFAULT_PROMPT),
         handle=handle, bio=bio[:500], url=url,
     )
     result = call_gpt_json(prompt, context=f"link_classify @{handle} {url}")
     category = str(result.get("category") or "unknown").strip().lower()
-    return category if category in ("website", "social", "linktree") else "unknown"
+    return category if category in ("website", "social", "linktree", "marketplace") else "unknown"
 
 
 def _scrape_outbound_links(url: str) -> list[str]:
