@@ -37,6 +37,8 @@ from pipeline.helpers.prompts import (
     PITCH_PROMPT_NAME, PITCH_DEFAULT_PROMPT,
     RATE_INTEL_PROMPT_NAME, RATE_INTEL_DEFAULT_PROMPT,
     CONTRACT_ADVICE_PROMPT_NAME, CONTRACT_ADVICE_DEFAULT_PROMPT,
+    LINK_CLASSIFY_PROMPT_NAME, LINK_CLASSIFY_DEFAULT_PROMPT,
+    WEBSITE_PICK_PROMPT_NAME, WEBSITE_PICK_DEFAULT_PROMPT,
 )
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.enrichment.orchestrator import run_signal_enrichment
@@ -126,6 +128,7 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw DROP COLUMN IF EXISTS twitter_checked",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS initial_brand_scored BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS instagram_wikidata_checked BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS instagram_profile_checked BOOLEAN NOT NULL DEFAULT false",
         "DROP TABLE IF EXISTS tiktok_posts",
         "DROP TABLE IF EXISTS twitter_posts",
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS top_commenters",
@@ -328,6 +331,8 @@ def _run_migrations() -> None:
             (PITCH_PROMPT_NAME,         PITCH_DEFAULT_PROMPT),
             (RATE_INTEL_PROMPT_NAME,    RATE_INTEL_DEFAULT_PROMPT),
             (CONTRACT_ADVICE_PROMPT_NAME, CONTRACT_ADVICE_DEFAULT_PROMPT),
+            (LINK_CLASSIFY_PROMPT_NAME, LINK_CLASSIFY_DEFAULT_PROMPT),
+            (WEBSITE_PICK_PROMPT_NAME,  WEBSITE_PICK_DEFAULT_PROMPT),
         ]:
             if not db.query(Prompt).filter(Prompt.name == name).first():
                 db.add(Prompt(name=name, content=content))

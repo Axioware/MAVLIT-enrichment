@@ -33,6 +33,15 @@ YOUTUBE_API_KEY_11 = os.getenv("YOUTUBE_API_KEY_11", "")
 YOUTUBE_API_KEY_12 = os.getenv("YOUTUBE_API_KEY_12", "")
 APIFY_TOKEN       = os.getenv("APIFY_TOKEN", "")
 
+# Google Custom Search JSON API — fallback website discovery in
+# pipeline/enrichment_re/brand_instagram_profile.py when a brand's Instagram
+# bio link doesn't resolve to a website. Needs both a Programmable Search
+# Engine ID (cx) configured to search the whole web, and an API key from the
+# same Google Cloud project with the Custom Search API enabled. Free tier is
+# 100 queries/day.
+GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY", "")
+GOOGLE_SEARCH_CX      = os.getenv("GOOGLE_SEARCH_CX", "")
+
 # LLM verification (Claude) — set ENABLE_LLM=true to activate
 ENABLE_LLM        = os.getenv("ENABLE_LLM", "false").strip().lower() == "true"
 

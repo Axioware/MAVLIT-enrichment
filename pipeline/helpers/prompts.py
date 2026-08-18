@@ -26,6 +26,8 @@ Prompt name -> which enrichment module actually calls it:
   brand_pitch_generation        — pipeline/pitching.py
   rate_intelligence_estimate    — pipeline/rate_intelligence.py
   contract_advice_review        — pipeline/contract_advice.py
+  instagram_link_classify       — pipeline/enrichment_re/brand_instagram_profile.py
+  brand_website_search_pick     — pipeline/enrichment_re/brand_instagram_profile.py
 """
 
 #  instagram_posts.py
@@ -527,4 +529,43 @@ Review this contract for common creator-sponsorship red flags, including but not
 Reply ONLY with this JSON object, no extra text:
 {"looks_good": true, "issues": ["...", "..."], "summary": "..."}
 Set looks_good to false if there is at least one real concern worth flagging. issues should be short, specific, plain-language bullet points (empty list if none found). summary should be 2-3 sentences giving the creator an overall read.\
+"""
+
+
+#  brand_instagram_profile.py
+
+LINK_CLASSIFY_PROMPT_NAME = "instagram_link_classify"
+LINK_CLASSIFY_DEFAULT_PROMPT = """\
+You are classifying a URL found in an Instagram bio to determine what kind of link it is.
+
+Instagram handle: {handle}
+Bio: {bio}
+URL being classified: {url}
+
+Classify this URL into exactly one category:
+1. "website" — the brand's own official website/domain (online store, company site, product page) — not a social platform or link-aggregator tool
+2. "social" — a profile on another social media platform (Facebook, TikTok, YouTube, Twitter/X, Pinterest, Threads, WhatsApp, Discord, etc.), or Instagram itself
+3. "linktree" — a link-in-bio aggregator page (e.g. Linktree, Beacons, Milkshake, Later, Campsite, Lnk.bio, Direct.me, and similar tools) that itself contains a list of other links
+4. "unknown" — cannot confidently tell from the URL/bio alone
+
+Reply ONLY with this JSON object, no extra text:
+{"category": "website", "reason": "short one-line reason"}\
+"""
+
+WEBSITE_PICK_PROMPT_NAME = "brand_website_search_pick"
+WEBSITE_PICK_DEFAULT_PROMPT = """\
+You are identifying a brand's real official website from search results.
+
+Instagram handle: {handle}
+Instagram bio: {bio}
+Instagram external URL (if any): {external_url}
+
+Search results for "{query}":
+{results}
+
+Decide which ONE of the search results above (if any) is most likely the brand's own official website — not a marketplace listing (Amazon, Etsy shop page, etc.), not a social media profile, not a press/news article, not an unrelated business that happens to share a similar name.
+
+Reply ONLY with this JSON object, no extra text:
+{"index": 0, "reason": "short one-line reason"}
+Use the 1-based index of the correct result from the numbered list above, or 0 if none of the results are confidently the brand's real official website.\
 """

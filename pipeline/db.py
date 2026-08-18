@@ -77,6 +77,14 @@ class BrandRaw(Base):
     # IS NULL) — true whether or not a match was found, so unresolvable
     # handles aren't retried every run.
     instagram_wikidata_checked = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Set by pipeline/enrichment_re/brand_instagram_profile.py after attempting
+    # to resolve name/website for a bare brand row (name IS NULL) straight from
+    # its own Instagram profile — bio external URL, optionally a linktree-style
+    # link-in-bio page, then a Google search fallback. True whether or not a
+    # website was found, so unresolvable handles aren't retried every run.
+    # Only meaningful after instagram_wikidata_checked=True (this step only
+    # runs on rows the Wikidata reverse lookup already gave up on).
+    instagram_profile_checked = Column(Boolean, nullable=False, server_default="false", default=False)
 
     def __str__(self) -> str:
         return self.name or f"Brand #{self.id}"
