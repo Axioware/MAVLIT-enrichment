@@ -55,12 +55,24 @@ from pipeline.helpers.social import normalize_handle
 logger = logging.getLogger(__name__)
 
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"  # same Instagram scraper used across the pipeline
+# Full browser-like header set — link-in-bio hosts (Linktree in particular,
+# fronted by Fastly) 403 a bare User-Agent-only request as bot traffic; this
+# fingerprint is what actually gets a 200 (confirmed live against linktr.ee).
 _PAGE_HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) "
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0 Safari/537.36"
+        "Chrome/124.0.0.0 Safari/537.36"
     ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
 }
 _PAGE_TIMEOUT      = 12
 _SEARCH_RESULTS    = 5
