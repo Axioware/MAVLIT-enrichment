@@ -13,14 +13,17 @@ End-to-end reverse-engineering pipeline:
      via each function's own brand_id (or brand_raw_id) parameter:
 
        2. brand_wikidata_lookup.py
-       3. wikidata_socials.py
-       4. shopify_detect.py
-       5. tranco.py
-       6. youtube_sponsorship.py
-       7. meta_ads.py
-       8. instagram_posts.py
-       9. instagram_users.py       (per-post, not per-brand — see below)
-      10. initial_brand_scoring.py
+       3. brand_instagram_profile.py (only picks up what step 2 left bare —
+          see its own docstring for the Instagram bio/linktree/Google-search
+          resolution order)
+       4. wikidata_socials.py
+       5. shopify_detect.py
+       6. tranco.py
+       7. youtube_sponsorship.py
+       8. meta_ads.py
+       9. instagram_posts.py
+      10. instagram_users.py       (per-post, not per-brand — see below)
+      11. initial_brand_scoring.py
 
 If step 1 discovers zero brands, nothing further runs — there's nothing to
 enrich. Each per-brand call bypasses that step's own *_checked filter (the
@@ -30,7 +33,7 @@ it, so a brand_id parameter was added to both, matching every other step).
 A brand that isn't applicable to a given step (e.g. no website yet, so
 shopify_detect has nothing to fetch) just no-ops for that one call.
 
-Step 9 (instagram_users) is the one exception to "one call per brand" —
+Step 10 (instagram_users) is the one exception to "one call per brand" —
 it operates on instagram_posts ROWS, not brands directly, so for each
 discovered brand it loops enrich_instagram_users(brand_raw_id=...) until
 that brand's posts are fully drained, before moving to the next brand.
@@ -50,6 +53,7 @@ load_dotenv()
 from pipeline.db import BrandRaw, SessionLocal
 from pipeline.enrichment_re.content_creator_re import enrich_content_creator_re
 from pipeline.enrichment_re.brand_wikidata_lookup import enrich_brand_wikidata_lookup
+from pipeline.enrichment_re.brand_instagram_profile import enrich_brand_instagram_profile
 from pipeline.enrichment.wikidata_socials import enrich_wikidata_socials
 from pipeline.enrichment.shopify_detect import enrich_shopify
 from pipeline.enrichment.tranco import enrich_tranco
@@ -87,7 +91,7 @@ def run_content_creator_re_fully(db, batch_limit: int = 1) -> set[int]:
     small batch at a time. Returns the union of every brands_raw.id
     confirmed/discovered across the whole run.
     """
-    label = "1/10 content_creator_re"
+    label = "1/11 content_creator_re"
     _step_start(label)
     all_brand_ids: set[int] = set()
     batch_num = 0
@@ -170,12 +174,13 @@ def main() -> None:
 
         logger.info("Discovered brand_id(s): %s", sorted(brand_ids))
 
-        run_per_brand("2/10 brand_wikidata_lookup",  enrich_brand_wikidata_lookup, db, brand_ids)
-        run_per_brand("3/10 wikidata_socials",       enrich_wikidata_socials,      db, brand_ids)
-        run_per_brand("4/10 shopify_detect",         enrich_shopify,               db, brand_ids)
-        run_per_brand("5/10 tranco",                 enrich_tranco,                db, brand_ids)
-        run_per_brand("6/10 youtube_sponsorship",    enrich_youtube_sponsorships,  db, brand_ids)
-        run_per_brand("7/10 meta_ads",                enrich_meta_ads,             db, brand_ids)
+        run_per_brand("2/11 brand_wikidata_lookup",   enrich_brand_wikidata_lookup, db, brand_ids)
+        run_per_brand("3/11 brand_instagram_profile", enrich_brand_instagram_profile, db, brand_ids)
+        run_per_brand("4/11 wikidata_socials",        enrich_wikidata_socials,      db, brand_ids)
+        run_per_brand("5/11 shopify_detect",          enrich_shopify,               db, brand_ids)
+        run_per_brand("6/11 tranco",                  enrich_tranco,                db, brand_ids)
+        run_per_brand("7/11 youtube_sponsorship",     enrich_youtube_sponsorships,  db, brand_ids)
+        run_per_brand("8/11 meta_ads",                enrich_meta_ads,              db, brand_ids)
 
         website_brand_ids = {
             row.id
@@ -189,10 +194,10 @@ def main() -> None:
         if not website_brand_ids:
             logger.info("No discovered brands with has_official_website=True — skipping instagram_posts.")
         else:
-            run_per_brand("8/10 instagram_posts", enrich_instagram_posts, db, website_brand_ids)
+            run_per_brand("9/11 instagram_posts", enrich_instagram_posts, db, website_brand_ids)
 
-        run_instagram_users_per_brand("9/10 instagram_users", db, brand_ids, batch_limit=5)
-        run_per_brand("10/10 initial_brand_scoring", run_brand_scoring,            db, brand_ids)
+        run_instagram_users_per_brand("10/11 instagram_users", db, brand_ids, batch_limit=5)
+        run_per_brand("11/11 initial_brand_scoring", run_brand_scoring,            db, brand_ids)
     finally:
         db.close()
 
