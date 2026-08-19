@@ -509,6 +509,10 @@ class BrandInstagramUserAdmin(ModelView, model=BrandInstagramUser):
         BrandInstagramUser.brand_raw:      "Brand",
         BrandInstagramUser.instagram_user: "Instagram User",
     }
+    # BrandInstagramUser has no text columns of its own (just two FK ints) —
+    # dotted paths search the related BrandRaw/InstagramUser columns instead
+    # (sqladmin auto-joins them; see ModelView.search_query in sqladmin).
+    column_searchable_list = ["brand_raw.name", "brand_raw.instagram_handle", "instagram_user.username"]
     column_sortable_list = [c.name for c in BrandInstagramUser.__table__.columns]
     column_default_sort  = [(BrandInstagramUser.created_at, True)]
     page_size = 15
@@ -527,6 +531,10 @@ class InstagramCreatorCommenterAdmin(ModelView, model=InstagramCreatorCommenter)
         InstagramCreatorCommenter.comment_likes:  "Comment Likes",
         InstagramCreatorCommenter.comment_text:   "Comment",
     }
+    column_searchable_list = [
+        "brand_raw.name", "creator_user.username", "commenter_user.username",
+        InstagramCreatorCommenter.comment_text, InstagramCreatorCommenter.source_post_url,
+    ]
     column_sortable_list = [c.name for c in InstagramCreatorCommenter.__table__.columns]
     column_default_sort  = [(InstagramCreatorCommenter.created_at, True)]
     page_size = 15
@@ -549,6 +557,7 @@ class SavedBrandAdmin(ModelView, model=SavedBrand):
     icon         = "fa-solid fa-bookmark"
     column_list  = "__all__"
     column_labels = {SavedBrand.creator: "Creator", SavedBrand.brand_raw: "Brand"}
+    column_searchable_list = ["brand_raw.name", "creator.email", "creator.full_name"]
     column_sortable_list = [c.name for c in SavedBrand.__table__.columns]
     column_default_sort  = [(SavedBrand.created_at, True)]
     page_size = 15
@@ -572,6 +581,10 @@ class RateEstimateAdmin(ModelView, model=RateEstimate):
     icon         = "fa-solid fa-money-bill-trend-up"
     column_list  = "__all__"
     column_labels = {RateEstimate.creator: "Creator", RateEstimate.brand_raw: "Brand"}
+    column_searchable_list = [
+        "brand_raw.name", "creator.email", "creator.full_name",
+        RateEstimate.platform, RateEstimate.deliverable_type,
+    ]
     column_sortable_list = [c.name for c in RateEstimate.__table__.columns]
     column_default_sort  = [(RateEstimate.id, True)]
     page_size = 15
@@ -583,6 +596,7 @@ class ContractReviewAdmin(ModelView, model=ContractReview):
     icon         = "fa-solid fa-file-contract"
     column_list  = "__all__"
     column_labels = {ContractReview.creator: "Creator"}
+    column_searchable_list = ["creator.email", "creator.full_name", ContractReview.summary, ContractReview.contract_text]
     column_sortable_list = [c.name for c in ContractReview.__table__.columns]
     column_default_sort  = [(ContractReview.id, True)]
     page_size = 15
@@ -594,6 +608,7 @@ class InitialBrandScoreAdmin(ModelView, model=InitialBrandScore):
     icon         = "fa-solid fa-star"
     column_list  = "__all__"
     column_labels = {InitialBrandScore.brand_raw: "Brand"}
+    column_searchable_list = ["brand_raw.name", InitialBrandScore.score_band]
     column_sortable_list = [c.name for c in InitialBrandScore.__table__.columns]
     column_default_sort = [(InitialBrandScore.id, True)]
     page_size = 15
@@ -610,6 +625,7 @@ class BrandProfileAdmin(ModelView, model=BrandProfile):
     # with column_exclude_list) and from column_sortable_list.
     column_exclude_list = [BrandProfile.embedding]
     column_labels = {BrandProfile.brand_raw: "Brand"}
+    column_searchable_list = ["brand_raw.name", BrandProfile.typical_creator_tier, BrandProfile.contact_mode]
     column_sortable_list = [c.name for c in BrandProfile.__table__.columns if c.name != "embedding"]
     column_default_sort = [(BrandProfile.brand_raw_id, True)]
     page_size = 15
