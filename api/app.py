@@ -10,7 +10,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
-from sqlalchemy import text
+from sqlalchemy import String, cast, or_, text
+from sqlalchemy.orm import aliased
+from sqlalchemy.sql import Select
 from config import ADMIN_PASSKEY, FRONTEND_ORIGINS, IS_PRODUCTION, JWT_SECRET, POSTHOG_PROJECT_TOKEN, POSTHOG_HOST
 from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, ContractReview, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Pitch, Prompt, RateEstimate, SavedBrand, TestBrandsWithInstagramPosts, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
@@ -538,6 +540,31 @@ class InstagramCreatorCommenterAdmin(ModelView, model=InstagramCreatorCommenter)
     column_sortable_list = [c.name for c in InstagramCreatorCommenter.__table__.columns]
     column_default_sort  = [(InstagramCreatorCommenter.created_at, True)]
     page_size = 15
+
+    def search_query(self, stmt: Select, term: str) -> Select:
+        """
+        Override sqladmin's default join-per-dotted-path search: creator_user
+        and commenter_user both point at instagram_users, and joining that
+        table twice unaliased makes Postgres raise DuplicateAlias ("table
+        name 'instagram_users' specified more than once"). Alias each side
+        explicitly instead.
+        """
+        creator_alias = aliased(InstagramUser)
+        commenter_alias = aliased(InstagramUser)
+        pattern = f"%{term}%"
+        return (
+            stmt
+            .join(InstagramCreatorCommenter.brand_raw)
+            .join(creator_alias, InstagramCreatorCommenter.creator_user_id == creator_alias.id)
+            .join(commenter_alias, InstagramCreatorCommenter.commenter_user_id == commenter_alias.id)
+            .filter(or_(
+                cast(BrandRaw.name, String).ilike(pattern),
+                cast(creator_alias.username, String).ilike(pattern),
+                cast(commenter_alias.username, String).ilike(pattern),
+                cast(InstagramCreatorCommenter.comment_text, String).ilike(pattern),
+                cast(InstagramCreatorCommenter.source_post_url, String).ilike(pattern),
+            ))
+        )
 
 
 class PromptAdmin(ModelView, model=Prompt):
