@@ -430,6 +430,8 @@ IMPORTANT RULES
 
 9. If you cannot confidently conclude that a referenced account is a sponsor/brand partner for THIS post, return an empty list.
 
+10. Brands essentially never share a single sponsored/paid-partnership post with each other or with a long list of other tagged accounts. If the post references more than a small handful of accounts in total (mentions + tagged_users + coauthor_producers combined), treat that as a strong signal this is a giveaway, brand round-up, general shoutout, or event/community post rather than a genuine single-brand paid partnership — return an empty list unless the evidence for one specific brand is overwhelming.
+
 Return ONLY valid JSON:
 
 {"brands":["username1","username2"]}
