@@ -12,19 +12,28 @@ Fetches each brand's homepage to:
      brands_raw.name / .niche that's currently unset (bare brands created by
      content_creator_re / brand_wikidata_lookup / brand_instagram_profile
      that never got one), ask the same call to also determine a best-fit
-     value and backfill it. An already-known name/niche is never
-     overwritten — the LLM is told to just echo it back unchanged. For
-     niche specifically, if the LLM can't confidently classify it, "unknown"
-     is stored as a real value (not left NULL) — that distinguishes "looked
-     and couldn't tell" from "never processed", so a brand doesn't sit
-     unclassified forever. Name has no such "unknown" sentinel — NULL
-     already means "unresolved bare brand" throughout enrichment_re, so an
-     undetermined name is just left NULL. A derived name is checked against
-     existing brands_raw.name_normalized values before being assigned, and
-     silently skipped (logged, not raised) on a collision with an existing
-     brand. Skipped entirely if OPENAI_KEY isn't set. brands_niches is
-     upserted (not just updated) since a bare brand has no existing row
-     there yet.
+     value and fill it.
+
+     Niche: an already-known niche is never overwritten — the LLM is told
+     to just echo it back unchanged. If it can't confidently classify one,
+     "unknown" is stored as a real value (not left NULL) — that
+     distinguishes "looked and couldn't tell" from "never processed", so a
+     brand doesn't sit unclassified forever.
+
+     Name: unlike niche, an already-known name CAN be corrected here, not
+     just filled — but only when brands_raw.wikidata_id is unset. A
+     wikidata_id means the name came from a confirmed Wikidata entity match
+     (high confidence) and is left alone entirely; only names that
+     themselves came from a prior LLM guess (brand_instagram_profile.py) or
+     no name at all are eligible to be filled/corrected by this step. Name
+     also has no "unknown" sentinel — NULL already means "unresolved bare
+     brand" throughout enrichment_re, so an undetermined name is just left
+     NULL. A derived name is checked against existing brands_raw.
+     name_normalized values before being assigned, and silently skipped
+     (logged, not raised) on a collision with an existing brand.
+
+     Skipped entirely if OPENAI_KEY isn't set. brands_niches is upserted
+     (not just updated) since a bare brand has no existing row there yet.
 
 Social fields are only written if the column is currently NULL, so they
 don't overwrite more-authoritative Wikidata data fetched earlier.
@@ -287,24 +296,28 @@ def _upsert_brand_niche(db: Session, brand_id: int, niche: str, description: str
 
 def _update_brand_niche_description_and_tags(db: Session, brand: BrandRaw, description: str) -> None:
     """
-    Extracts a name backfill (if brand.name was NULL), sub-niche tags, and a
-    niche backfill (if brand.niche was NULL) from the scraped description via
-    the LLM, then upserts brands_niches — a plain UPDATE would silently no-op
-    for bare brands (content_creator_re / brand_wikidata_lookup rows) that
-    have no brands_niches row yet.
+    Extracts a name fill-or-correction, sub-niche tags, and a niche backfill
+    (if brand.niche was NULL) from the scraped description via the LLM, then
+    upserts brands_niches — a plain UPDATE would silently no-op for bare
+    brands (content_creator_re / brand_wikidata_lookup rows) that have no
+    brands_niches row yet.
 
-    Name backfill is checked against existing brands_raw.name_normalized
-    values BEFORE assigning (rather than assigning then catching an
-    IntegrityError on commit) — this function runs mid-processing, with
-    is_shopify/socials/description already staged but not yet committed for
-    this brand elsewhere in enrich_shopify's loop, so a rollback here would
-    lose that other work too, not just the name.
+    Name is filled OR corrected here (not just filled when NULL) — but only
+    when brand.wikidata_id is unset. A wikidata_id means the current name
+    came from a confirmed Wikidata entity match (high confidence); only
+    names that themselves came from a prior LLM guess (brand_instagram_
+    profile.py) or no name at all are eligible to be changed by this step.
+    Checked against existing brands_raw.name_normalized values BEFORE
+    assigning (rather than assigning then catching an IntegrityError on
+    commit) — this function runs mid-processing, with is_shopify/socials/
+    description already staged but not yet committed for this brand
+    elsewhere in enrich_shopify's loop, so a rollback here would lose that
+    other work too, not just the name.
     """
-    had_name  = bool(brand.name)
     had_niche = bool(brand.niche)
     name, niche, tags = _extract_brand_niche_and_tags(db, brand, description)
 
-    if not had_name and name:
+    if brand.wikidata_id is None and name and name != brand.name:
         normalized = normalize(name)
         collision = db.query(BrandRaw.id).filter(
             BrandRaw.name_normalized == normalized,
@@ -313,13 +326,20 @@ def _update_brand_niche_description_and_tags(db: Session, brand: BrandRaw, descr
         if collision:
             logger.warning(
                 "Shopify/socials check: brand_id=%d derived name '%s' collides with existing "
-                "brand_id=%d — left unresolved",
+                "brand_id=%d — left unchanged",
                 brand.id, name, collision.id,
             )
         else:
+            old_name = brand.name
             brand.name = name
             brand.name_normalized = normalized
-            logger.info("Shopify/socials check: brand_id=%d name backfilled → '%s'", brand.id, name)
+            if old_name:
+                logger.info(
+                    "Shopify/socials check: brand_id=%d name corrected: '%s' → '%s'",
+                    brand.id, old_name, name,
+                )
+            else:
+                logger.info("Shopify/socials check: brand_id=%d name backfilled → '%s'", brand.id, name)
 
     if not had_niche and niche:
         brand.niche = niche

@@ -24,12 +24,15 @@ Resolution order, first hit wins:
      fall back to a search against a local SearXNG instance (config.
      SEARXNG_URL) for "<handle> official website", take the top 5 results,
      and ask a second LLM call (brand_website_search_pick) — given the
-     profile's own bio/external URL as context to rule out lookalikes and
-     marketplace/press listings — which one (if any) is the real official
-     site. This fallback tier does NOT derive a name — brands_raw.name is
-     only ever backfilled when the official website itself was found
-     directly from the bio/linktree in step 2, never from the raw Instagram
-     display name and never from a search-fallback match.
+     profile's own bio/external URL, plus whatever name step 2 may already
+     have derived, as context to rule out lookalikes and marketplace/press
+     listings and to confirm-or-correct that name — which one (if any) is
+     the real official site, and the brand's real name to go with it.
+
+Every brand this module ever touches has name IS NULL by construction (the
+module's own query filter), so there is never an already-set name for
+either LLM call here to correct in practice — both simply derive one fresh
+whenever they land on a real website, and produce nothing when they don't.
 
 Sets instagram_profile_checked=True whether or not a website was found, so
 unresolved handles aren't retried every run — has_official_website is set
@@ -267,12 +270,20 @@ def _searxng_search(query: str) -> list[dict]:
     return out
 
 
-def _resolve_from_search(db: Session, handle: str, bio: str, external_url: str) -> tuple[str | None, str | None]:
-    """Returns (website, website_source) or (None, None)."""
+def _resolve_from_search(
+    db: Session, handle: str, bio: str, external_url: str, saved_name: str,
+) -> tuple[str | None, str | None, str]:
+    """
+    Returns (website, website_source, name). name is derived from the search
+    results (using saved_name — whatever brand_instagram_profile.py's own
+    LINK_CLASSIFY tier may already have found earlier in the same call — as
+    a hint the LLM can confirm or correct), and is "" whenever website is
+    None.
+    """
     query = f"{handle} official website"
     results = _searxng_search(query)
     if not results:
-        return None, None
+        return None, None, ""
 
     listing = "\n".join(
         f"{i + 1}. {r['title']} — {r['url']} — {r['snippet']}"
@@ -281,6 +292,7 @@ def _resolve_from_search(db: Session, handle: str, bio: str, external_url: str) 
     prompt = fill_template(
         _get_prompt(db, WEBSITE_PICK_PROMPT_NAME, WEBSITE_PICK_DEFAULT_PROMPT),
         handle=handle, bio=bio[:500], external_url=external_url or "none",
+        saved_name=saved_name or "unknown",
         query=query, results=listing,
     )
     result = call_gpt_json(prompt, context=f"website_pick @{handle}")
@@ -290,8 +302,9 @@ def _resolve_from_search(db: Session, handle: str, bio: str, external_url: str) 
         idx = 0
 
     if 1 <= idx <= len(results):
-        return results[idx - 1]["url"], "searxng_search"
-    return None, None
+        name = str(result.get("name") or "").strip()
+        return results[idx - 1]["url"], "searxng_search", name
+    return None, None, ""
 
 
 #  Apply + commit
@@ -392,11 +405,11 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
 
             website, website_source, name = _resolve_from_profile(db, handle, full_name, bio, external_url)
             if not website:
-                # SearXNG-search fallback doesn't derive a name — per the bio
-                # classify prompt's scope, a name is only ever saved when the
-                # official website itself was found from the bio/linktree.
-                website, website_source = _resolve_from_search(db, handle, bio, external_url)
-                name = ""
+                # name is always "" here — LINK_CLASSIFY only derives one
+                # when it finds "website" itself, which this branch means it
+                # didn't — passed through anyway as the search-pick prompt's
+                # saved_name hint, in case that ever changes.
+                website, website_source, name = _resolve_from_search(db, handle, bio, external_url, name)
 
             _apply_result(db, brand, name, website, website_source)
             logger.info(

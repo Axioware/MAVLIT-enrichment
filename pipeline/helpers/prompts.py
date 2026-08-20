@@ -325,7 +325,7 @@ Brand: {brand_name}
 Niche: {niche}
 Website description: {description}
 
-If Brand above is "unknown", determine the brand's real, clean company/brand name from the website description — what the business actually calls itself, not a generic phrase pulled from the text. If Brand is already known (not "unknown"), just repeat that same value back unchanged — do not second-guess it.
+If Brand above is "unknown", determine the brand's real, clean company/brand name from the website description — what the business actually calls itself, not a generic phrase pulled from the text. If Brand is already known (not "unknown"), treat it as a likely-correct hint — repeat it back unchanged if the description supports it or doesn't contradict it, but correct it to the accurate name instead if the description clearly shows it's wrong.
 
 If Niche above is "unknown", determine the single best-fit broad niche category for this brand from the description (e.g. "fashion", "beauty", "food_beverage", "tech", "fitness", "home_goods", "pets", "toys", "automotive", "travel"). If Niche is already known (not "unknown"), just repeat that same value back unchanged — do not second-guess it.
 
@@ -564,11 +564,12 @@ Reply ONLY with this JSON object, no extra text:
 
 WEBSITE_PICK_PROMPT_NAME = "brand_website_search_pick"
 WEBSITE_PICK_DEFAULT_PROMPT = """\
-You are identifying a brand's real official website from search results.
+You are identifying a brand's real official website from search results, and confirming or correcting its name.
 
 Instagram handle: {handle}
 Instagram bio: {bio}
 Instagram external URL (if any): {external_url}
+Currently saved brand name (if any): {saved_name}
 
 Search results for "{query}":
 {results}
@@ -577,7 +578,11 @@ Decide which ONE of the search results above (if any) is most likely the brand's
 
 Judge by the DOMAIN of each result, not its specific path or query string — a result URL like "https://brand.com/register?ref=800000016" is still a valid pick if brand.com is genuinely the brand's own domain; a tracking parameter or deep link doesn't disqualify it. Only the domain root is kept once picked.
 
+If, and only if, you picked a website (index is not 0): also give the brand's real, clean name in the "name" field, using the search result titles/snippets together with the saved name. If "Currently saved brand name" above is "unknown" or empty, determine the name from the search results. If a saved name IS given, treat it as a likely-correct hint — repeat it back unchanged if the results support it or don't contradict it, but correct it to the accurate name instead if the results clearly show the saved name is wrong.
+
+If index is 0 (no confident website match), "name" MUST be an empty string.
+
 Reply ONLY with this JSON object, no extra text:
-{"index": 0, "reason": "short one-line reason"}
+{"index": 0, "name": "", "reason": "short one-line reason"}
 Use the 1-based index of the correct result from the numbered list above, or 0 if none of the results are confidently the brand's real official website.\
 """
