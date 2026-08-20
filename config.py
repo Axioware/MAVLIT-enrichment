@@ -33,14 +33,13 @@ YOUTUBE_API_KEY_11 = os.getenv("YOUTUBE_API_KEY_11", "")
 YOUTUBE_API_KEY_12 = os.getenv("YOUTUBE_API_KEY_12", "")
 APIFY_TOKEN       = os.getenv("APIFY_TOKEN", "")
 
-# Google Custom Search JSON API — fallback website discovery in
+# Local SearXNG instance — fallback website discovery in
 # pipeline/enrichment_re/brand_instagram_profile.py when a brand's Instagram
-# bio link doesn't resolve to a website. Needs both a Programmable Search
-# Engine ID (cx) configured to search the whole web, and an API key from the
-# same Google Cloud project with the Custom Search API enabled. Free tier is
-# 100 queries/day.
-GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY", "")
-GOOGLE_SEARCH_CX      = os.getenv("GOOGLE_SEARCH_CX", "")
+# bio link doesn't resolve to a website. Requires JSON output enabled on the
+# SearXNG instance itself (search.formats in its settings.yml must include
+# "json" — disabled by default). No API key/quota, unlike the Google Custom
+# Search API this replaced.
+SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8080")
 
 # LLM verification (Claude) — set ENABLE_LLM=true to activate
 ENABLE_LLM        = os.getenv("ENABLE_LLM", "false").strip().lower() == "true"

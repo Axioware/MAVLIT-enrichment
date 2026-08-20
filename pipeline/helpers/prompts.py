@@ -319,19 +319,21 @@ Use empty lists if there isn't enough information to extract either one — do n
 
 BRAND_NICHE_TAGS_PROMPT_NAME = "brand_niche_tags"
 BRAND_NICHE_TAGS_DEFAULT_PROMPT = """\
-You are analyzing a brand's own website description to extract its niche category and specific sub-niche/category tags for a brand-creator sponsorship matching platform.
+You are analyzing a brand's own website description to extract its real brand name, niche category, and specific sub-niche/category tags for a brand-creator sponsorship matching platform.
 
 Brand: {brand_name}
 Niche: {niche}
 Website description: {description}
+
+If Brand above is "unknown", determine the brand's real, clean company/brand name from the website description — what the business actually calls itself, not a generic phrase pulled from the text. If Brand is already known (not "unknown"), just repeat that same value back unchanged — do not second-guess it.
 
 If Niche above is "unknown", determine the single best-fit broad niche category for this brand from the description (e.g. "fashion", "beauty", "food_beverage", "tech", "fitness", "home_goods", "pets", "toys", "automotive", "travel"). If Niche is already known (not "unknown"), just repeat that same value back unchanged — do not second-guess it.
 
 Extract specific, concrete sub-niche tags/keywords that describe what this brand actually does or sells, beyond its broad niche category (e.g. for a "fashion" brand: "sustainable clothing", "streetwear", "plus-size fashion"; for a "tech" brand: "smart home devices", "gaming laptops", "wireless earbuds").
 
 Reply ONLY with this JSON object, no extra text:
-{"niche": "...", "tags": ["...", "..."]}
-Use an empty list for tags if the description doesn't give enough information — do not invent tags not supported by the input. If you truly cannot determine a niche from the description either, use "unknown" for niche.\
+{"name": "...", "niche": "...", "tags": ["...", "..."]}
+Use an empty list for tags if the description doesn't give enough information — do not invent tags not supported by the input. If you truly cannot determine a niche from the description either, use "unknown" for niche. If you truly cannot determine a real brand name from the description, use "unknown" for name.\
 """
 
 

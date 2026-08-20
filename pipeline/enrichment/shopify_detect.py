@@ -7,17 +7,24 @@ Fetches each brand's homepage to:
   3. Extract full social media profile URLs → instagram_handle,
      facebook_page, youtube_channel_id, linkedin_id
   4. Scrape the brand's about page → description
-  5. Send that description to the LLM to extract sub-niche/category tags,
-     stored in brands_niches.tags — and, if brands_raw.niche is currently
-     NULL (bare brands created by content_creator_re / brand_wikidata_lookup
-     that never got a niche), ask the same call to also determine a best-fit
-     niche and backfill brands_raw.niche with it. An existing niche is never
-     overwritten — the LLM is told to just echo it back unchanged. If the
-     LLM can't confidently classify it, "unknown" is stored as a real niche
-     value (not left NULL) — that distinguishes "looked and couldn't tell"
-     from "never processed", so a brand doesn't sit unclassified forever.
-     Skipped if OPENAI_KEY isn't set. brands_niches is upserted (not
-     just updated) since a bare brand has no existing row there yet.
+  5. Send that description to the LLM (brand_niche_tags) to extract
+     sub-niche/category tags, stored in brands_niches.tags — and, for any of
+     brands_raw.name / .niche that's currently unset (bare brands created by
+     content_creator_re / brand_wikidata_lookup / brand_instagram_profile
+     that never got one), ask the same call to also determine a best-fit
+     value and backfill it. An already-known name/niche is never
+     overwritten — the LLM is told to just echo it back unchanged. For
+     niche specifically, if the LLM can't confidently classify it, "unknown"
+     is stored as a real value (not left NULL) — that distinguishes "looked
+     and couldn't tell" from "never processed", so a brand doesn't sit
+     unclassified forever. Name has no such "unknown" sentinel — NULL
+     already means "unresolved bare brand" throughout enrichment_re, so an
+     undetermined name is just left NULL. A derived name is checked against
+     existing brands_raw.name_normalized values before being assigned, and
+     silently skipped (logged, not raised) on a collision with an existing
+     brand. Skipped entirely if OPENAI_KEY isn't set. brands_niches is
+     upserted (not just updated) since a bare brand has no existing row
+     there yet.
 
 Social fields are only written if the column is currently NULL, so they
 don't overwrite more-authoritative Wikidata data fetched earlier.
@@ -43,6 +50,7 @@ from sqlalchemy.orm import Session
 from config import OPENAI_KEY
 from pipeline.db import BrandNiche, BrandRaw, Prompt
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.helpers.normalize import normalize
 from pipeline.helpers.prompts import BRAND_NICHE_TAGS_PROMPT_NAME, BRAND_NICHE_TAGS_DEFAULT_PROMPT
 from pipeline.helpers.social import normalize_social_url
 
@@ -221,30 +229,39 @@ def _get_brand_niche_tags_prompt(db: Session) -> str:
     return row.content if row else BRAND_NICHE_TAGS_DEFAULT_PROMPT
 
 
-def _extract_brand_niche_and_tags(db: Session, brand: BrandRaw, description: str) -> tuple[str | None, list[str]]:
+def _extract_brand_niche_and_tags(
+    db: Session, brand: BrandRaw, description: str,
+) -> tuple[str | None, str | None, list[str]]:
     """
     Ask the LLM for concrete sub-niche/category tags from a brand's scraped
-    description, and — only when brand.niche is currently unset — a best-fit
-    broad niche guess too (the prompt is told to just echo back an already-
-    known niche unchanged, so this never overwrites one). Returns
-    (None, []) on any failure or if OPENAI_KEY isn't set — never
-    raises, so this never blocks the rest of enrich_shopify's per-brand
-    processing.
+    description, and — only when the corresponding field is currently unset
+    — a best-fit name and/or broad niche guess too (the prompt is told to
+    just echo back an already-known value unchanged, so this never
+    overwrites either one). Returns (None, None, []) on any failure or if
+    OPENAI_KEY isn't set — never raises, so this never blocks the rest of
+    enrich_shopify's per-brand processing.
     """
     if not OPENAI_KEY:
-        return None, []
+        return None, None, []
     prompt = fill_template(
         _get_brand_niche_tags_prompt(db),
-        brand_name=brand.name or brand.instagram_handle or "unknown",
+        brand_name=brand.name or "unknown",
         niche=brand.niche or "unknown",
         description=description,
     )
     result = call_gpt_json(prompt, context=f"brand niche tags for {brand.name}")
     if not isinstance(result, dict):
-        return None, []
+        return None, None, []
 
-    # "unknown" is a real, storable answer here (not treated as no-answer) —
-    # it distinguishes "the LLM looked and couldn't tell" from "never
+    # Unlike niche (below), "unknown" is never stored for name — name IS
+    # NULL already means "unresolved bare brand" throughout enrichment_re,
+    # so a literal "unknown" string here would break that convention rather
+    # than usefully distinguish anything.
+    name = result.get("name")
+    name = name.strip() if isinstance(name, str) and name.strip() and name.strip().lower() != "unknown" else None
+
+    # "unknown" IS a real, storable answer for niche though — it
+    # distinguishes "the LLM looked and couldn't tell" from "never
     # processed", so a brand doesn't sit at niche=NULL forever just because
     # its description was too vague to classify.
     niche = result.get("niche")
@@ -252,7 +269,7 @@ def _extract_brand_niche_and_tags(db: Session, brand: BrandRaw, description: str
 
     tags = result.get("tags")
     tags = [t for t in tags if isinstance(t, str) and t.strip()] if isinstance(tags, list) else []
-    return niche, tags
+    return name, niche, tags
 
 
 def _upsert_brand_niche(db: Session, brand_id: int, niche: str, description: str, tags: list[str] | None) -> None:
@@ -270,17 +287,43 @@ def _upsert_brand_niche(db: Session, brand_id: int, niche: str, description: str
 
 def _update_brand_niche_description_and_tags(db: Session, brand: BrandRaw, description: str) -> None:
     """
-    Extracts sub-niche tags (and a niche backfill, if brand.niche was NULL)
-    from the scraped description via the LLM, then upserts brands_niches —
-    a plain UPDATE would silently no-op for bare brands (content_creator_re /
-    brand_wikidata_lookup rows) that have no brands_niches row yet.
+    Extracts a name backfill (if brand.name was NULL), sub-niche tags, and a
+    niche backfill (if brand.niche was NULL) from the scraped description via
+    the LLM, then upserts brands_niches — a plain UPDATE would silently no-op
+    for bare brands (content_creator_re / brand_wikidata_lookup rows) that
+    have no brands_niches row yet.
+
+    Name backfill is checked against existing brands_raw.name_normalized
+    values BEFORE assigning (rather than assigning then catching an
+    IntegrityError on commit) — this function runs mid-processing, with
+    is_shopify/socials/description already staged but not yet committed for
+    this brand elsewhere in enrich_shopify's loop, so a rollback here would
+    lose that other work too, not just the name.
     """
+    had_name  = bool(brand.name)
     had_niche = bool(brand.niche)
-    niche, tags = _extract_brand_niche_and_tags(db, brand, description)
+    name, niche, tags = _extract_brand_niche_and_tags(db, brand, description)
+
+    if not had_name and name:
+        normalized = normalize(name)
+        collision = db.query(BrandRaw.id).filter(
+            BrandRaw.name_normalized == normalized,
+            BrandRaw.id != brand.id,
+        ).first()
+        if collision:
+            logger.warning(
+                "Shopify/socials check: brand_id=%d derived name '%s' collides with existing "
+                "brand_id=%d — left unresolved",
+                brand.id, name, collision.id,
+            )
+        else:
+            brand.name = name
+            brand.name_normalized = normalized
+            logger.info("Shopify/socials check: brand_id=%d name backfilled → '%s'", brand.id, name)
 
     if not had_niche and niche:
         brand.niche = niche
-        logger.info("Shopify/socials check: %s niche backfilled → '%s'", brand.name, niche)
+        logger.info("Shopify/socials check: %s niche backfilled → '%s'", brand.name or f"brand_id={brand.id}", niche)
 
     effective_niche = brand.niche
     if effective_niche:

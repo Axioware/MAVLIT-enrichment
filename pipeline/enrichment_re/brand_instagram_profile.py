@@ -21,15 +21,15 @@ Resolution order, first hit wins:
          (carrying its own derived name along with it).
   3. If nothing resolved from the profile (no external URL, private
      account, or every link classified "social"/"marketplace"/"unknown"),
-     fall back to a Google Custom Search for "<handle> official website",
-     take the top 5 results, and ask a second LLM call
-     (brand_website_search_pick) — given the profile's own bio/external URL
-     as context to rule out lookalikes and marketplace/press listings —
-     which one (if any) is the real official site. This fallback tier does
-     NOT derive a name — brands_raw.name is only ever backfilled when the
-     official website itself was found directly from the bio/linktree in
-     step 2, never from the raw Instagram display name and never from a
-     search-fallback match.
+     fall back to a search against a local SearXNG instance (config.
+     SEARXNG_URL) for "<handle> official website", take the top 5 results,
+     and ask a second LLM call (brand_website_search_pick) — given the
+     profile's own bio/external URL as context to rule out lookalikes and
+     marketplace/press listings — which one (if any) is the real official
+     site. This fallback tier does NOT derive a name — brands_raw.name is
+     only ever backfilled when the official website itself was found
+     directly from the bio/linktree in step 2, never from the raw Instagram
+     display name and never from a search-fallback match.
 
 Sets instagram_profile_checked=True whether or not a website was found, so
 unresolved handles aren't retried every run — has_official_website is set
@@ -46,7 +46,7 @@ from bs4 import BeautifulSoup
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from config import APIFY_TOKEN, GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_CX
+from config import APIFY_TOKEN, SEARXNG_URL
 from pipeline.db import BrandRaw, Prompt
 from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
@@ -233,39 +233,44 @@ def _resolve_from_profile(
     return None, None, ""
 
 
-#  Google search fallback
+#  SearXNG search fallback
 
-def _google_search(query: str) -> list[dict]:
-    """Top results: [{"title", "url", "snippet"}, ...] — [] if unconfigured or the call fails."""
-    if not (GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_CX):
-        logger.warning("GOOGLE_SEARCH_API_KEY/GOOGLE_SEARCH_CX not set — skipping search fallback")
-        return []
+def _searxng_search(query: str) -> list[dict]:
+    """
+    Top results via the local SearXNG instance: [{"title", "url", "snippet"},
+    ...] — [] if it's unreachable, JSON output isn't enabled on it (see
+    config.SEARXNG_URL's comment), or the call otherwise fails. Deduped by
+    URL, capped at _SEARCH_RESULTS.
+    """
     try:
         resp = httpx.get(
-            "https://www.googleapis.com/customsearch/v1",
-            params={
-                "key": GOOGLE_SEARCH_API_KEY,
-                "cx":  GOOGLE_SEARCH_CX,
-                "q":   query,
-                "num": _SEARCH_RESULTS,
-            },
+            f"{SEARXNG_URL.rstrip('/')}/search",
+            params={"q": query, "format": "json"},
             timeout=15,
         )
         resp.raise_for_status()
-        items = resp.json().get("items") or []
-        return [
-            {"title": i.get("title", ""), "url": i.get("link", ""), "snippet": i.get("snippet", "")}
-            for i in items[:_SEARCH_RESULTS]
-        ]
+        items = resp.json().get("results") or []
     except Exception as exc:
-        logger.warning("Google search failed for %r: %s", query, exc)
+        logger.warning("SearXNG search failed for %r: %s", query, exc)
         return []
+
+    seen: set[str] = set()
+    out: list[dict] = []
+    for i in items:
+        url = (i.get("url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        out.append({"title": i.get("title", ""), "url": url, "snippet": i.get("content", "")})
+        if len(out) >= _SEARCH_RESULTS:
+            break
+    return out
 
 
 def _resolve_from_search(db: Session, handle: str, bio: str, external_url: str) -> tuple[str | None, str | None]:
     """Returns (website, website_source) or (None, None)."""
     query = f"{handle} official website"
-    results = _google_search(query)
+    results = _searxng_search(query)
     if not results:
         return None, None
 
@@ -285,7 +290,7 @@ def _resolve_from_search(db: Session, handle: str, bio: str, external_url: str) 
         idx = 0
 
     if 1 <= idx <= len(results):
-        return results[idx - 1]["url"], "google_search"
+        return results[idx - 1]["url"], "searxng_search"
     return None, None
 
 
@@ -387,7 +392,7 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
 
             website, website_source, name = _resolve_from_profile(db, handle, full_name, bio, external_url)
             if not website:
-                # Google-search fallback doesn't derive a name — per the bio
+                # SearXNG-search fallback doesn't derive a name — per the bio
                 # classify prompt's scope, a name is only ever saved when the
                 # official website itself was found from the bio/linktree.
                 website, website_source = _resolve_from_search(db, handle, bio, external_url)
