@@ -223,6 +223,13 @@ def _active_key() -> str:
         _API_KEYS = [k for k in [YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2, YOUTUBE_API_KEY_3, YOUTUBE_API_KEY_4, YOUTUBE_API_KEY_5, YOUTUBE_API_KEY_6, YOUTUBE_API_KEY_7, YOUTUBE_API_KEY_8, YOUTUBE_API_KEY_9, YOUTUBE_API_KEY_10, YOUTUBE_API_KEY_11, YOUTUBE_API_KEY_12] if k]
     if not _API_KEYS:
         raise _QuotaExhausted("No YouTube API keys configured — set YOUTUBE_API_KEY in .env")
+    # _key_index is never reset once every key has been rotated through
+    # (see _rotate_key) — without this bounds check, every call after the
+    # first full exhaustion raises a raw IndexError instead of the
+    # _QuotaExhausted the rest of this module (and every caller) is built
+    # to catch and handle gracefully.
+    if _key_index >= len(_API_KEYS):
+        raise _QuotaExhausted("All configured YouTube API keys exhausted")
     return _API_KEYS[_key_index]
 
 

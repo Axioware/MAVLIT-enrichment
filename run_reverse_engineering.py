@@ -183,8 +183,8 @@ def main() -> None:
         run_per_brand("8/11 meta_ads",                enrich_meta_ads,              db, brand_ids)
 
         website_brand_ids = {
-            row.id
-            for (row,) in db.query(BrandRaw.id)
+            row_id
+            for (row_id,) in db.query(BrandRaw.id)
             .filter(
                 BrandRaw.id.in_(brand_ids),
                 BrandRaw.has_official_website.is_(True),
