@@ -104,12 +104,35 @@ _TOP_CANDIDATES = 5
 # Domains that are never a brand's own official website — filtered out
 # before ranking so a social/platform profile can't crowd out the real
 # site just by having a higher individual SearXNG rank. Edit this set to
-# add/remove platforms.
+# add/remove platforms. Checked as an exact domain match — these platforms
+# host each account under a path (youtube.com/@handle,
+# instagram.com/handle), not a subdomain.
 _PLATFORM_DOMAINS = frozenset([
     "instagram.com", "youtube.com", "tiktok.com", "facebook.com",
     "x.com", "twitter.com", "linkedin.com", "linktr.ee",
     "patreon.com", "reddit.com", "tumblr.com",
 ])
+
+# Free blog/website-builder hosting platforms — a subdomain on one of these
+# (e.g. "simplymander.wordpress.com") is someone's personal blog/page, not a
+# business's own dedicated domain, even when it's genuinely written/run by
+# the brand's own owner (confirmed in production: the LLM confidently
+# picked a brand's wordpress.com blog as "the official website" when it was
+# the only candidate left after platform filtering — filtering these out
+# here means the LLM never sees them as an option at all, which is more
+# reliable than relying on it to consistently apply that judgment call
+# every time). Checked as domain == base OR domain ends with "." + base
+# (subdomain match), unlike _PLATFORM_DOMAINS' exact match, since these
+# platforms host each user under a subdomain rather than a path.
+_FREE_HOSTING_DOMAINS = frozenset([
+    "wordpress.com", "blogspot.com", "weebly.com", "wixsite.com",
+    "medium.com", "substack.com", "carrd.co", "godaddysites.com",
+    "sites.google.com", "tripod.com", "angelfire.com",
+])
+
+
+def _is_free_hosting_domain(domain: str) -> bool:
+    return any(domain == base or domain.endswith("." + base) for base in _FREE_HOSTING_DOMAINS)
 
 
 #  Prompt lookup
@@ -319,11 +342,14 @@ def _tld_score(domain: str) -> int:
 def _rank_domain_candidates(handle: str, results: list[dict]) -> list[dict]:
     """
     Groups raw SearXNG results by domain, drops known platform/social
-    domains (_PLATFORM_DOMAINS), and scores what's left so a brand's real
-    site — which often shows up as several different subpages spread across
-    a long result list, each individually outranked by single-appearance
-    platform links — wins on aggregate signal instead of being discarded
-    before the LLM ever sees it.
+    domains (_PLATFORM_DOMAINS) and free blog/website-builder hosting
+    domains (_FREE_HOSTING_DOMAINS — a personal wordpress.com/blogspot.com/
+    etc. subdomain is never a business's own official website even when
+    it's genuinely written by the brand's owner), and scores what's left so
+    a brand's real site — which often shows up as several different
+    subpages spread across a long result list, each individually
+    outranked by single-appearance platform links — wins on aggregate
+    signal instead of being discarded before the LLM ever sees it.
 
     Score per domain = handle-in-domain match (+3) + frequency (+1 per
     URL seen, capped at +5) + has a root-path URL in its group (+2) +
@@ -332,10 +358,16 @@ def _rank_domain_candidates(handle: str, results: list[dict]) -> list[dict]:
     Returns up to _TOP_CANDIDATES candidates, highest score first, each:
       {"domain", "url" (root path preferred as the representative),
        "title", "snippet", "count", "score"}
+    Returns [] if nothing survives filtering — callers must treat that as
+    "no website found", not fall back to a filtered-out domain.
     """
-    filtered = [r for r in results if _extract_domain(r["url"]) not in _PLATFORM_DOMAINS]
+    filtered = [
+        r for r in results
+        if _extract_domain(r["url"]) not in _PLATFORM_DOMAINS
+        and not _is_free_hosting_domain(_extract_domain(r["url"]))
+    ]
     logger.info(
-        "SearXNG filtered results for @%s (platform domains removed): %d -> %d — %s",
+        "SearXNG filtered results for @%s (platform/free-hosting domains removed): %d -> %d — %s",
         handle, len(results), len(filtered), [r["url"] for r in filtered],
     )
 
