@@ -571,10 +571,10 @@ Instagram bio: {bio}
 Instagram external URL (if any): {external_url}
 Currently saved brand name (if any): {saved_name}
 
-Search results for "{query}":
+Search results for "{query}" (already deduplicated to one representative URL per domain — social/platform domains like Instagram, YouTube, Linktree, etc. have already been removed, and each is annotated with how many times that domain appeared across the full raw result set):
 {results}
 
-Decide which ONE of the search results above (if any) is most likely the brand's own official website — not a marketplace listing (Amazon, Etsy shop page, etc.), not a social media profile, not a press/news article, not an unrelated business that happens to share a similar name.
+Decide which ONE of the results above (if any) is most likely the brand's own official website — not a marketplace listing (Amazon, Etsy shop page, etc.), not a press/news article, not an unrelated business that happens to share a similar name. A domain appearing many times across the raw results is a meaningful signal it's the real site (its own multiple pages tend to all get indexed), but isn't decisive on its own — still weigh it against the title/snippet content and the handle/bio/saved-name context.
 
 Judge by the DOMAIN of each result, not its specific path or query string — a result URL like "https://brand.com/register?ref=800000016" is still a valid pick if brand.com is genuinely the brand's own domain; a tracking parameter or deep link doesn't disqualify it. Only the domain root is kept once picked.
 

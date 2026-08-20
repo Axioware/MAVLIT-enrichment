@@ -22,12 +22,18 @@ Resolution order, first hit wins:
   3. If nothing resolved from the profile (no external URL, private
      account, or every link classified "social"/"marketplace"/"unknown"),
      fall back to a search against a local SearXNG instance (config.
-     SEARXNG_URL) for "<handle> official website", take the top 5 results,
-     and ask a second LLM call (brand_website_search_pick) — given the
-     profile's own bio/external URL, plus whatever name step 2 may already
-     have derived, as context to rule out lookalikes and marketplace/press
-     listings and to confirm-or-correct that name — which one (if any) is
-     the real official site, and the brand's real name to go with it.
+     SEARXNG_URL) for "<handle> official website" — up to _RAW_RESULTS_LIMIT
+     raw results, grouped by domain and ranked (_rank_domain_candidates;
+     see its docstring) rather than just taking the first few URLs, since a
+     brand's real site often appears as several different subpages spread
+     across a long result list, each individually outranked by
+     single-appearance social/platform links. The top _TOP_CANDIDATES
+     domains go to a second LLM call (brand_website_search_pick) — given
+     the profile's own bio/external URL, plus whatever name step 2 may
+     already have derived, as context to rule out lookalikes and
+     marketplace/press listings and to confirm-or-correct that name —
+     which one (if any) is the real official site, and the brand's real
+     name to go with it.
 
 Every brand this module ever touches has name IS NULL by construction (the
 module's own query filter), so there is never an already-set name for
@@ -83,8 +89,27 @@ _PAGE_HEADERS = {
     "Sec-Fetch-User": "?1",
 }
 _PAGE_TIMEOUT      = 12
-_SEARCH_RESULTS    = 5
 _MAX_LINKTREE_LINKS = 10  # safety cap on how many outbound links to classify per linktree page
+
+# How many raw (URL-deduped) SearXNG results to pull before domain
+# aggregation/ranking — deliberately generous. The brand's own site often
+# shows up as several different subpages spread across a long result list
+# (e.g. simplymander.com/, /about, /membership all individually outranked
+# by single-appearance platform links), so capping this too low throws away
+# exactly the frequency signal _rank_domain_candidates depends on.
+_RAW_RESULTS_LIMIT = 40
+# How many top-ranked DOMAIN candidates actually get sent to the LLM.
+_TOP_CANDIDATES = 5
+
+# Domains that are never a brand's own official website — filtered out
+# before ranking so a social/platform profile can't crowd out the real
+# site just by having a higher individual SearXNG rank. Edit this set to
+# add/remove platforms.
+_PLATFORM_DOMAINS = frozenset([
+    "instagram.com", "youtube.com", "tiktok.com", "facebook.com",
+    "x.com", "twitter.com", "linkedin.com", "linktr.ee",
+    "patreon.com", "reddit.com", "tumblr.com",
+])
 
 
 #  Prompt lookup
@@ -240,10 +265,11 @@ def _resolve_from_profile(
 
 def _searxng_search(query: str) -> list[dict]:
     """
-    Top results via the local SearXNG instance: [{"title", "url", "snippet"},
+    Raw results via the local SearXNG instance: [{"title", "url", "snippet"},
     ...] — [] if it's unreachable, JSON output isn't enabled on it (see
     config.SEARXNG_URL's comment), or the call otherwise fails. Deduped by
-    URL, capped at _SEARCH_RESULTS.
+    exact URL only (domain-level grouping happens separately, in
+    _rank_domain_candidates) and capped at _RAW_RESULTS_LIMIT.
     """
     try:
         resp = httpx.get(
@@ -265,29 +291,123 @@ def _searxng_search(query: str) -> list[dict]:
             continue
         seen.add(url)
         out.append({"title": i.get("title", ""), "url": url, "snippet": i.get("content", "")})
-        if len(out) >= _SEARCH_RESULTS:
+        if len(out) >= _RAW_RESULTS_LIMIT:
             break
+
+    logger.info("SearXNG raw results for %r: %d — %s", query, len(out), [r["url"] for r in out])
     return out
+
+
+def _is_root_path(url: str) -> bool:
+    """True if url's path is empty or just "/" — a homepage, not a subpage."""
+    try:
+        return urlparse(url).path in ("", "/")
+    except Exception:
+        return False
+
+
+def _tld_score(domain: str) -> int:
+    """Prefer generic top-level domains over country-code/other ones — same heuristic as wikidata.py's _website_score."""
+    parts = domain.split(".")
+    if len(parts) == 2 and parts[-1] in ("com", "org", "net", "io"):
+        return 2
+    if len(parts) == 2:
+        return 1
+    return 0
+
+
+def _rank_domain_candidates(handle: str, results: list[dict]) -> list[dict]:
+    """
+    Groups raw SearXNG results by domain, drops known platform/social
+    domains (_PLATFORM_DOMAINS), and scores what's left so a brand's real
+    site — which often shows up as several different subpages spread across
+    a long result list, each individually outranked by single-appearance
+    platform links — wins on aggregate signal instead of being discarded
+    before the LLM ever sees it.
+
+    Score per domain = handle-in-domain match (+3) + frequency (+1 per
+    URL seen, capped at +5) + has a root-path URL in its group (+2) +
+    TLD quality (0-2, see _tld_score).
+
+    Returns up to _TOP_CANDIDATES candidates, highest score first, each:
+      {"domain", "url" (root path preferred as the representative),
+       "title", "snippet", "count", "score"}
+    """
+    filtered = [r for r in results if _extract_domain(r["url"]) not in _PLATFORM_DOMAINS]
+    logger.info(
+        "SearXNG filtered results for @%s (platform domains removed): %d -> %d — %s",
+        handle, len(results), len(filtered), [r["url"] for r in filtered],
+    )
+
+    groups: dict[str, list[dict]] = {}
+    for r in filtered:
+        domain = _extract_domain(r["url"])
+        if domain:
+            groups.setdefault(domain, []).append(r)
+
+    logger.info(
+        "SearXNG grouped domains for @%s: %s",
+        handle, {d: len(g) for d, g in groups.items()},
+    )
+
+    handle_key = "".join(ch for ch in handle.lower() if ch.isalnum())
+
+    candidates: list[dict] = []
+    for domain, group in groups.items():
+        root = next((r for r in group if _is_root_path(r["url"])), None)
+        representative = root or group[0]
+
+        domain_key = "".join(ch for ch in domain.split(".")[0].lower() if ch.isalnum())
+        handle_match  = 3 if handle_key and handle_key in domain_key else 0
+        frequency     = min(len(group), 5)
+        root_bonus    = 2 if root else 0
+        tld           = _tld_score(domain)
+        score = handle_match + frequency + root_bonus + tld
+
+        candidates.append({
+            "domain": domain,
+            "url": representative["url"],
+            "title": representative["title"],
+            "snippet": representative["snippet"],
+            "count": len(group),
+            "score": score,
+        })
+
+    candidates.sort(key=lambda c: c["score"], reverse=True)
+
+    logger.info(
+        "SearXNG ranked domain candidates for @%s: %s",
+        handle, [(c["domain"], f"count={c['count']}", f"score={c['score']}") for c in candidates],
+    )
+
+    return candidates[:_TOP_CANDIDATES]
 
 
 def _resolve_from_search(
     db: Session, handle: str, bio: str, external_url: str, saved_name: str,
 ) -> tuple[str | None, str | None, str]:
     """
-    Returns (website, website_source, name). name is derived from the search
-    results (using saved_name — whatever brand_instagram_profile.py's own
-    LINK_CLASSIFY tier may already have found earlier in the same call — as
-    a hint the LLM can confirm or correct), and is "" whenever website is
-    None.
+    Returns (website, website_source, name). Candidates sent to the LLM are
+    ranked DOMAINS (see _rank_domain_candidates), not raw top-N URLs — a
+    domain's frequency across many result pages is itself a strong signal
+    that a naive "first N URLs" cutoff would discard. name is derived from
+    the search results (using saved_name — whatever brand_instagram_
+    profile.py's own LINK_CLASSIFY tier may already have found earlier in
+    the same call — as a hint the LLM can confirm or correct), and is ""
+    whenever website is None.
     """
     query = f"{handle} official website"
-    results = _searxng_search(query)
-    if not results:
+    raw_results = _searxng_search(query)
+    if not raw_results:
+        return None, None, ""
+
+    candidates = _rank_domain_candidates(handle, raw_results)
+    if not candidates:
         return None, None, ""
 
     listing = "\n".join(
-        f"{i + 1}. {r['title']} — {r['url']} — {r['snippet']}"
-        for i, r in enumerate(results)
+        f"{i + 1}. {c['url']} — {c['title']} — {c['snippet']} (this domain appeared {c['count']}x in search results)"
+        for i, c in enumerate(candidates)
     )
     prompt = fill_template(
         _get_prompt(db, WEBSITE_PICK_PROMPT_NAME, WEBSITE_PICK_DEFAULT_PROMPT),
@@ -301,9 +421,9 @@ def _resolve_from_search(
     except (TypeError, ValueError):
         idx = 0
 
-    if 1 <= idx <= len(results):
+    if 1 <= idx <= len(candidates):
         name = str(result.get("name") or "").strip()
-        return results[idx - 1]["url"], "searxng_search", name
+        return candidates[idx - 1]["url"], "searxng_search", name
     return None, None, ""
 
 
