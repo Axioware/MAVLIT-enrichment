@@ -536,9 +536,10 @@ Set looks_good to false if there is at least one real concern worth flagging. is
 
 LINK_CLASSIFY_PROMPT_NAME = "instagram_link_classify"
 LINK_CLASSIFY_DEFAULT_PROMPT = """\
-You are classifying a URL found in an Instagram bio to determine what kind of link it is.
+You are classifying a URL found in an Instagram bio to determine what kind of link it is, and — only if it turns out to be the brand's own official website — extracting the brand's real, clean name.
 
 Instagram handle: {handle}
+Instagram display name (from Instagram, often messy marketing copy): {full_name}
 Bio: {bio}
 URL being classified: {url}
 
@@ -551,8 +552,12 @@ Classify this URL into exactly one category:
 
 Judge "website" by the DOMAIN, not the specific path or query string — a URL like "https://brand.com/register?ref=800000016" or "https://brand.com/shop/product123" is still the brand's own website (category "website"); a tracking parameter, referral code, or deep link does not make it a linktree or unknown. But a URL whose domain is a third-party marketplace (amazon.com, etsy.com, ebay.com, walmart.com, etc.) is ALWAYS "marketplace", never "website" — no matter how specific or branded-looking the path is (e.g. "amazon.com/stores/page/8A8B3EB2-E356-4C27-B4B2-12EEFCEB05CF" is "marketplace", not "website"). Only the domain root is kept once classified as "website", so don't let the path/query change your answer for a genuine brand domain.
 
+If, and only if, category is "website": also give the brand's real, clean name in the "name" field. The Instagram display name above is often marketing copy, not the real name — it can include emojis, taglines, "Official", "| Shop Now", pipe-separated slogans, or ALL CAPS styling. Derive the actual brand name from the display name, bio, and this website's own domain/identity together (e.g. domain "jpfans.com" supports a name like "JPfans"), preserving deliberate stylization (e.g. "adidas" lowercase, "eBay").
+
+If category is NOT "website" (social/linktree/marketplace/unknown), "name" MUST be an empty string — do not guess a name for a link that isn't the brand's own site.
+
 Reply ONLY with this JSON object, no extra text:
-{"category": "website", "reason": "short one-line reason"}\
+{"category": "website", "name": "", "reason": "short one-line reason"}\
 """
 
 WEBSITE_PICK_PROMPT_NAME = "brand_website_search_pick"

@@ -11,25 +11,30 @@ Resolution order, first hit wins:
   1. Scrape the profile (Apify, same actor/addParentData trick used
      elsewhere) for fullName + biography + externalUrl.
   2. Classify the bio's externalUrl via LLM (instagram_link_classify) as
-     "website" / "social" / "linktree" / "unknown".
-       - "website"  -> store it directly.
+     "website" / "social" / "linktree" / "marketplace" / "unknown". This same
+     call also derives the brand's real name (from fullName/bio/the
+     website's own domain together) whenever — and only whenever — it
+     lands on "website"; every other category returns an empty name.
+       - "website"  -> store the URL and the LLM-derived name directly.
        - "linktree" -> scrape that link-in-bio page's outbound links and
-         classify each one the same way until one comes back "website".
+         classify each one the same way until one comes back "website"
+         (carrying its own derived name along with it).
   3. If nothing resolved from the profile (no external URL, private
-     account, or every link classified "social"/"unknown"), fall back to a
-     Google Custom Search for "<handle> official website", take the top 5
-     results, and ask a second LLM call (brand_website_search_pick) —
-     given the profile's own bio/external URL as context to rule out
-     lookalikes and marketplace/press listings — which one (if any) is the
-     real official site.
+     account, or every link classified "social"/"marketplace"/"unknown"),
+     fall back to a Google Custom Search for "<handle> official website",
+     take the top 5 results, and ask a second LLM call
+     (brand_website_search_pick) — given the profile's own bio/external URL
+     as context to rule out lookalikes and marketplace/press listings —
+     which one (if any) is the real official site. This fallback tier does
+     NOT derive a name — brands_raw.name is only ever backfilled when the
+     official website itself was found directly from the bio/linktree in
+     step 2, never from the raw Instagram display name and never from a
+     search-fallback match.
 
-fullName backfills brands_raw.name whenever a website is also found (a bare
-row with a name but no website/niche/source still isn't useful downstream —
-shopify_detect.py, wikidata_socials.py etc. all require an official website
-to run at all), but not that everything else. Sets instagram_profile_checked=
-True whether or not a website was found, so unresolved handles aren't
-retried every run — has_official_website is set False in that case so the
-row is still distinguishable from "never attempted".
+Sets instagram_profile_checked=True whether or not a website was found, so
+unresolved handles aren't retried every run — has_official_website is set
+False in that case so the row is still distinguishable from "never
+attempted".
 """
 
 import logging
@@ -160,15 +165,25 @@ def _scrape_profile(handle: str) -> dict | None:
 
 #  Link classification (bio URL, and linktree outbound links)
 
-def _classify_link(db: Session, handle: str, bio: str, url: str) -> str:
-    """Returns one of 'website' / 'social' / 'linktree' / 'marketplace' / 'unknown'."""
+def _classify_link(db: Session, handle: str, full_name: str, bio: str, url: str) -> tuple[str, str]:
+    """
+    Returns (category, name). category is one of 'website' / 'social' /
+    'linktree' / 'marketplace' / 'unknown'. name is only ever non-empty when
+    category == 'website' — the prompt is instructed to derive the brand's
+    real name (from full_name/bio/domain together) in that case only, and
+    to leave it blank otherwise; enforced again here in case the model
+    doesn't comply.
+    """
     prompt = fill_template(
         _get_prompt(db, LINK_CLASSIFY_PROMPT_NAME, LINK_CLASSIFY_DEFAULT_PROMPT),
-        handle=handle, bio=bio[:500], url=url,
+        handle=handle, full_name=full_name or "", bio=bio[:500], url=url,
     )
     result = call_gpt_json(prompt, context=f"link_classify @{handle} {url}")
     category = str(result.get("category") or "unknown").strip().lower()
-    return category if category in ("website", "social", "linktree", "marketplace") else "unknown"
+    if category not in ("website", "social", "linktree", "marketplace"):
+        category = "unknown"
+    name = str(result.get("name") or "").strip() if category == "website" else ""
+    return category, name
 
 
 def _scrape_outbound_links(url: str) -> list[str]:
@@ -198,21 +213,24 @@ def _scrape_outbound_links(url: str) -> list[str]:
     return links
 
 
-def _resolve_from_profile(db: Session, handle: str, bio: str, external_url: str) -> tuple[str | None, str | None]:
-    """Returns (website, website_source) or (None, None)."""
+def _resolve_from_profile(
+    db: Session, handle: str, full_name: str, bio: str, external_url: str,
+) -> tuple[str | None, str | None, str]:
+    """Returns (website, website_source, name) — name is "" whenever website is None."""
     if not external_url:
-        return None, None
+        return None, None, ""
 
-    category = _classify_link(db, handle, bio, external_url)
+    category, name = _classify_link(db, handle, full_name, bio, external_url)
     if category == "website":
-        return external_url, "instagram_bio"
+        return external_url, "instagram_bio", name
 
     if category == "linktree":
         for link in _scrape_outbound_links(external_url):
-            if _classify_link(db, handle, bio, link) == "website":
-                return link, "instagram_linktree"
+            link_category, link_name = _classify_link(db, handle, full_name, bio, link)
+            if link_category == "website":
+                return link, "instagram_linktree", link_name
 
-    return None, None
+    return None, None, ""
 
 
 #  Google search fallback
@@ -274,11 +292,11 @@ def _resolve_from_search(db: Session, handle: str, bio: str, external_url: str) 
 #  Apply + commit
 
 def _apply_result(
-    db: Session, brand: BrandRaw, full_name: str, website: str | None, website_source: str | None,
+    db: Session, brand: BrandRaw, name: str, website: str | None, website_source: str | None,
 ) -> None:
-    if full_name and not brand.name:
-        brand.name = full_name
-        brand.name_normalized = normalize(full_name)
+    if name and not brand.name:
+        brand.name = name
+        brand.name_normalized = normalize(name)
 
     if website:
         website = _normalize_website(website)
@@ -367,11 +385,15 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
             bio          = profile.get("biography", "")
             external_url = profile.get("externalUrl", "")
 
-            website, website_source = _resolve_from_profile(db, handle, bio, external_url)
+            website, website_source, name = _resolve_from_profile(db, handle, full_name, bio, external_url)
             if not website:
+                # Google-search fallback doesn't derive a name — per the bio
+                # classify prompt's scope, a name is only ever saved when the
+                # official website itself was found from the bio/linktree.
                 website, website_source = _resolve_from_search(db, handle, bio, external_url)
+                name = ""
 
-            _apply_result(db, brand, full_name, website, website_source)
+            _apply_result(db, brand, name, website, website_source)
             logger.info(
                 "Brand Instagram profile lookup: @%s → %s (%s)",
                 handle, website or "no website found", website_source or "unresolved",
