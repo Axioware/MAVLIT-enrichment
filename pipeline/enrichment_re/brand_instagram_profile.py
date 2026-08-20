@@ -420,10 +420,23 @@ def _resolve_from_search(
         idx = int(result.get("index", 0))
     except (TypeError, ValueError):
         idx = 0
+    # confident is an explicit, separate field from index — not just
+    # inferred from index != 0 — so the model has to actively assert
+    # confidence rather than defaulting to "pick the best of a mediocre
+    # set" just because a numbered list was presented. A confident-sounding
+    # wrong pick (e.g. a personal blog about the brand, picked only because
+    # the real official domain wasn't in the candidate set) is worse than
+    # saving nothing, so both conditions must hold before this is trusted.
+    confident = bool(result.get("confident", False))
 
-    if 1 <= idx <= len(candidates):
+    if confident and 1 <= idx <= len(candidates):
         name = str(result.get("name") or "").strip()
         return candidates[idx - 1]["url"], "searxng_search", name
+
+    logger.info(
+        "SearXNG website_pick for @%s: not confident (index=%s, confident=%s) — no website saved",
+        handle, idx, confident,
+    )
     return None, None, ""
 
 
