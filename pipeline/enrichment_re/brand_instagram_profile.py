@@ -46,6 +46,7 @@ False in that case so the row is still distinguishable from "never
 attempted".
 """
 
+import json
 import logging
 import time
 from urllib.parse import urlparse
@@ -237,8 +238,56 @@ def _classify_link(db: Session, handle: str, full_name: str, bio: str, url: str)
     return category, name
 
 
+def _find_sameas_urls(node) -> list[str]:
+    """
+    Recursively search a parsed JSON-LD structure for "sameAs" values at any
+    nesting level — schema.org data is often nested (e.g. a ProfilePage's
+    "sameAs" sits inside its "mainEntity" Person object, not at the top
+    level), so a flat top-level-only check misses it.
+    """
+    urls: list[str] = []
+    if isinstance(node, dict):
+        same_as = node.get("sameAs")
+        if isinstance(same_as, str):
+            urls.append(same_as)
+        elif isinstance(same_as, list):
+            urls.extend(u for u in same_as if isinstance(u, str))
+        for value in node.values():
+            urls.extend(_find_sameas_urls(value))
+    elif isinstance(node, list):
+        for item in node:
+            urls.extend(_find_sameas_urls(item))
+    return urls
+
+
+def _extract_jsonld_sameas_links(html: str) -> list[str]:
+    """
+    Some link-in-bio tools (confirmed: liinks.co) render their actual link
+    buttons entirely client-side via JavaScript — plain HTML has no real
+    <a href> tags for them at all, so a non-JS scraper never sees them.
+    Many of these tools still embed a schema.org JSON-LD block (<script
+    type="application/ld+json">) with a "sameAs" array listing those same
+    URLs for SEO purposes; this pulls those out as a fallback source of
+    candidate links when the page has no server-rendered anchors.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    urls: list[str] = []
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        try:
+            data = json.loads(script.get_text() or "")
+        except Exception:
+            continue
+        urls.extend(_find_sameas_urls(data))
+    return urls
+
+
 def _scrape_outbound_links(url: str) -> list[str]:
-    """Fetch a link-in-bio page and return its outbound link URLs (deduped by domain, capped)."""
+    """
+    Fetch a link-in-bio page and return its outbound link URLs (deduped by
+    domain, capped). Server-rendered <a href> tags first, then JSON-LD
+    "sameAs" URLs (_extract_jsonld_sameas_links) as a fallback for pages
+    whose real links only exist after client-side JS rendering.
+    """
     try:
         resp = httpx.get(url, headers=_PAGE_HEADERS, timeout=_PAGE_TIMEOUT, follow_redirects=True)
         resp.raise_for_status()
@@ -248,10 +297,13 @@ def _scrape_outbound_links(url: str) -> list[str]:
 
     soup = BeautifulSoup(resp.text, "html.parser")
     page_domain = _extract_domain(str(resp.url))
+
+    candidate_hrefs = [a["href"].strip() for a in soup.find_all("a", href=True)]
+    candidate_hrefs += _extract_jsonld_sameas_links(resp.text)
+
     seen: set[str] = set()
     links: list[str] = []
-    for a in soup.find_all("a", href=True):
-        href = a["href"].strip()
+    for href in candidate_hrefs:
         if not href.startswith("http"):
             continue
         domain = _extract_domain(href)
