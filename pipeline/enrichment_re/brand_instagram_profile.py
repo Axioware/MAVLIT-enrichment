@@ -332,13 +332,30 @@ def _apply_result(
     except IntegrityError:
         # name_normalized collided with an existing brand (e.g. a properly
         # seeded row for the same real-world brand already exists) — leave
-        # this row bare rather than crash the batch, but still mark checked.
+        # this row's NAME bare rather than crash the batch, but still mark
+        # checked. db.rollback() discards every staged change on `brand`,
+        # not just the colliding name (SQLAlchemy expires the whole
+        # instance) — website/domain/has_official_website/website_source
+        # are unrelated to the collision and must be re-applied here too
+        # (using `website`, already normalized above), or a name collision
+        # would silently wipe out perfectly good website data as well.
         db.rollback()
         brand.name = None
         brand.name_normalized = None
+        if website:
+            brand.website = website
+            brand.domain = _extract_domain(website)
+            brand.has_official_website = True
+            brand.website_source = website_source
+        else:
+            brand.has_official_website = False
         brand.instagram_profile_checked = True
         db.commit()
-        logger.warning("Brand Instagram profile lookup: name collided with an existing brand — left unresolved")
+        logger.warning(
+            "Brand Instagram profile lookup: name '%s' collided with an existing brand — "
+            "name left unresolved, website/domain still saved",
+            name,
+        )
 
 
 #  Main entry point
@@ -412,9 +429,14 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
                 website, website_source, name = _resolve_from_search(db, handle, bio, external_url, name)
 
             _apply_result(db, brand, name, website, website_source)
+            # Read back from `brand` (not the local `website`/`name` vars) —
+            # _apply_result normalizes the URL and can clear `name` on a
+            # collision, so the local vars no longer reflect what actually
+            # got committed.
             logger.info(
-                "Brand Instagram profile lookup: @%s → %s (%s)",
-                handle, website or "no website found", website_source or "unresolved",
+                "Brand Instagram profile lookup: @%s → %s / name=%s (%s)",
+                handle, brand.website or "no website found", brand.name or "none",
+                website_source or "unresolved",
             )
             processed += 1
             time.sleep(1)
