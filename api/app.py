@@ -501,6 +501,51 @@ class ContentCreatorREAdmin(ModelView, model=ContentCreatorRE):
     column_default_sort    = [(ContentCreatorRE.id, True)]
     page_size = 15
 
+    async def on_model_change(self, data: dict, model, is_created: bool, request) -> None:
+        """
+        Reject a save (create or edit) whose "url" OR "username" already
+        exists on a DIFFERENT row — content_creator_re has no DB-level
+        unique constraint on either, so without this, adding the same
+        Instagram account twice (by URL or by username) would silently
+        create a duplicate scrape target. Raising here surfaces a clean
+        error on the form itself (sqladmin catches it and re-renders with
+        context["error"] = str(e), see application.py's create/edit
+        routes) rather than crashing — same pattern already used by
+        CreatorProfileAdmin.on_model_change for its own validation.
+        """
+        url      = (data.get("url") or "").strip()
+        username = (data.get("username") or "").strip()
+        if not url and not username:
+            return
+
+        db = SessionLocal()
+        try:
+            existing_url = None
+            if url:
+                q = db.query(ContentCreatorRE.id).filter(ContentCreatorRE.url == url)
+                if not is_created:
+                    q = q.filter(ContentCreatorRE.id != model.id)
+                existing_url = q.first()
+
+            existing_username = None
+            if username:
+                q = db.query(ContentCreatorRE.id).filter(ContentCreatorRE.username == username)
+                if not is_created:
+                    q = q.filter(ContentCreatorRE.id != model.id)
+                existing_username = q.first()
+        finally:
+            db.close()
+
+        if existing_url and existing_username:
+            raise ValueError(
+                f"This URL (row id={existing_url.id}) and username (row id={existing_username.id}) "
+                "are already in Content Creator RE — not saved."
+            )
+        if existing_url:
+            raise ValueError(f"This URL is already in Content Creator RE (row id={existing_url.id}) — not saved.")
+        if existing_username:
+            raise ValueError(f"This username is already in Content Creator RE (row id={existing_username.id}) — not saved.")
+
 
 class BrandInstagramUserAdmin(ModelView, model=BrandInstagramUser):
     name         = "Brand ↔ Instagram User"
