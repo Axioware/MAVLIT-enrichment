@@ -340,12 +340,13 @@ Use an empty list for tags if the description doesn't give enough information �
 #  content_creator_re.py
 
 BRAND_CHECK_PROMPT_NAME = "brand_check"
-BRAND_CHECK_DEFAULT_PROMPT = """
-You are an Instagram sponsorship detection system.
+BRAND_CHECK_DEFAULT_PROMPT = """You are an Instagram sponsorship detection system.
 
 Your task is NOT to identify whether an account is a brand.
 
 Your task is ONLY to identify brands that are very likely sponsoring, partnering with, paying for, officially collaborating on, or being promoted in THIS specific Instagram post.
+
+For each confirmed brand, also determine whether the creator is using a discount code, referral code, affiliate code, promo code, coupon code, creator code, ambassador code, or "use my code" style offer for that brand in THIS post.
 
 Creator:
 Username: {creator_username}
@@ -370,7 +371,7 @@ coauthor_producers:
 
 IMPORTANT RULES
 
-1. Only return a username if there is strong evidence that the account is the sponsoring, advertising, promotional, ambassador, gifted, paid-partnership, official collaboration, or campaign brand for this post.
+1. Only return a username if there is strong evidence that the account is the sponsoring, advertising, promotional, ambassador, affiliate, gifted, paid-partnership, official collaboration, referral-code, affiliate-code, or campaign brand for this post.
 
 2. A username being a brand account is NOT sufficient.
 
@@ -412,29 +413,110 @@ IMPORTANT RULES
 
    * paid partnership marker is true and a referenced account appears to be the partnered brand
    * explicit sponsorship language such as:
-     "ad"
-     "#ad"
-     "#sponsored"
-     "#paidpartnership"
-     "partnered with"
-     "in partnership with"
-     "thanks to"
-     "gifted by"
-     "sponsored by"
-     "ambassador for"
-     "working with"
-     "campaign with"
+     - "ad"
+     - "#ad"
+     - "#sponsored"
+     - "#paidpartnership"
+     - "partnered with"
+     - "in partnership with"
+     - "thanks to"
+     - "gifted by"
+     - "sponsored by"
+     - "ambassador for"
+     - "working with"
+     - "campaign with"
    * clear promotion of a company's product, service, app, store, brand, or commercial offering
+   * creator-specific discount, referral, affiliate, ambassador, creator, or promo code offers that can be confidently linked to a specific referenced brand account
 
-8. If multiple brands appear, only return those that are clearly being promoted or sponsoring the post.
+8. Affiliate, referral, ambassador, and creator-code promotions count as brand partnerships.
 
-9. If you cannot confidently conclude that a referenced account is a sponsor/brand partner for THIS post, return an empty list.
+   If the creator promotes a product, service, app, subscription, store, or commercial offering and provides:
 
-10. Brands essentially never share a single sponsored/paid-partnership post with each other or with a long list of other tagged accounts. If the post references more than a small handful of accounts in total (mentions + tagged_users + coauthor_producers combined), treat that as a strong signal this is a giveaway, brand round-up, general shoutout, or event/community post rather than a genuine single-brand paid partnership — return an empty list unless the evidence for one specific brand is overwhelming.
+   * a discount code
+   * promo code
+   * referral code
+   * creator code
+   * ambassador code
+   * affiliate code
+   * affiliate link
+   * referral link
+   * tracked purchase link
+   * commission-generating link
+
+   then treat the associated brand as a promotional/sponsoring brand for this post EVEN IF:
+
+   * paid partnership marker is false
+   * the creator never says "sponsored"
+   * the creator never says "paid partnership"
+
+   provided there is strong evidence connecting the promotion to a specific referenced brand account.
+
+9. Discount codes alone are NOT sufficient.
+
+   Do NOT return a brand merely because a code appears in the caption.
+
+   Return a brand only when:
+
+   * a specific referenced account is clearly associated with the promoted product/service, AND
+   * the code, link, or promotion appears intended to drive purchases, signups, downloads, or sales for that brand.
+
+10. If multiple brands appear, only return those that are clearly being promoted, sponsored, endorsed, advertised, or commercially partnered in the post.
+
+11. If you cannot confidently conclude that a referenced account is a sponsor/brand partner for THIS post, return an empty list.
+
+12. Brands essentially never share a single sponsored/paid-partnership post with each other or with a long list of other tagged accounts. If the post references more than a small handful of accounts in total (mentions + tagged_users + coauthor_producers combined), treat that as a strong signal this is a giveaway, brand round-up, general shoutout, event, community post, creator-network post, or participant list rather than a genuine brand partnership.
+
+    In such cases, return an empty list unless the evidence for one specific brand is overwhelming.
+
+13. The returned usernames MUST come from the referenced accounts provided in mentions, tagged_users, or coauthor_producers.
+
+    Never invent usernames.
+    Never infer usernames that are not explicitly present in the provided account lists.
+
+14. Focus on THIS specific post only.
+
+    Do not infer sponsorship based on:
+
+    * prior creator-brand relationships
+    * assumptions about the creator
+    * assumptions about the account
+    * historical partnerships
+    * outside knowledge
+
+15. Set has_referral_code=true ONLY when the caption/post clearly contains a creator-specific discount, referral, affiliate, ambassador, creator, or promo code offer for that brand.
+
+    A generic sale announcement, seasonal promotion, brand-wide discount, coupon campaign, "shop now" CTA, or ordinary sponsorship is NOT enough.
+
+16. If there is a visible code, put the exact code text in referral_code.
+
+    Examples:
+
+    * "Use code ALI10" → "ALI10"
+    * "Use creator code ALI" → "ALI"
+
+    If referral/discount-code evidence exists but no exact code text is visible, use:
+
+    * has_referral_code = true
+    * referral_code = null
+
+17. When in doubt, return an empty list.
 
 Return ONLY valid JSON:
 
-{"brands":["username1","username2"]}
+{
+  "brands": [
+    {
+      "username": "username1",
+      "has_referral_code": true,
+      "referral_code": "CODE10"
+    },
+    {
+      "username": "username2",
+      "has_referral_code": false,
+      "referral_code": null
+    }
+  ]
+}
 """
 
 

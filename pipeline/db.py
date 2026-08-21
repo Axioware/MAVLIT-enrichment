@@ -38,6 +38,9 @@ class BrandRaw(Base):
     source            = Column(Text)
     source_confidence = Column(Integer)
     source_url        = Column(Text)
+    # True when content_creator_re's brand_check LLM sees this brand using
+    # a creator discount/referral code in a confirmed partnership post.
+    refferls          = Column(Boolean, nullable=False, server_default="false", default=False)
     # Official website (P856) resolved at seed time
     website           = Column(Text)
     domain            = Column(Text)
@@ -681,6 +684,7 @@ def _brand_raw_fields(b: dict) -> dict:
         "description":           b.get("description") or None,
         "wikipedia_url":         b.get("wikipedia_url") or None,
         "source_confidence":     b.get("source_confidence"),
+        "refferls":              bool(b.get("refferls")),
         "website":               website,
         "domain":                b.get("domain") or None,
         "country":               b.get("country"),

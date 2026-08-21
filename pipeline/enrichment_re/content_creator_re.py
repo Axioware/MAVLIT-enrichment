@@ -89,15 +89,77 @@ def _ensure_partnership_evidence_table() -> None:
             CREATE UNIQUE INDEX IF NOT EXISTS uq_test_creator_brand_post
             ON test_creator_brand_partnership_posts(creator_username, brand_raw_id, post_url)
         """))
+        conn.execute(text("ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS refferls BOOLEAN NOT NULL DEFAULT false"))
         conn.commit()
 
 
 def _get_brand_check_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == BRAND_CHECK_PROMPT_NAME).first()
-    return row.content if row else BRAND_CHECK_DEFAULT_PROMPT
+    if not row:
+        return BRAND_CHECK_DEFAULT_PROMPT
+    if "has_referral_code" not in (row.content or ""):
+        row.content = BRAND_CHECK_DEFAULT_PROMPT
+        db.commit()
+        logger.info("Content creator RE: refreshed brand_check prompt with referral-code fields")
+    return row.content
 
 
-def _check_post_for_brands(db: Session, username: str, full_name: str | None, item: dict) -> list[str]:
+def _boolish(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "yes", "1", "y"}
+    return bool(value)
+
+
+def _parse_brand_check_result(result: dict) -> list[dict]:
+    brands = result.get("brands")
+    if not isinstance(brands, list):
+        return []
+
+    parsed: list[dict] = []
+    for brand in brands:
+        if isinstance(brand, str):
+            handle = normalize_handle(brand)
+            if handle:
+                parsed.append({
+                    "username": handle,
+                    "has_referral_code": False,
+                    "referral_code": None,
+                })
+            continue
+
+        if not isinstance(brand, dict):
+            continue
+
+        raw_handle = brand.get("username") or brand.get("handle") or brand.get("brand")
+        if not isinstance(raw_handle, str):
+            continue
+
+        handle = normalize_handle(raw_handle)
+        if not handle:
+            continue
+
+        referral_code = (
+            brand.get("referral_code")
+            or brand.get("discount_code")
+            or brand.get("creator_code")
+        )
+        if isinstance(referral_code, str):
+            referral_code = referral_code.strip() or None
+        else:
+            referral_code = None
+
+        parsed.append({
+            "username": handle,
+            "has_referral_code": _boolish(brand.get("has_referral_code")) or bool(referral_code),
+            "referral_code": referral_code,
+        })
+
+    return parsed
+
+
+def _check_post_for_brands(db: Session, username: str, full_name: str | None, item: dict) -> list[dict]:
     """
     Extract mentions/tagged_users/coauthor_producers/paid_partnership from a
     raw post item and ask the LLM which of those referenced accounts, if
@@ -122,19 +184,7 @@ def _check_post_for_brands(db: Session, username: str, full_name: str | None, it
         coauthor_producers=", ".join(coauthors) if coauthors else "none",
     )
     result = call_gpt_json(prompt, context=f"brand_check @{username} post {item.get('id')}")
-    if not isinstance(result, dict):
-        return []
-    brands = result.get("brands")
-    if not isinstance(brands, list):
-        return []
-    normalized = []
-    for brand in brands:
-        if not isinstance(brand, str):
-            continue
-        handle = normalize_handle(brand)
-        if handle:
-            normalized.append(handle)
-    return normalized
+    return _parse_brand_check_result(result) if isinstance(result, dict) else []
 
 
 def _get_or_create_brand_id(db: Session, brand_username: str) -> int | None:
@@ -164,6 +214,13 @@ def _get_or_create_brand_id(db: Session, brand_username: str) -> int | None:
     insert_brand(db, {"instagram_handle": handle_url})
     row = db.query(BrandRaw.id).filter(BrandRaw.instagram_handle == handle_url).first()
     return row.id if row else None
+
+
+def _mark_brand_referral(db: Session, brand_id: int, has_referral_code: bool) -> None:
+    if not has_referral_code:
+        return
+    db.query(BrandRaw).filter(BrandRaw.id == brand_id).update({"refferls": True})
+    db.commit()
 
 
 def _brand_snapshot(db: Session, brand_id: int, brand_username: str) -> tuple[str, str | None]:
@@ -319,13 +376,15 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int
         confirmed_brand_ids: set[int] = set()
         branded_posts: list[tuple[dict, set[int]]] = []
         for item in raw_posts:
-            brand_usernames = _check_post_for_brands(db, username, profile.get("fullName"), item)
-            if brand_usernames:
+            brand_matches = _check_post_for_brands(db, username, profile.get("fullName"), item)
+            if brand_matches:
                 time.sleep(0.3)
             post_brand_ids: set[int] = set()
-            for brand_username in brand_usernames:
+            for brand_match in brand_matches:
+                brand_username = brand_match["username"]
                 brand_id = _get_or_create_brand_id(db, brand_username)
                 if brand_id:
+                    _mark_brand_referral(db, brand_id, brand_match.get("has_referral_code", False))
                     _record_llm_partnership_post(
                         db,
                         brand_id=brand_id,

@@ -81,6 +81,7 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS description TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS wikipedia_url TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS source_confidence INTEGER",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS refferls BOOLEAN NOT NULL DEFAULT false",
         # Full unique index on wikidata_id — PostgreSQL treats NULLs as distinct,
         # so multiple NULL rows are permitted even with a UNIQUE index.
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_brands_raw_wikidata_id ON brands_raw(wikidata_id)",
@@ -342,6 +343,9 @@ def _run_migrations() -> None:
         ]:
             if not db.query(Prompt).filter(Prompt.name == name).first():
                 db.add(Prompt(name=name, content=content))
+        brand_check_prompt = db.query(Prompt).filter(Prompt.name == BRAND_CHECK_PROMPT_NAME).first()
+        if brand_check_prompt and "has_referral_code" not in (brand_check_prompt.content or ""):
+            brand_check_prompt.content = BRAND_CHECK_DEFAULT_PROMPT
         db.commit()
 
 
