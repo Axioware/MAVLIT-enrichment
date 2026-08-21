@@ -14,7 +14,7 @@ from sqlalchemy import String, cast, or_, text
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql import Select
 from config import ADMIN_PASSKEY, FRONTEND_ORIGINS, IS_PRODUCTION, JWT_SECRET, POSTHOG_PROJECT_TOKEN, POSTHOG_HOST
-from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, ContractReview, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Pitch, Prompt, RateEstimate, SavedBrand, TestBrandsWithInstagramPosts, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, ContractReview, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Pitch, Prompt, RateEstimate, SavedBrand, TestBrandsWithInstagramPosts, TestCreatorBrandPartnershipPost, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
 from api.schemas import CreatorProfileResponse, profile_to_response as _profile_to_response
 from api.advisory import router as advisory_router
@@ -293,6 +293,10 @@ def _run_migrations() -> None:
         # sqladmin's auto-generated form doesn't force a value on every
         # edit (see CreatorProfileAdmin's on_model_change in this file).
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS password_hash TEXT",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_test_creator_brand_post
+        ON test_creator_brand_partnership_posts(creator_username, brand_raw_id, post_url)
+        """,
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -471,6 +475,28 @@ class TestBrandsWithInstagramPostsAdmin(ModelView, model=TestBrandsWithInstagram
     column_searchable_list = [TestBrandsWithInstagramPosts.brand_name]
     column_sortable_list   = [c.name for c in TestBrandsWithInstagramPosts.__table__.columns]
     column_default_sort    = [(TestBrandsWithInstagramPosts.instagram_post_count, True)]
+    page_size = 15
+
+
+class TestCreatorBrandPartnershipPostAdmin(ModelView, model=TestCreatorBrandPartnershipPost):
+    name         = "Creator Brand Post (test)"
+    name_plural  = "Creator Brand Posts (test)"
+    category     = "Test"
+    icon         = "fa-solid fa-flask-vial"
+    column_list  = "__all__"
+    column_labels = {
+        TestCreatorBrandPartnershipPost.brand_raw: "Brand",
+        TestCreatorBrandPartnershipPost.content_creator_re: "Content Creator RE",
+    }
+    column_searchable_list = [
+        TestCreatorBrandPartnershipPost.brand_name,
+        TestCreatorBrandPartnershipPost.brand_instagram_handle,
+        TestCreatorBrandPartnershipPost.creator_username,
+        TestCreatorBrandPartnershipPost.creator_name,
+        TestCreatorBrandPartnershipPost.post_url,
+    ]
+    column_sortable_list = [c.name for c in TestCreatorBrandPartnershipPost.__table__.columns]
+    column_default_sort  = [(TestCreatorBrandPartnershipPost.detected_at, True)]
     page_size = 15
 
 
@@ -802,6 +828,7 @@ admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
 admin.add_view(InstagramPostAdmin)
 admin.add_view(TestBrandsWithInstagramPostsAdmin)
+admin.add_view(TestCreatorBrandPartnershipPostAdmin)
 admin.add_view(InstagramUserAdmin)
 admin.add_view(ContentCreatorREAdmin)
 admin.add_view(BrandInstagramUserAdmin)

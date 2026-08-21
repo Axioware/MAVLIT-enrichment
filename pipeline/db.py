@@ -627,6 +627,34 @@ class TestBrandsWithInstagramPosts(Base):
     generated_at            = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
+class TestCreatorBrandPartnershipPost(Base):
+    """
+    Scratch/test table for content_creator_re evidence. One row per
+    LLM-confirmed creator/brand/post partnership, preserving the source
+    post URL that caused a bare/existing brands_raw row to be linked.
+    """
+    __tablename__ = "test_creator_brand_partnership_posts"
+    __table_args__ = (
+        UniqueConstraint("creator_username", "brand_raw_id", "post_url", name="uq_test_creator_brand_post"),
+    )
+
+    id                    = Column(Integer, primary_key=True)
+    brand_raw_id          = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
+    brand_name            = Column(Text)
+    brand_instagram_handle = Column(Text)
+    creator_username      = Column(Text, nullable=False, index=True)
+    creator_name          = Column(Text)
+    content_creator_re_id = Column(Integer, ForeignKey("content_creator_re.id"), index=True)
+    post_id               = Column(Text)
+    post_url              = Column(Text, nullable=False)
+    post_timestamp        = Column(Text)
+    llm_partnership       = Column(Boolean, nullable=False, server_default="true", default=True)
+    detected_at           = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
+    content_creator_re = relationship("ContentCreatorRE", lazy="selectin", foreign_keys=[content_creator_re_id])
+
+
 class Prompt(Base):
     __tablename__ = "prompts"
 

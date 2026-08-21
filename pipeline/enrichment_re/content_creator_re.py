@@ -5,19 +5,21 @@ Reverse-engineering flow: content_creator_re is a manually-seeded list
 (username, niche, url) with no brand/post behind it. For each row where
 is_scraped=False:
 
-  1. Scrape the creator's top 5 posts via Apify and classify demographics
+  1. Scrape the creator's top 40 posts via Apify and classify demographics
      via the LLM — same _scrape_posts/_profile_from_posts/_classify_demographics
      functions used by the main creator flow in instagram_users.py. niche is
      NOT LLM-classified here — it's copied straight from content_creator_re.niche.
   2. Store one row per post in instagram_users (user_type="contentcreatorRE"),
      with is_content_creator_re=True.
-  3. For each of those 5 posts, extract mentions/tagged_users/coauthor_producers/
+  3. For each of those posts, extract mentions/tagged_users/coauthor_producers/
      paid_partnership and ask the LLM (brand_check prompt) which referenced
      accounts, if any, are real brand/company accounts — not other creators.
      Any confirmed brand gets a bare brands_raw row (instagram_handle only;
      name/niche/source are nullable for exactly this case — see pipeline/db.py)
-     and is linked to this creator via brand_instagram_users. One creator_re
-     row can end up linked to several different brands across its 5 posts.
+     and is linked to this creator via brand_instagram_users. The exact
+     LLM-confirmed creator/brand/post evidence is also upserted into
+     test_creator_brand_partnership_posts. One creator_re row can end up
+     linked to several different brands across its scraped posts.
   4. For posts where step 3 confirmed at least one brand, collect up to 5
      commenters for that post only, scrape 1 post each for profile data, store
      them in instagram_users (user_type="commenter") with
@@ -29,14 +31,34 @@ Prompts (editable via /admin > Prompts):
   brand_check — this module only
 """
 
+import argparse
 import logging
+import os
+import sys
 import time
 
-from sqlalchemy import or_
+if __package__ in (None, ""):
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+
+from dotenv import load_dotenv
+load_dotenv()
+
+from sqlalchemy import or_, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, OPENAI_KEY
-from pipeline.db import BrandRaw, ContentCreatorRE, InstagramUser, Prompt, insert_brand
+from pipeline.db import (
+    Base,
+    BrandRaw,
+    ContentCreatorRE,
+    InstagramUser,
+    Prompt,
+    SessionLocal,
+    TestCreatorBrandPartnershipPost,
+    engine,
+    insert_brand,
+)
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import BRAND_CHECK_PROMPT_NAME, BRAND_CHECK_DEFAULT_PROMPT
@@ -48,11 +70,26 @@ from pipeline.enrichment.instagram_users import (
     _collect_commenter_records,
     _link_commenter_to_creator,
     _link_to_brand,
+    _post_url,
     _profile_from_posts,
     _scrape_posts,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_partnership_evidence_table() -> None:
+    """
+    Keep the scratch evidence table available for standalone script runs
+    too. The FastAPI app also creates it on startup via Base.metadata.
+    """
+    Base.metadata.create_all(bind=engine, tables=[TestCreatorBrandPartnershipPost.__table__])
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_test_creator_brand_post
+            ON test_creator_brand_partnership_posts(creator_username, brand_raw_id, post_url)
+        """))
+        conn.commit()
 
 
 def _get_brand_check_prompt(db: Session) -> str:
@@ -90,7 +127,14 @@ def _check_post_for_brands(db: Session, username: str, full_name: str | None, it
     brands = result.get("brands")
     if not isinstance(brands, list):
         return []
-    return [b.strip() for b in brands if isinstance(b, str) and b.strip()]
+    normalized = []
+    for brand in brands:
+        if not isinstance(brand, str):
+            continue
+        handle = normalize_handle(brand)
+        if handle:
+            normalized.append(handle)
+    return normalized
 
 
 def _get_or_create_brand_id(db: Session, brand_username: str) -> int | None:
@@ -122,6 +166,65 @@ def _get_or_create_brand_id(db: Session, brand_username: str) -> int | None:
     return row.id if row else None
 
 
+def _brand_snapshot(db: Session, brand_id: int, brand_username: str) -> tuple[str, str | None]:
+    brand = db.query(BrandRaw).filter(BrandRaw.id == brand_id).first()
+    if not brand:
+        return brand_username, None
+    return (
+        brand.name or brand_username,
+        brand.instagram_handle or f"https://www.instagram.com/{brand_username}",
+    )
+
+
+def _record_llm_partnership_post(
+    db: Session,
+    *,
+    brand_id: int,
+    brand_username: str,
+    creator_row_id: int,
+    creator_username: str,
+    creator_name: str | None,
+    item: dict,
+) -> None:
+    post_url = _post_url(item)
+    if not post_url:
+        logger.warning(
+            "Content creator RE: @%s brand @%s LLM-confirmed but post has no URL — evidence row skipped",
+            creator_username,
+            brand_username,
+        )
+        return
+
+    brand_name, brand_handle = _brand_snapshot(db, brand_id, brand_username)
+    stmt = pg_insert(TestCreatorBrandPartnershipPost).values({
+        "brand_raw_id": brand_id,
+        "brand_name": brand_name,
+        "brand_instagram_handle": brand_handle,
+        "creator_username": creator_username,
+        "creator_name": creator_name or creator_username,
+        "content_creator_re_id": creator_row_id,
+        "post_id": str(item.get("id") or ""),
+        "post_url": post_url,
+        "post_timestamp": item.get("timestamp"),
+        "llm_partnership": True,
+    })
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["creator_username", "brand_raw_id", "post_url"],
+        set_={
+            "brand_name": stmt.excluded.brand_name,
+            "brand_instagram_handle": stmt.excluded.brand_instagram_handle,
+            "creator_name": stmt.excluded.creator_name,
+            "content_creator_re_id": stmt.excluded.content_creator_re_id,
+            "post_id": stmt.excluded.post_id,
+            "post_timestamp": stmt.excluded.post_timestamp,
+            "llm_partnership": True,
+            "detected_at": text("now()"),
+        },
+    )
+    db.execute(stmt)
+    db.commit()
+
+
 def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int]]:
     """
     Process up to `limit` content_creator_re rows where is_scraped=False.
@@ -135,6 +238,8 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int
     if not APIFY_TOKEN:
         logger.warning("APIFY_TOKEN not set — skipping content_creator_re enrichment")
         return 0, set()
+
+    _ensure_partnership_evidence_table()
 
     rows: list[ContentCreatorRE] = (
         db.query(ContentCreatorRE)
@@ -221,6 +326,15 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int
             for brand_username in brand_usernames:
                 brand_id = _get_or_create_brand_id(db, brand_username)
                 if brand_id:
+                    _record_llm_partnership_post(
+                        db,
+                        brand_id=brand_id,
+                        brand_username=brand_username,
+                        creator_row_id=row.id,
+                        creator_username=username,
+                        creator_name=profile.get("fullName"),
+                        item=item,
+                    )
                     post_brand_ids.add(brand_id)
                     confirmed_brand_ids.add(brand_id)
             if post_brand_ids:
@@ -332,3 +446,25 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int
         processed, len(all_confirmed_brand_ids),
     )
     return processed, all_confirmed_brand_ids
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s")
+    parser = argparse.ArgumentParser(description="Run content_creator_re reverse-engineering enrichment.")
+    parser.add_argument("--limit", type=int, default=1, help="Pending content_creator_re rows to process this run.")
+    args = parser.parse_args()
+
+    db = SessionLocal()
+    try:
+        processed, brand_ids = enrich_content_creator_re(db, limit=args.limit)
+        print(
+            f"content_creator_re processed={processed}; "
+            f"confirmed_brand_ids={sorted(brand_ids)}; "
+            "evidence_table=test_creator_brand_partnership_posts"
+        )
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    main()
