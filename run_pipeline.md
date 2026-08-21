@@ -285,3 +285,6 @@ db = SessionLocal()
 enrich_brand_instagram_profile(db, limit=1)
 db.close()
 "
+
+
+## after all have to run LLM(one time) for niche of creators for specific selected niche
