@@ -132,6 +132,33 @@ def run_per_brand(label: str, fn, db, brand_ids: set[int], **kwargs) -> None:
     _step_end(label, f"attempted {done}/{len(brand_ids)} brand(s)")
 
 
+def _pending_for_scoring(db, brand_ids: set[int]) -> set[int]:
+    """
+    Mirrors run_brand_scoring's own batch-mode (brand_id=None) prerequisite
+    filter exactly — score a brand only once EVERY enrichment step this
+    script runs has actually completed for it, not just because it was
+    discovered. Needed because brand_id= (what run_per_brand always passes)
+    bypasses run_brand_scoring's own prerequisite check by design (it's
+    meant to let you force-rescore one brand for testing) — without this,
+    every discovered brand gets scored regardless of whether shopify/
+    tranco/meta_ads/youtube/instagram actually finished for it.
+    """
+    return {
+        row.id for row in
+        db.query(BrandRaw.id).filter(
+            BrandRaw.id.in_(brand_ids),
+            BrandRaw.has_official_website == True,
+            BrandRaw.wikidata_enriched  == True,
+            BrandRaw.shopify_checked    == True,
+            BrandRaw.tranco_checked     == True,
+            BrandRaw.meta_ads_fetched   == True,
+            BrandRaw.youtube_checked    == True,
+            BrandRaw.instagram_checked  == True,
+            BrandRaw.initial_brand_scored == False,
+        ).all()
+    }
+
+
 def run_instagram_users_per_brand(label: str, db, brand_ids: set[int], batch_limit: int = 5) -> None:
     """
     instagram_users.py operates on instagram_posts ROWS, not brands
@@ -197,7 +224,16 @@ def main() -> None:
             run_per_brand("9/11 instagram_posts", enrich_instagram_posts, db, website_brand_ids)
 
         run_instagram_users_per_brand("10/11 instagram_users", db, brand_ids, batch_limit=5)
-        run_per_brand("11/11 initial_brand_scoring", run_brand_scoring,            db, brand_ids)
+
+        pending_score_ids = _pending_for_scoring(db, brand_ids)
+        skipped = brand_ids - pending_score_ids
+        if skipped:
+            logger.info(
+                "[11/11 initial_brand_scoring] skipping %d brand(s) not yet fully "
+                "enriched (or already scored): %s",
+                len(skipped), sorted(skipped),
+            )
+        run_per_brand("11/11 initial_brand_scoring", run_brand_scoring, db, pending_score_ids)
     finally:
         db.close()
 
