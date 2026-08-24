@@ -306,6 +306,9 @@ def _run_migrations() -> None:
         "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS mentions JSONB",
         "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS tagged_users JSONB",
         "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS coauthor_producers JSONB",
+        # test_creator_brand_partnership_posts: LLM-estimated 0-100 sponsorship
+        # confidence, backfilled by pipeline/enrichment_re/score_post_sponsorship.py.
+        "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS sponsorship_confidence INTEGER",
     ]
     with engine.connect() as conn:
         for sql in stmts:

@@ -662,6 +662,11 @@ class TestCreatorBrandPartnershipPost(Base):
     tagged_users          = Column(JSONB)
     coauthor_producers    = Column(JSONB)
 
+    # LLM-estimated 0-100 confidence that this post is a paid sponsorship
+    # with this specific brand, backfilled by
+    # pipeline/enrichment_re/score_post_sponsorship.py.
+    sponsorship_confidence = Column(Integer)
+
     detected_at           = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
