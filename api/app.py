@@ -298,6 +298,14 @@ def _run_migrations() -> None:
         CREATE UNIQUE INDEX IF NOT EXISTS uq_test_creator_brand_post
         ON test_creator_brand_partnership_posts(creator_username, brand_raw_id, post_url)
         """,
+        # test_creator_brand_partnership_posts: post content/collaboration
+        # signals, backfilled for pre-existing rows by
+        # pipeline/enrichment_re/backfill_partnership_post_content.py.
+        "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS caption TEXT",
+        "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS paid_partnership BOOLEAN",
+        "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS mentions JSONB",
+        "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS tagged_users JSONB",
+        "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS coauthor_producers JSONB",
     ]
     with engine.connect() as conn:
         for sql in stmts:

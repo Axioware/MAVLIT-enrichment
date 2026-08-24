@@ -652,6 +652,16 @@ class TestCreatorBrandPartnershipPost(Base):
     post_url              = Column(Text, nullable=False)
     post_timestamp        = Column(Text)
     llm_partnership       = Column(Boolean, nullable=False, server_default="true", default=True)
+
+    # Post content/collaboration signals, backfilled from Apify by
+    # pipeline/enrichment_re/backfill_partnership_post_content.py for rows
+    # that predate these columns.
+    caption               = Column(Text)
+    paid_partnership      = Column(Boolean)
+    mentions              = Column(JSONB)
+    tagged_users          = Column(JSONB)
+    coauthor_producers    = Column(JSONB)
+
     detected_at           = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])

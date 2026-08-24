@@ -90,6 +90,11 @@ def _ensure_partnership_evidence_table() -> None:
             ON test_creator_brand_partnership_posts(creator_username, brand_raw_id, post_url)
         """))
         conn.execute(text("ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS refferls BOOLEAN NOT NULL DEFAULT false"))
+        conn.execute(text("ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS caption TEXT"))
+        conn.execute(text("ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS paid_partnership BOOLEAN"))
+        conn.execute(text("ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS mentions JSONB"))
+        conn.execute(text("ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS tagged_users JSONB"))
+        conn.execute(text("ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS coauthor_producers JSONB"))
         conn.commit()
 
 
