@@ -139,10 +139,10 @@ Tagged users:
 
 Respond with ONLY valid JSON:
 
-{
+{{
   "confidence_pct": <integer 0-100>,
   "reason": "<short explanation>"
-}
+}}
 """
 
 
