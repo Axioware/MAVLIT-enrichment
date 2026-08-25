@@ -270,7 +270,12 @@ def _record_llm_partnership_post(
         return
 
     brand_name, brand_handle = _brand_snapshot(db, brand_id, brand_username)
-    handle = normalize_handle(brand_handle or brand_username)
+    # _real_coauthors expects "the post owner's own handle" to filter out and
+    # substitute in — here that's the CREATOR (these posts are scraped from
+    # the creator's own account, unlike instagram_posts.py which scrapes
+    # from the brand's account), so pass creator_username, not brand_handle.
+    # Passing brand_handle here previously stripped the brand out of
+    # coauthorProducers and replaced it with the creator's own username.
     stmt = pg_insert(TestCreatorBrandPartnershipPost).values({
         "brand_raw_id": brand_id,
         "brand_name": brand_name,
@@ -286,7 +291,7 @@ def _record_llm_partnership_post(
         "paid_partnership": item.get("paidPartnership"),
         "mentions": item.get("mentions"),
         "tagged_users": _usernames_only(item.get("taggedUsers")),
-        "coauthor_producers": _usernames_only(_real_coauthors(item, handle)),
+        "coauthor_producers": _usernames_only(_real_coauthors(item, creator_username)),
         "sponsorship_confidence": sponsorship_confidence,
     })
     stmt = stmt.on_conflict_do_update(

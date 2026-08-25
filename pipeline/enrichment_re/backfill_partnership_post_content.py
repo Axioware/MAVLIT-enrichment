@@ -30,7 +30,6 @@ from pipeline.db import SessionLocal, TestCreatorBrandPartnershipPost
 from pipeline.enrichment.instagram_posts import _real_coauthors, _usernames_only
 from pipeline.enrichment_re.content_creator_re import _ensure_partnership_evidence_table
 from pipeline.helpers.apify import run_apify_actor
-from pipeline.helpers.social import normalize_handle
 
 logger = logging.getLogger(__name__)
 
@@ -96,12 +95,16 @@ def backfill_partnership_post_content(db: Session, limit: int = 500) -> tuple[in
             time.sleep(1.0)
             continue
 
-        handle = normalize_handle(row.brand_instagram_handle or "")
+        # _real_coauthors expects "the post owner's own handle" to filter out
+        # and substitute in — here that's the CREATOR (post_url is the
+        # creator's own post), not the brand, so pass creator_username.
+        # Passing the brand handle previously stripped the brand out of
+        # coauthorProducers and replaced it with the creator's own username.
         row.caption = item.get("caption")
         row.paid_partnership = item.get("paidPartnership")
         row.mentions = item.get("mentions")
         row.tagged_users = _usernames_only(item.get("taggedUsers"))
-        row.coauthor_producers = _usernames_only(_real_coauthors(item, handle))
+        row.coauthor_producers = _usernames_only(_real_coauthors(item, row.creator_username))
         db.commit()
         updated += 1
         logger.info(
