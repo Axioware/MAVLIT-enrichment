@@ -63,7 +63,7 @@ from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import BRAND_CHECK_PROMPT_NAME, BRAND_CHECK_DEFAULT_PROMPT
 from pipeline.helpers.social import normalize_handle
-from pipeline.enrichment.instagram_posts import _usernames_only
+from pipeline.enrichment.instagram_posts import _real_coauthors, _usernames_only
 from pipeline.enrichment.instagram_users import (
     _build_post_row,
     _classify_demographics,
@@ -259,6 +259,7 @@ def _record_llm_partnership_post(
         return
 
     brand_name, brand_handle = _brand_snapshot(db, brand_id, brand_username)
+    handle = normalize_handle(brand_handle or brand_username)
     stmt = pg_insert(TestCreatorBrandPartnershipPost).values({
         "brand_raw_id": brand_id,
         "brand_name": brand_name,
@@ -270,6 +271,11 @@ def _record_llm_partnership_post(
         "post_url": post_url,
         "post_timestamp": item.get("timestamp"),
         "llm_partnership": True,
+        "caption": item.get("caption"),
+        "paid_partnership": item.get("paidPartnership"),
+        "mentions": item.get("mentions"),
+        "tagged_users": _usernames_only(item.get("taggedUsers")),
+        "coauthor_producers": _usernames_only(_real_coauthors(item, handle)),
     })
     stmt = stmt.on_conflict_do_update(
         index_elements=["creator_username", "brand_raw_id", "post_url"],
@@ -281,6 +287,11 @@ def _record_llm_partnership_post(
             "post_id": stmt.excluded.post_id,
             "post_timestamp": stmt.excluded.post_timestamp,
             "llm_partnership": True,
+            "caption": stmt.excluded.caption,
+            "paid_partnership": stmt.excluded.paid_partnership,
+            "mentions": stmt.excluded.mentions,
+            "tagged_users": stmt.excluded.tagged_users,
+            "coauthor_producers": stmt.excluded.coauthor_producers,
             "detected_at": text("now()"),
         },
     )
