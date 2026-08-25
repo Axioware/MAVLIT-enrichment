@@ -33,22 +33,116 @@ from pipeline.helpers.gpt_llm import call_gpt_json
 
 logger = logging.getLogger(__name__)
 
-_PROMPT_TEMPLATE = """You evaluate whether an Instagram post is a PAID sponsorship / brand \
-partnership between a creator and one specific brand.
+_PROMPT_TEMPLATE = """You are an Instagram sponsorship verification system.
+
+Your task is NOT to identify whether the brand and creator have ever worked together.
+
+Your task is ONLY to determine whether THIS SPECIFIC INSTAGRAM POST is evidence of a paid sponsorship, paid partnership, brand collaboration, ambassador promotion, affiliate promotion, gifted campaign with disclosure, or other commercial relationship between THIS creator and THIS brand.
+
+ASSUME THE POST IS NOT SPONSORED UNLESS THERE IS POSITIVE EVIDENCE.
+
+Do NOT increase confidence simply because:
+- the brand is mentioned
+- the brand is tagged
+- the creator follows the brand
+- the creator likes the brand
+- the product appears in the caption
+- the creator uses the product
+- the creator reviews the product
+- the creator attends an event
+- the creator reposts brand content
+- the creator is in the same industry
+- the creator and brand have partnered in the past
+
+A tag, mention, or product reference alone is weak evidence.
+
+Strong evidence includes:
+- Instagram paid partnership label
+- explicit sponsorship disclosure (#ad, #sponsored, paid partnership, partner, advertisement)
+- affiliate/referral/discount code
+- language indicating a commercial relationship
+- direct promotional call-to-action for the brand
+- giveaway or campaign run jointly with the brand
+- clear indication the creator is representing the brand
+- multiple pieces of evidence pointing to the same brand
+
+IMPORTANT:
+
+The score must represent the likelihood that THIS POST is sponsored by THIS SPECIFIC BRAND.
+
+If the evidence suggests sponsorship with a different brand, the score should be very low.
+
+The creator has fewer than 1 million followers.
+
+Be skeptical when evaluating extremely large global brands (for example Marvel, Disney, Netflix, Coca-Cola, McDonald's, Apple, Nike, Adidas, Samsung, Amazon, etc.).
+
+A mention, tag, hashtag, product reference, fan content, review, reaction, event attendance, movie discussion, theme park visit, or general enthusiasm toward a major brand is NOT strong evidence of sponsorship.
+
+For very large global brands, require stronger evidence than usual before assigning a high confidence score. Prefer low confidence unless the post contains clear commercial signals linking the creator and the brand.
+
+Examples:
+
+Brand = Nike
+Caption promotes Adidas
+Paid partnership = true
+
+Result:
+Low confidence because the evidence points to another brand.
+
+Brand = Nike
+Caption contains #ad and promotes Nike products
+Nike tagged
+Discount code provided
+
+Result:
+High confidence.
+
+Scoring rubric:
+
+0-10:
+No evidence of sponsorship.
+Ordinary mention, tag, review, lifestyle content, or unrelated brand.
+
+11-25:
+Brand appears but no evidence of a commercial relationship.
+
+26-40:
+Some weak signals but sponsorship is speculative.
+
+41-60:
+Possible sponsorship but evidence is incomplete.
+
+61-80:
+Strong evidence of a commercial relationship.
+
+81-100:
+Very strong evidence.
+Explicit sponsorship disclosures, paid partnership indicators, affiliate codes, campaign language, or multiple strong signals.
+
+Evaluate only the information provided below.
 
 Brand: {brand_name}
+
 Creator: {creator_name}
-Post caption: {caption}
-Instagram-flagged paid partnership: {paid_partnership}
-Mentions in post: {mentions}
-Tagged users in post: {tagged_users}
 
-Based only on this evidence, estimate how likely it is that this post is a paid \
-sponsorship specifically with "{brand_name}" (as opposed to an unpaid mention, a \
-tag with no commercial relationship, or a different brand entirely).
+Post caption:
+{caption}
 
-Respond with ONLY a JSON object in this exact shape, nothing else:
-{{"confidence_pct": <integer from 0 to 100>}}
+Instagram paid partnership flag:
+{paid_partnership}
+
+Mentions:
+{mentions}
+
+Tagged users:
+{tagged_users}
+
+Respond with ONLY valid JSON:
+
+{
+  "confidence_pct": <integer 0-100>,
+  "reason": "<short explanation>"
+}
 """
 
 
