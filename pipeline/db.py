@@ -663,8 +663,9 @@ class TestCreatorBrandPartnershipPost(Base):
     coauthor_producers    = Column(JSONB)
 
     # LLM-estimated 0-100 confidence that this post is a paid sponsorship
-    # with this specific brand, backfilled by
-    # pipeline/enrichment_re/score_post_sponsorship.py.
+    # with this specific brand. Filled in live by content_creator_re.py's
+    # brand_check prompt for newly-detected rows; backfilled for older rows
+    # by pipeline/enrichment_re/score_post_sponsorship.py.
     sponsorship_confidence = Column(Integer)
 
     detected_at           = Column(TIMESTAMP(timezone=True), server_default=func.now())

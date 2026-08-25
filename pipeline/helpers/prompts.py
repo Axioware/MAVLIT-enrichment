@@ -501,6 +501,23 @@ IMPORTANT RULES
 
 17. When in doubt, return an empty list.
 
+SCORING
+
+For each confirmed brand, also assign confidence_pct: an integer from 0 to 100 for how confident you are that THIS POST is genuinely a paid sponsorship, paid partnership, or other commercial collaboration with THIS SPECIFIC brand — not just that the account passed the rules above.
+
+Scoring rubric:
+
+0-10: No real evidence of a commercial relationship — should not have passed the rules above at all.
+11-25: Brand appears but the commercial relationship is speculative.
+26-40: Some weak signals, but sponsorship is not clearly established.
+41-60: Possible sponsorship, evidence incomplete.
+61-80: Strong evidence of a genuine commercial relationship (clear partnership/ambassador/campaign language, or a discount/referral/affiliate code tied to this brand).
+81-100: Very strong evidence — explicit paid-partnership marker plus disclosure language (#ad, #sponsored, "partnered with", etc.), or multiple independent strong signals together (e.g. paid partnership marker AND a referral code AND explicit campaign language) all pointing to this brand.
+
+Be skeptical scoring extremely large global brands (for example Nike, Adidas, Apple, Samsung, Amazon, Coca-Cola, McDonald's, Disney, Netflix) — a tag, mention, or general enthusiasm toward such a brand is weak evidence on its own. Require stronger evidence than usual before scoring above 60 for brands like these.
+
+If the evidence more strongly suggests a different brand than the one being scored, confidence_pct should be low even though the account passed the rules above.
+
 Return ONLY valid JSON:
 
 {
@@ -508,12 +525,14 @@ Return ONLY valid JSON:
     {
       "username": "username1",
       "has_referral_code": true,
-      "referral_code": "CODE10"
+      "referral_code": "CODE10",
+      "confidence_pct": 85
     },
     {
       "username": "username2",
       "has_referral_code": false,
-      "referral_code": null
+      "referral_code": null,
+      "confidence_pct": 45
     }
   ]
 }
