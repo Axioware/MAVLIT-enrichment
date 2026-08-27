@@ -290,7 +290,4 @@ db.close()
 python -m pipeline.enrichment_re.score_post_sponsorship
 
 
-## to run apify to get caption
-python -m pipeline.enrichment_re.backfill_partnership_post_content --limit 500
-
 ## after all have to run LLM(one time) for niche of creators for specific selected niche
