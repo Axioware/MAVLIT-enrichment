@@ -34,7 +34,7 @@ import json
 import logging
 import time
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, ENABLE_INSTA_LLM, OPENAI_KEY
@@ -244,7 +244,35 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
     }
 
 
-#  Main enrichment function 
+def _build_profile_only_row(brand_raw_id: int, handle: str, items: list[dict]) -> dict:
+    """
+    Row for a brand whose scrape returned zero posts worth keeping (no
+    sponsorship signal survived filtering, or the account had no posts at
+    all) — keeps the brand's profile snapshot (followers, bio, etc.)
+    without any post-specific fields, so every checked brand still has at
+    least one instagram_posts row to read a follower count from.
+
+    Profile fields come from the first raw item's metaData (addParentData
+    embeds the same profile snapshot on every item), since a filtered-out
+    item still carries it. items may be empty (account had zero posts at
+    all) — falls back to no profile data in that case.
+    """
+    meta = (items[0].get("metaData") or {}) if items else {}
+    return {
+        "brand_raw_id":           brand_raw_id,
+        "instagram_handle":       handle,
+        "followers_count":        meta.get("followersCount"),
+        "follows_count":          meta.get("followsCount"),
+        "posts_count":            meta.get("postsCount"),
+        "is_business_account":    meta.get("isBusinessAccount"),
+        "verified":               meta.get("verified"),
+        "biography":              meta.get("biography"),
+        "external_url":           meta.get("externalUrl"),
+        "business_category_name": meta.get("businessCategoryName"),
+    }
+
+
+#  Main enrichment function
 
 def enrich_instagram_posts(
     db: Session,
@@ -413,6 +441,13 @@ def enrich_instagram_posts(
                         # llm_checked stays False in this mode
                         inserted += upsert_rows(db, InstagramPost, [row], ["post_id"])
                         unique_creators |= _row_creators(row)
+
+            if inserted == 0:
+                upsert_rows(
+                    db, InstagramPost,
+                    [_build_profile_only_row(brand.id, handle, items)],
+                    ["brand_raw_id"], index_where=text("post_id IS NULL"),
+                )
 
             total_posts += inserted
             logger.info(

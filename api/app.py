@@ -143,6 +143,17 @@ def _run_migrations() -> None:
         # creator(s) referenced on the post, backfilled by
         # pipeline/enrichment/score_instagram_post_sponsorship.py.
         "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS sponsorship_confidence INTEGER",
+        # instagram_posts: allow a "profile-only" row (brand_raw_id + profile
+        # snapshot, no post fields) for brands whose scrape returns zero
+        # posts worth keeping — see enrich_instagram_posts's
+        # _build_profile_only_row. Partial unique index caps it at one such
+        # row per brand (real posts still have their own post_id and aren't
+        # affected, since this index only covers post_id IS NULL rows).
+        "ALTER TABLE instagram_posts ALTER COLUMN post_id DROP NOT NULL",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_instagram_posts_profile_only
+        ON instagram_posts(brand_raw_id) WHERE post_id IS NULL
+        """,
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS user_type TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS tier_fit TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS captions JSONB",

@@ -182,7 +182,11 @@ class InstagramPost(Base):
     instagram_handle       = Column(Text, nullable=False)
 
     # Post identity
-    post_id                = Column(Text, unique=True, nullable=False)
+    # Nullable — a "profile-only" row (brand_raw_id set, everything post-
+    # specific left NULL) gets saved when a brand's scrape returns zero
+    # posts worth keeping, so the brand's follower count is still on file.
+    # See enrich_instagram_posts's _build_profile_only_row.
+    post_id                = Column(Text, unique=True)
     post_url               = Column(Text)
     post_type              = Column(Text)   # Image, Video, Sidecar, etc.
     timestamp              = Column(Text)
