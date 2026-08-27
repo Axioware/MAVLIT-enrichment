@@ -207,6 +207,12 @@ class InstagramPost(Base):
     # LLM verification
     llm_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
 
+    # LLM-estimated 0-100 confidence that this brand post is a paid
+    # sponsorship with the creator(s) referenced via sponsors/tagged_users/
+    # mentions/coauthor_producers. Filled in by
+    # pipeline/enrichment/score_instagram_post_sponsorship.py.
+    sponsorship_confidence = Column(Integer)
+
     # User enrichment tracking
     is_users_scraped   = Column(Boolean, nullable=False, server_default="false", default=False)
 

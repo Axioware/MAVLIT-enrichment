@@ -139,6 +139,10 @@ def _run_migrations() -> None:
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS confirmed_creators",
         "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS llm_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS is_users_scraped BOOLEAN NOT NULL DEFAULT false",
+        # instagram_posts: LLM-estimated 0-100 sponsorship confidence with the
+        # creator(s) referenced on the post, backfilled by
+        # pipeline/enrichment/score_instagram_post_sponsorship.py.
+        "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS sponsorship_confidence INTEGER",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS user_type TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS tier_fit TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS captions JSONB",
