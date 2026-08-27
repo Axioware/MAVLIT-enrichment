@@ -39,62 +39,122 @@ from pipeline.helpers.gpt_llm import call_gpt_json
 
 logger = logging.getLogger(__name__)
 
-_PROMPT_TEMPLATE = """You are an Instagram sponsorship verification system.
+_PROMPT_TEMPLATE = """You are an Instagram brand-collaboration verification system.
 
-Your task is NOT to identify whether the referenced accounts are creators.
+Your task is NOT to identify whether referenced accounts are creators.
 
-Your task is ONLY to determine whether THIS SPECIFIC INSTAGRAM POST, posted by the BRAND'S own account, is evidence of a paid sponsorship, paid partnership, brand collaboration, ambassador promotion, affiliate promotion, gifted campaign with disclosure, or other commercial relationship between THIS brand and the creator(s) referenced below.
+Your task is ONLY to determine whether THIS SPECIFIC INSTAGRAM POST, published by the brand's own Instagram account, is evidence of a commercial collaboration between the brand and one or more referenced creator accounts.
 
-ASSUME THE POST IS NOT A PAID COLLABORATION UNLESS THERE IS POSITIVE EVIDENCE.
+Commercial collaborations include:
+- paid sponsorships
+- paid partnerships
+- influencer campaigns
+- ambassador relationships
+- affiliate relationships
+- gifted collaborations with disclosure
+- creator marketing campaigns
+- brand-funded promotions
+
+ASSUME THERE IS NO COMMERCIAL COLLABORATION UNLESS THERE IS POSITIVE EVIDENCE.
+
+The goal is to determine whether the brand is actively collaborating with a creator in THIS SPECIFIC POST.
 
 Do NOT increase confidence simply because:
 - an account is tagged
 - an account is mentioned
-- an account is listed as a coauthor
-- an account is listed as a sponsor field with no other context
-- the referenced account is a well-known creator or influencer
-- the post is a repost, shoutout, or event photo
+- an account is a coauthor
+- an account appears in the sponsor field
+- the account is famous
+- the account has many followers
+- the account appears in a photo
+- the account attended an event
+- the account purchased a product
+- the account won a contest
+- the account is a customer
+- the account is an employee
+- the account is another business
+- the account is another brand
+- the account is a retailer or distributor
+- the account is a photographer, videographer, venue, agency, or service provider
 
-A tag, mention, or product reference alone is weak evidence.
+A tag, mention, coauthor relationship, or sponsor field alone is NOT sufficient evidence of a commercial creator partnership.
 
 Strong evidence includes:
 - Instagram paid partnership label
-- explicit sponsorship disclosure (#ad, #sponsored, paid partnership, partner, advertisement)
-- affiliate/referral/discount code attributed to the creator
-- language indicating a commercial relationship (e.g. "our ambassador", "working with", "campaign with")
-- direct promotional call-to-action featuring the creator
-- giveaway or campaign run jointly with the creator
-- clear indication the creator is representing or endorsing the brand
+- explicit sponsorship disclosure
+- #ad, #sponsored, #paidpartnership
+- affiliate, referral, promo, creator, ambassador, or discount codes
+- campaign language involving the referenced creator
+- language such as:
+  - "partnering with"
+  - "working with"
+  - "collaboration with"
+  - "ambassador"
+  - "creator partner"
+  - "sponsored by"
+  - "in partnership with"
+- giveaway or promotion run jointly with the creator
+- explicit creator-feature campaign
+- multiple pieces of evidence pointing to the same creator relationship
 
 IMPORTANT:
 
-The score must represent the likelihood that THIS POST is a paid collaboration between the BRAND and the creator(s) it references (sponsors / tagged_users / mentions / coauthor_producers combined).
+The score must represent the likelihood that THIS POST is evidence of a commercial collaboration between the brand and one or more referenced creator accounts.
 
-Be skeptical when the referenced accounts look like ordinary customers, employees, event attendees, or other brand/company accounts rather than independent creators.
+The score should NOT represent:
+- whether the referenced account is famous
+- whether the referenced account is a creator
+- whether the referenced account has worked with the brand in the past
+
+Only evaluate the evidence present in THIS POST.
+
+If referenced accounts appear to be:
+- customers
+- employees
+- event attendees
+- vendors
+- photographers
+- agencies
+- retail stores
+- distributors
+- partner businesses
+- media outlets
+- other brands
+
+then assign a low score unless there is explicit evidence of a creator-brand commercial relationship.
+
+Before assigning a score, answer these questions internally:
+
+1. Is there evidence of a commercial collaboration in this post?
+2. Which referenced account(s) appear to be part of that collaboration?
+3. Does the post clearly indicate a creator-marketing relationship rather than a customer, employee, vendor, or business relationship?
+
+The confidence score should be high only when all three questions support a creator-brand commercial partnership.
 
 Scoring rubric:
 
 0-10:
-No evidence of a paid collaboration. Ordinary tag, mention, repost, or unrelated account.
+No evidence of collaboration.
 
-11-25:
-An account is referenced but there's no evidence of a commercial relationship.
+11-20:
+Accounts are referenced but there is no commercial evidence.
 
-26-40:
-Some weak signals, but a paid collaboration is speculative.
+21-40:
+Weak signals. Collaboration is speculative.
 
 41-60:
-Possible collaboration, evidence is incomplete.
+Possible collaboration but evidence is incomplete.
 
 61-80:
-Strong evidence of a genuine commercial relationship with the referenced creator(s).
+Strong evidence of a creator-brand commercial relationship.
 
 81-100:
-Very strong evidence — explicit paid-partnership marker plus disclosure language, affiliate/discount codes, or multiple strong signals together.
+Explicit creator partnership, sponsorship disclosure, paid partnership indicator, creator code, ambassador program, or multiple strong signals directly linking the brand and creator.
 
-Evaluate only the information provided below.
+Evaluate only the information below.
 
-Brand: {brand_name}
+Brand:
+{brand_name}
 
 Post caption:
 {caption}
