@@ -224,11 +224,12 @@ def _score_post(
     return max(0, min(100, round(score)))
 
 
-def score_instagram_post_sponsorship(db: Session, limit: int = 500) -> tuple[int, int]:
+def score_instagram_post_sponsorship(db: Session, limit: int | None = None) -> tuple[int, int]:
     """
-    Fill sponsorship_confidence on up to `limit` rows in instagram_posts
-    that reference at least one account (sponsors/tagged_users/mentions/
-    coauthor_producers) and where it's still NULL.
+    Fill sponsorship_confidence on rows in instagram_posts that reference at
+    least one account (sponsors/tagged_users/mentions/coauthor_producers)
+    and where it's still NULL. Processes every pending row by default; pass
+    limit to cap how many this call processes.
 
     Returns (updated, failed).
     """
@@ -238,7 +239,7 @@ def score_instagram_post_sponsorship(db: Session, limit: int = 500) -> tuple[int
 
     _ensure_column()
 
-    rows: list[InstagramPost] = (
+    query = (
         db.query(InstagramPost)
         .filter(InstagramPost.sponsorship_confidence.is_(None))
         .filter(
@@ -249,9 +250,10 @@ def score_instagram_post_sponsorship(db: Session, limit: int = 500) -> tuple[int
                 InstagramPost.coauthor_producers.isnot(None),
             )
         )
-        .limit(limit)
-        .all()
     )
+    if limit is not None:
+        query = query.limit(limit)
+    rows: list[InstagramPost] = query.all()
 
     if not rows:
         logger.info("Instagram post sponsorship scoring: no rows pending")
@@ -294,7 +296,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="One-time LLM sponsorship-confidence scoring for instagram_posts (brand → creator direction)."
     )
-    parser.add_argument("--limit", type=int, default=500, help="Max pending rows to process this run.")
+    parser.add_argument(
+        "--limit", type=int, default=None,
+        help="Max pending rows to process this run. Omit to process every pending row.",
+    )
     args = parser.parse_args()
 
     db = SessionLocal()
