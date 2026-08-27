@@ -286,8 +286,12 @@ enrich_brand_instagram_profile(db, limit=1)
 db.close()
 "
 
-## to run LLM per post 
+## to run LLM per post re
 python -m pipeline.enrichment_re.score_post_sponsorship
+
+
+## to run LLM per post 
+python -m pipeline.enrichment.score_instagram_post_sponsorship
 
 
 ## after all have to run LLM(one time) for niche of creators for specific selected niche
