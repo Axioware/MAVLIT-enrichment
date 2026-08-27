@@ -39,55 +39,60 @@ logger = logging.getLogger(__name__)
 
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"
 
-if not APIFY_TOKEN:
-    raise SystemExit("APIFY_TOKEN not set")
+def main() -> None:
+    if not APIFY_TOKEN:
+        raise SystemExit("APIFY_TOKEN not set")
 
-db = SessionLocal()
+    db = SessionLocal()
 
-brands = (
-    db.query(BrandRaw)
-    .join(TestCreatorBrandPartnershipPost, TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id)
-    .filter(BrandRaw.instagram_checked.is_(True))
-    .filter(~db.query(InstagramPost.id).filter(InstagramPost.brand_raw_id == BrandRaw.id).exists())
-    .distinct()
-    .all()
-)
-
-print(f"{len(brands)} brand(s) to backfill")
-
-saved = 0
-failed = 0
-
-for brand in brands:
-    handle = normalize_handle(brand.instagram_handle or "")
-    if not handle:
-        print(f"id={brand.id} {brand.name}: no instagram_handle — skipping")
-        continue
-
-    print(f"--- id={brand.id} {brand.name or '(no name)'} @{handle} ---")
-    items = run_apify_actor(
-        _ACTOR_ID,
-        {
-            "addParentData": True,
-            "directUrls":    [f"https://www.instagram.com/{handle}/"],
-            "resultsLimit":  1,
-            "resultsType":   "posts",
-        },
-        label=f"Profile-only backfill @{handle}",
-        require_success=True,
+    brands = (
+        db.query(BrandRaw)
+        .join(TestCreatorBrandPartnershipPost, TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id)
+        .filter(BrandRaw.instagram_checked.is_(True))
+        .filter(~db.query(InstagramPost.id).filter(InstagramPost.brand_raw_id == BrandRaw.id).exists())
+        .distinct()
+        .all()
     )
 
-    if items is None:
-        print(f"  Apify scrape failed for @{handle} — skipping (retry later)")
-        failed += 1
+    print(f"{len(brands)} brand(s) to backfill")
+
+    saved = 0
+    failed = 0
+
+    for brand in brands:
+        handle = normalize_handle(brand.instagram_handle or "")
+        if not handle:
+            print(f"id={brand.id} {brand.name}: no instagram_handle — skipping")
+            continue
+
+        print(f"--- id={brand.id} {brand.name or '(no name)'} @{handle} ---")
+        items = run_apify_actor(
+            _ACTOR_ID,
+            {
+                "addParentData": True,
+                "directUrls":    [f"https://www.instagram.com/{handle}/"],
+                "resultsLimit":  1,
+                "resultsType":   "posts",
+            },
+            label=f"Profile-only backfill @{handle}",
+            require_success=True,
+        )
+
+        if items is None:
+            print(f"  Apify scrape failed for @{handle} — skipping (retry later)")
+            failed += 1
+            time.sleep(1.0)
+            continue
+
+        row = _build_profile_only_row(brand.id, handle, items)
+        n = upsert_rows(db, InstagramPost, [row], ["brand_raw_id"], index_where=text("post_id IS NULL"))
+        saved += n
+        print(f"  followers={row.get('followers_count')} — {'saved' if n else 'already existed'}")
         time.sleep(1.0)
-        continue
 
-    row = _build_profile_only_row(brand.id, handle, items)
-    n = upsert_rows(db, InstagramPost, [row], ["brand_raw_id"], index_where=text("post_id IS NULL"))
-    saved += n
-    print(f"  followers={row.get('followers_count')} — {'saved' if n else 'already existed'}")
-    time.sleep(1.0)
+    db.close()
+    print(f"done: saved={saved} failed={failed} total={len(brands)}")
 
-db.close()
-print(f"done: saved={saved} failed={failed} total={len(brands)}")
+
+if __name__ == "__main__":
+    main()
