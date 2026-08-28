@@ -13,15 +13,13 @@ is_scraped=False:
      with is_content_creator_re=True.
   3. For each of those posts, extract mentions/tagged_users/coauthor_producers/
      paid_partnership and ask the LLM (brand_check prompt) which referenced
-     accounts, if any, are real brand/company accounts — not other creators —
-     and, for each one confirmed, a 0-100 sponsorship_confidence score for
-     that specific post/brand pair. Any confirmed brand gets a bare
-     brands_raw row (instagram_handle only; name/niche/source are nullable
-     for exactly this case — see pipeline/db.py) and is linked to this
-     creator via brand_instagram_users. The exact LLM-confirmed
-     creator/brand/post evidence, including its confidence score, is also
-     upserted into test_creator_brand_partnership_posts. One creator_re row
-     can end up linked to several different brands across its scraped posts.
+     accounts, if any, are real brand/company accounts — not other creators.
+     Any confirmed brand gets a bare brands_raw row (instagram_handle only;
+     name/niche/source are nullable for exactly this case — see pipeline/db.py)
+     and is linked to this creator via brand_instagram_users. The exact
+     LLM-confirmed creator/brand/post evidence is also upserted into
+     test_creator_brand_partnership_posts. One creator_re row can end up
+     linked to several different brands across its scraped posts.
   4. For posts where step 3 confirmed at least one brand, collect up to 5
      commenters for that post only, scrape 1 post each for profile data, store
      them in instagram_users (user_type="commenter") with
@@ -105,10 +103,10 @@ def _get_brand_check_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == BRAND_CHECK_PROMPT_NAME).first()
     if not row:
         return BRAND_CHECK_DEFAULT_PROMPT
-    if "confidence_pct" not in (row.content or ""):
+    if "has_referral_code" not in (row.content or "") or "confidence_pct" in (row.content or ""):
         row.content = BRAND_CHECK_DEFAULT_PROMPT
         db.commit()
-        logger.info("Content creator RE: refreshed brand_check prompt with confidence scoring")
+        logger.info("Content creator RE: refreshed brand_check prompt (removed confidence scoring)")
     return row.content
 
 
@@ -134,7 +132,6 @@ def _parse_brand_check_result(result: dict) -> list[dict]:
                     "username": handle,
                     "has_referral_code": False,
                     "referral_code": None,
-                    "confidence_pct": None,
                 })
             continue
 
@@ -159,17 +156,10 @@ def _parse_brand_check_result(result: dict) -> list[dict]:
         else:
             referral_code = None
 
-        confidence_pct = brand.get("confidence_pct")
-        if isinstance(confidence_pct, (int, float)):
-            confidence_pct = max(0, min(100, round(confidence_pct)))
-        else:
-            confidence_pct = None
-
         parsed.append({
             "username": handle,
             "has_referral_code": _boolish(brand.get("has_referral_code")) or bool(referral_code),
             "referral_code": referral_code,
-            "confidence_pct": confidence_pct,
         })
 
     return parsed
@@ -258,7 +248,6 @@ def _record_llm_partnership_post(
     creator_username: str,
     creator_name: str | None,
     item: dict,
-    sponsorship_confidence: int | None = None,
 ) -> None:
     post_url = _post_url(item)
     if not post_url:
@@ -292,7 +281,6 @@ def _record_llm_partnership_post(
         "mentions": item.get("mentions"),
         "tagged_users": _usernames_only(item.get("taggedUsers")),
         "coauthor_producers": _usernames_only(_real_coauthors(item, creator_username)),
-        "sponsorship_confidence": sponsorship_confidence,
     })
     stmt = stmt.on_conflict_do_update(
         index_elements=["creator_username", "brand_raw_id", "post_url"],
@@ -309,7 +297,6 @@ def _record_llm_partnership_post(
             "mentions": stmt.excluded.mentions,
             "tagged_users": stmt.excluded.tagged_users,
             "coauthor_producers": stmt.excluded.coauthor_producers,
-            "sponsorship_confidence": stmt.excluded.sponsorship_confidence,
             "detected_at": text("now()"),
         },
     )
@@ -428,7 +415,6 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int
                         creator_username=username,
                         creator_name=profile.get("fullName"),
                         item=item,
-                        sponsorship_confidence=brand_match.get("confidence_pct"),
                     )
                     post_brand_ids.add(brand_id)
                     confirmed_brand_ids.add(brand_id)

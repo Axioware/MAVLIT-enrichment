@@ -224,18 +224,29 @@ def _score_post(
     return max(0, min(100, round(score)))
 
 
-def score_instagram_post_sponsorship(db: Session, limit: int | None = None) -> tuple[int, int]:
+def score_instagram_post_sponsorship(
+    db: Session, limit: int | None = None, brand_raw_id: int | None = None,
+) -> int:
     """
     Fill sponsorship_confidence on rows in instagram_posts that reference at
     least one account (sponsors/tagged_users/mentions/coauthor_producers)
     and where it's still NULL. Processes every pending row by default; pass
     limit to cap how many this call processes.
 
-    Returns (updated, failed).
+    Pass brand_raw_id to scope this call to one brand's instagram_posts rows
+    instead — still filtered to sponsorship_confidence IS NULL, so repeated
+    calls (e.g. limit=5 in a loop) advance through that brand's pending
+    posts one batch at a time, matching enrich_instagram_users's
+    brand_raw_id= pattern (this operates on instagram_posts ROWS, same as
+    that step, not on brands directly).
+
+    Returns the number of rows updated (failures are logged, not returned —
+    matching every other enrichment step's fn(db, limit=...) -> int
+    convention, since drain_pending_step's loop stops on a falsy return).
     """
     if not OPENAI_KEY:
         logger.warning("OPENAI_KEY not set — skipping instagram post sponsorship scoring")
-        return 0, 0
+        return 0
 
     _ensure_column()
 
@@ -251,13 +262,15 @@ def score_instagram_post_sponsorship(db: Session, limit: int | None = None) -> t
             )
         )
     )
+    if brand_raw_id is not None:
+        query = query.filter(InstagramPost.brand_raw_id == brand_raw_id)
     if limit is not None:
         query = query.limit(limit)
     rows: list[InstagramPost] = query.all()
 
     if not rows:
         logger.info("Instagram post sponsorship scoring: no rows pending")
-        return 0, 0
+        return 0
 
     logger.info("Instagram post sponsorship scoring: processing %d row(s)", len(rows))
     updated = 0
@@ -288,7 +301,7 @@ def score_instagram_post_sponsorship(db: Session, limit: int | None = None) -> t
         time.sleep(0.5)
 
     logger.info("Instagram post sponsorship scoring: %d updated, %d failed", updated, failed)
-    return updated, failed
+    return updated
 
 
 def main() -> None:
@@ -300,12 +313,16 @@ def main() -> None:
         "--limit", type=int, default=None,
         help="Max pending rows to process this run. Omit to process every pending row.",
     )
+    parser.add_argument(
+        "--brand-id", type=int, default=None, dest="brand_raw_id",
+        help="Scope this run to one brand's instagram_posts rows (brands_raw.id).",
+    )
     args = parser.parse_args()
 
     db = SessionLocal()
     try:
-        updated, failed = score_instagram_post_sponsorship(db, limit=args.limit)
-        print(f"score_instagram_post_sponsorship: updated={updated} failed={failed}")
+        updated = score_instagram_post_sponsorship(db, limit=args.limit, brand_raw_id=args.brand_raw_id)
+        print(f"score_instagram_post_sponsorship: updated={updated}")
     finally:
         db.close()
 

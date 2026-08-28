@@ -169,28 +169,38 @@ def _score_post(brand_name: str, creator_name: str, caption: str | None,
     return max(0, min(100, round(score)))
 
 
-def score_post_sponsorship(db: Session, limit: int = 500) -> tuple[int, int]:
+def score_post_sponsorship(db: Session, limit: int = 500, brand_raw_id: int | None = None) -> int:
     """
     Fill sponsorship_confidence on up to `limit` rows in
     test_creator_brand_partnership_posts where it's still NULL.
-    Returns (updated, failed).
+
+    Pass brand_raw_id to scope this call to one brand's rows instead — still
+    filtered to sponsorship_confidence IS NULL, so repeated calls (e.g.
+    limit=500 in a loop) advance through that brand's pending rows one
+    batch at a time, matching enrich_instagram_users'/
+    score_instagram_post_sponsorship's brand_raw_id= pattern (this operates
+    on test_creator_brand_partnership_posts ROWS, not on brands directly).
+
+    Returns the number of rows updated (failures are logged, not returned —
+    matching every other enrichment step's fn(db, limit=...) -> int
+    convention, since a drain loop stops on a falsy return).
     """
     if not OPENAI_KEY:
         logger.warning("OPENAI_KEY not set — skipping sponsorship scoring")
-        return 0, 0
+        return 0
 
     _ensure_partnership_evidence_table()
 
-    rows: list[TestCreatorBrandPartnershipPost] = (
-        db.query(TestCreatorBrandPartnershipPost)
-        .filter(TestCreatorBrandPartnershipPost.sponsorship_confidence.is_(None))
-        .limit(limit)
-        .all()
+    query = db.query(TestCreatorBrandPartnershipPost).filter(
+        TestCreatorBrandPartnershipPost.sponsorship_confidence.is_(None)
     )
+    if brand_raw_id is not None:
+        query = query.filter(TestCreatorBrandPartnershipPost.brand_raw_id == brand_raw_id)
+    rows: list[TestCreatorBrandPartnershipPost] = query.limit(limit).all()
 
     if not rows:
         logger.info("Sponsorship scoring: no rows pending")
-        return 0, 0
+        return 0
 
     logger.info("Sponsorship scoring: processing %d row(s)", len(rows))
     updated = 0
@@ -220,7 +230,7 @@ def score_post_sponsorship(db: Session, limit: int = 500) -> tuple[int, int]:
         time.sleep(0.5)
 
     logger.info("Sponsorship scoring: %d updated, %d failed", updated, failed)
-    return updated, failed
+    return updated
 
 
 def main() -> None:
@@ -229,12 +239,16 @@ def main() -> None:
         description="One-time LLM sponsorship-confidence scoring for test_creator_brand_partnership_posts."
     )
     parser.add_argument("--limit", type=int, default=500, help="Max pending rows to process this run.")
+    parser.add_argument(
+        "--brand-id", type=int, default=None, dest="brand_raw_id",
+        help="Scope this run to one brand's test_creator_brand_partnership_posts rows (brands_raw.id).",
+    )
     args = parser.parse_args()
 
     db = SessionLocal()
     try:
-        updated, failed = score_post_sponsorship(db, limit=args.limit)
-        print(f"score_post_sponsorship: updated={updated} failed={failed}")
+        updated = score_post_sponsorship(db, limit=args.limit, brand_raw_id=args.brand_raw_id)
+        print(f"score_post_sponsorship: updated={updated}")
     finally:
         db.close()
 
