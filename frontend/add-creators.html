@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/posthog-init.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MAVLIT Pipeline</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    /*  Nav  */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      height: 56px;
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+    }
+    .nav-brand {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      color: #38bdf8;
+      text-decoration: none;
+    }
+    .nav-link {
+      font-size: .85rem;
+      color: #94a3b8;
+      text-decoration: none;
+      padding: .35rem .75rem;
+      border-radius: 6px;
+      transition: background .15s, color .15s;
+    }
+    .nav-link:hover { background: #334155; color: #e2e8f0; }
+
+    .nav-link.nav-btn {
+      padding: .5rem 1rem;
+      background: #0284c7;
+      color: #ffffff;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+    .nav-link.nav-btn:hover {
+      background: #0369a1;
+      color: #ffffff;
+    }
+
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+    }
+    .nav-user {
+      font-size: .8rem;
+      color: #64748b;
+      max-width: 160px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .btn-signout {
+      font-size: .8rem;
+      font-weight: 600;
+      color: #64748b;
+      background: transparent;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: .3rem .75rem;
+      cursor: pointer;
+      transition: color .15s, border-color .15s, background .15s;
+    }
+    .btn-signout:hover {
+      color: #f87171;
+      border-color: rgba(239,68,68,.35);
+      background: rgba(239,68,68,.06);
+    }
+
+    /*  Layout  */
+    main {
+      max-width: 760px;
+      margin: 3rem auto;
+      padding: 0 1.5rem;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: .4rem;
+    }
+    .subtitle {
+      color: #64748b;
+      font-size: .9rem;
+      margin-bottom: 2.5rem;
+    }
+
+    /*  Card  */
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 2rem;
+      margin-bottom: 1.5rem;
+    }
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #cbd5e1;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    .card-title svg { opacity: .7; }
+
+    /*  Form  */
+    label {
+      display: block;
+      font-size: .8rem;
+      font-weight: 500;
+      color: #94a3b8;
+      margin-bottom: .4rem;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+    }
+    textarea {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: .75rem 1rem;
+      color: #f1f5f9;
+      font-size: .9rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      outline: none;
+      resize: vertical;
+      min-height: 220px;
+      line-height: 1.5;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    textarea:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 3px rgba(56,189,248,.15);
+    }
+    textarea::placeholder { color: #475569; }
+
+    select {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: .75rem 1rem;
+      color: #f1f5f9;
+      font-size: .95rem;
+      outline: none;
+      transition: border-color .15s;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2364748b' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right .85rem center;
+    }
+    select:focus { border-color: #38bdf8; }
+    select option { background: #1e293b; }
+
+    .form-group { margin-top: 1.25rem; }
+    .hint { color: #475569; font-size: .75rem; margin-top: .4rem; }
+
+    /*  Button  */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
+      margin-top: 1.75rem;
+      padding: .75rem 2rem;
+      background: #0284c7;
+      color: #fff;
+      font-size: .95rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background .15s, opacity .15s;
+    }
+    .btn:hover { background: #0369a1; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /*  Result  */
+    #resultCard { display: none; }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+    }
+    .stat {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 1rem;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #38bdf8;
+    }
+    .stat-value.stat-skipped { color: #fbbf24; }
+    .stat-label {
+      font-size: .75rem;
+      color: #475569;
+      margin-top: .25rem;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .error-box {
+      background: rgba(239,68,68,.08);
+      border: 1px solid rgba(239,68,68,.3);
+      border-radius: 8px;
+      padding: 1rem;
+      color: #fca5a5;
+      font-size: .85rem;
+      margin-top: 1rem;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a class="nav-brand" href="/">&#9889; MAVLIT Pipeline</a>
+  <div class="nav-right">
+    <a class="nav-link" href="/">Brand Seeder</a>
+    <a class="nav-link nav-btn" href="/login">Login</a>
+    <a class="nav-link" href="/creator-profile">Creator Profile</a>
+    <a class="nav-link" href="/matches">Your Matches</a>
+    <a class="nav-link" href="/admin" target="_blank">Database Admin &#8599;</a>
+    <span class="nav-user" id="navUser" style="display:none"></span>
+    <button class="btn-signout" id="signoutBtn" style="display:none" onclick="signOut()">Sign out</button>
+  </div>
+</nav>
+
+<main>
+  <h1>Add Content Creators</h1>
+  <p class="subtitle">Paste Instagram profile URLs (one per line), pick a niche, and add them to <code>content_creator_re</code> for the reverse-engineering pipeline to scrape.</p>
+
+  <div class="card">
+    <p class="card-title">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      New creators
+    </p>
+
+    <label for="urls">Instagram URLs</label>
+    <textarea id="urls" placeholder="https://www.instagram.com/someone/&#10;https://www.instagram.com/someoneelse/&#10;..."></textarea>
+    <p class="hint">One URL per line. Usernames/@handles work too — anything <code>normalize_handle</code> can parse.</p>
+
+    <div class="form-group">
+      <label for="niche">Niche</label>
+      <select id="niche">
+        <option value="Music">Music</option>
+        <option value="Fitness">Fitness</option>
+        <option value="Beauty">Beauty</option>
+      </select>
+    </div>
+
+    <button class="btn" id="addBtn" onclick="submitCreators()">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      Add Creators
+    </button>
+  </div>
+
+  <div class="card" id="resultCard">
+    <p class="card-title" style="margin-bottom:1rem">Result</p>
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-value" id="statAdded">—</div>
+        <div class="stat-label">Added</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value stat-skipped" id="statSkipped">—</div>
+        <div class="stat-label">Skipped (dupes)</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="statTotal">—</div>
+        <div class="stat-label">Total URLs</div>
+      </div>
+    </div>
+    <div class="error-box" id="errorBox" style="display:none"></div>
+  </div>
+</main>
+
+<script>
+  function submitCreators() {
+    const raw = document.getElementById('urls').value;
+    const urls = raw.split('\n').map(s => s.trim()).filter(Boolean);
+    const niche = document.getElementById('niche').value;
+
+    if (!urls.length) {
+      document.getElementById('urls').focus();
+      return;
+    }
+
+    const btn = document.getElementById('addBtn');
+    btn.disabled = true;
+
+    fetch('/content-creator-re/bulk-add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ urls, niche }),
+    })
+      .then(r => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Request failed'); });
+        return r.json();
+      })
+      .then(data => {
+        document.getElementById('resultCard').style.display = 'block';
+        document.getElementById('statAdded').textContent   = data.added;
+        document.getElementById('statSkipped').textContent = data.skipped;
+        document.getElementById('statTotal').textContent   = data.total;
+        document.getElementById('errorBox').style.display = 'none';
+        if (data.added > 0) document.getElementById('urls').value = '';
+      })
+      .catch(err => {
+        document.getElementById('resultCard').style.display = 'block';
+        document.getElementById('errorBox').style.display = 'block';
+        document.getElementById('errorBox').textContent = err.message;
+      })
+      .finally(() => { btn.disabled = false; });
+  }
+
+  // Auth: show user info + sign-out button in nav (cosmetic only, matches index.html)
+  fetch('/auth/me', { credentials: 'include' })
+    .then(r => r.ok ? r.json() : null)
+    .then(user => {
+      if (!user) return;
+      window.mavlitIdentifyUser(user);
+      var navUser = document.getElementById('navUser');
+      var signoutBtn = document.getElementById('signoutBtn');
+      navUser.textContent = user.name || user.email;
+      navUser.style.display = 'block';
+      signoutBtn.style.display = 'block';
+    });
+
+  function signOut() {
+    fetch('/auth/logout', { method: 'POST', credentials: 'include' })
+      .then(function() { window.mavlitResetIdentity(); window.location.replace('/signin'); });
+  }
+</script>
+</body>
+</html>

@@ -46,6 +46,7 @@ from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.enrichment.orchestrator import run_signal_enrichment
 from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 from pipeline.seed import run_seed
+from pipeline.enrichment_re.content_creator_re import add_content_creator_re
 
 logger = logging.getLogger(__name__)
 
@@ -1005,6 +1006,11 @@ def matches_page():
     return FileResponse("frontend/matches.html")
 
 
+@app.get("/add-creators", include_in_schema=False)
+def add_creators_page():
+    return FileResponse("frontend/add-creators.html")
+
+
 class SeedJobResponse(BaseModel):
     job_id:  str
     status:  str
@@ -1030,13 +1036,37 @@ class EnrichStatusResponse(BaseModel):
     results: dict | None = None
     error:   str | None  = None
 
-# 
+
+class BulkAddCreatorsRequest(BaseModel):
+    urls:  list[str]
+    niche: str
+
+
+class BulkAddCreatorsResponse(BaseModel):
+    added:   int
+    skipped: int
+    total:   int
+
+#
 # Endpoints
-# 
+#
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/content-creator-re/bulk-add", response_model=BulkAddCreatorsResponse)
+def bulk_add_content_creators(body: BulkAddCreatorsRequest):
+    """
+    Bulk-insert content_creator_re rows from pasted Instagram URLs, one
+    niche for the whole batch. Synchronous (no Apify/LLM calls — just URL
+    parsing + DB inserts) so no background job/polling needed, unlike
+    /seed. Skips a URL if its extracted username already exists.
+    """
+    urls = [u.strip() for u in body.urls if u.strip()]
+    added, skipped = add_content_creator_re(urls, body.niche)
+    return BulkAddCreatorsResponse(added=added, skipped=skipped, total=len(urls))
 
 
 @app.post("/seed", response_model=SeedJobResponse)

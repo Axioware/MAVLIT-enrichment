@@ -529,6 +529,46 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int
     return processed, all_confirmed_brand_ids
 
 
+def add_content_creator_re(urls: list[str], niche: str) -> tuple[int, int]:
+    """
+    Insert one content_creator_re row per URL with the given niche, skipping
+    any URL whose extracted username already exists (case-insensitive).
+    Used by the /content-creator-re/bulk-add API endpoint (see api/app.py,
+    frontend/add-creators.html) — one niche per call, urls pasted as a list.
+
+    Returns (added, skipped).
+    """
+    db = SessionLocal()
+    added = 0
+    skipped = 0
+    try:
+        for url in urls:
+            username = normalize_handle(url)
+            if not username:
+                logger.warning("Could not extract a username from %r — skipping", url)
+                skipped += 1
+                continue
+
+            existing = (
+                db.query(ContentCreatorRE)
+                .filter(ContentCreatorRE.username.ilike(username))
+                .first()
+            )
+            if existing:
+                logger.info("@%s already in content_creator_re (id=%d) — skipping", username, existing.id)
+                skipped += 1
+                continue
+
+            db.add(ContentCreatorRE(username=username, niche=niche, url=url))
+            db.commit()
+            added += 1
+            logger.info("@%s (%s) — added", username, niche)
+    finally:
+        db.close()
+
+    return added, skipped
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s")
     parser = argparse.ArgumentParser(description="Run content_creator_re reverse-engineering enrichment.")
