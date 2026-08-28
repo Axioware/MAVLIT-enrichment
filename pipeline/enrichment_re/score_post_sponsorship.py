@@ -220,12 +220,21 @@ def score_post_sponsorship(db: Session, limit: int = 500, brand_raw_id: int | No
             time.sleep(0.5)
             continue
 
+        # Captured before commit — db.commit() expires this row's attributes,
+        # and re-reading them afterward (e.g. for this log line) would force
+        # SQLAlchemy to silently reload the row, which also re-triggers its
+        # lazy="selectin" relationships (brand_raw/content_creator_re) and
+        # opens a NEW, never-committed transaction that just sits there
+        # holding a lock on brands_raw — this is exactly what caused a
+        # production hang/lock pileup (score_post_sponsorship stuck right
+        # after scoring a row, blocking /admin/brand-raw/list with a 502).
+        row_id, row_creator_username, row_brand_name = row.id, row.creator_username, row.brand_name
         row.sponsorship_confidence = score
         db.commit()
         updated += 1
         logger.info(
             "Sponsorship scoring: id=%d @%s/%s → %d%%",
-            row.id, row.creator_username, row.brand_name, score,
+            row_id, row_creator_username, row_brand_name, score,
         )
         time.sleep(0.5)
 

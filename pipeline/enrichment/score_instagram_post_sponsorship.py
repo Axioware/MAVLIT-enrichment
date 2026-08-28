@@ -291,12 +291,21 @@ def score_instagram_post_sponsorship(
             time.sleep(0.5)
             continue
 
+        # Captured before commit — db.commit() expires this row's attributes,
+        # and re-reading them afterward (e.g. for this log line) would force
+        # SQLAlchemy to silently reload the row, which also re-triggers its
+        # lazy="selectin" brand_raw relationship and opens a NEW,
+        # never-committed transaction that just sits there holding a lock on
+        # brands_raw — this is exactly what caused a production hang/lock
+        # pileup in the sibling score_post_sponsorship.py (stuck right after
+        # scoring a row, blocking /admin/brand-raw/list with a 502).
+        row_id, row_instagram_handle = row.id, row.instagram_handle
         row.sponsorship_confidence = score
         db.commit()
         updated += 1
         logger.info(
             "Instagram post sponsorship scoring: id=%d @%s → %d%%",
-            row.id, row.instagram_handle, score,
+            row_id, row_instagram_handle, score,
         )
         time.sleep(0.5)
 
