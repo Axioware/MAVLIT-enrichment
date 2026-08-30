@@ -5,6 +5,20 @@ from config import APIFY_TOKEN
 
 logger = logging.getLogger(__name__)
 
+# Apify's own client defaults to waiting *indefinitely* for a run to finish
+# (timeout_secs / wait_secs both default to None) — a stuck actor run (a
+# real, observed failure mode for scraper actors) would then block the
+# calling thread forever, holding open whatever DB transaction/connection
+# was checked out just before this call. Both are set explicitly so a call
+# always returns:
+#   _RUN_TIMEOUT_SECS — server-side: Apify kills the run itself after this.
+#   _WAIT_SECS        — client-side: how long we poll before giving up on
+#                        it and returning, even if Apify hasn't killed the
+#                        run yet. Kept slightly above _RUN_TIMEOUT_SECS so a
+#                        normally-finishing run isn't cut off early here.
+_RUN_TIMEOUT_SECS = 600
+_WAIT_SECS = 630
+
 
 class ApifyQuotaExceeded(Exception):
     """
@@ -49,6 +63,8 @@ def run_apify_actor(
 
     Returns [] on exception unless require_success=True, in which case
     returns None so the caller can skip marking the brand as processed.
+    A run that doesn't finish within _WAIT_SECS is treated the same way
+    (status will be non-terminal, e.g. "RUNNING") rather than blocking.
 
     Raises ApifyQuotaExceeded (instead of swallowing it like other errors)
     when the account has hit its monthly usage hard limit — see that
@@ -57,11 +73,17 @@ def run_apify_actor(
     prefix = f"{label}: " if label else ""
     client = ApifyClient(APIFY_TOKEN)
     try:
-        run = client.actor(actor_id).call(run_input=run_input)
+        run = client.actor(actor_id).call(
+            run_input=run_input,
+            timeout_secs=_RUN_TIMEOUT_SECS,
+            wait_secs=_WAIT_SECS,
+        )
         status = _run_field(run, "status", "status")
-        if require_success and status != "SUCCEEDED":
-            logger.error("%sApify actor failed — status: %s", prefix, status)
-            return None
+        if status != "SUCCEEDED":
+            level = logger.error if require_success else logger.warning
+            level("%sApify actor did not succeed — status: %s", prefix, status)
+            if require_success:
+                return None
         dataset_id = _run_field(run, "defaultDatasetId", "default_dataset_id")
         items = list(client.dataset(dataset_id).iterate_items())
         logger.info("%s%d items from Apify", prefix, len(items))

@@ -12,8 +12,14 @@ SOURCE_CONFIDENCE = {
 
 from config import DATABASE_URL
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=10, max_overflow=5, pool_recycle=1800)
+# expire_on_commit=False — otherwise every attribute read on an ORM object
+# after a commit() (common in the enrichment loops: query once, then
+# commit per-item inside the loop) silently issues a fresh SELECT and
+# checks out a new connection immediately before that item's slow external
+# call (Apify/HTTP/LLM). If that call hangs, the freshly-opened transaction
+# sits idle on that connection for the duration.
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, expire_on_commit=False)
 
 
 class Base(DeclarativeBase):
