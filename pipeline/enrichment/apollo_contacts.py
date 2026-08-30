@@ -582,7 +582,10 @@ def run_apollo_contacts(db: Session, limit: int = 20, brand_id: int | None = Non
         query = query.filter(BrandRaw.id == brand_id)
     else:
         query = (
-            query.filter(InitialBrandScore.total_score >= 50)
+            query.filter(
+                InitialBrandScore.total_score >= 50,
+                BrandRaw.has_official_website == True,
+            )
             .outerjoin(BrandContact, BrandContact.brand_raw_id == BrandRaw.id)
             .filter(BrandContact.id.is_(None))
         )

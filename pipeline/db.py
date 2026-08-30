@@ -38,6 +38,9 @@ class BrandRaw(Base):
     source            = Column(Text)
     source_confidence = Column(Integer)
     source_url        = Column(Text)
+    # True when content_creator_re's brand_check LLM sees this brand using
+    # a creator discount/referral code in a confirmed partnership post.
+    refferls          = Column(Boolean, nullable=False, server_default="false", default=False)
     # Official website (P856) resolved at seed time
     website           = Column(Text)
     domain            = Column(Text)
@@ -77,6 +80,14 @@ class BrandRaw(Base):
     # IS NULL) — true whether or not a match was found, so unresolvable
     # handles aren't retried every run.
     instagram_wikidata_checked = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Set by pipeline/enrichment_re/brand_instagram_profile.py after attempting
+    # to resolve name/website for a bare brand row (name IS NULL) straight from
+    # its own Instagram profile — bio external URL, optionally a linktree-style
+    # link-in-bio page, then a Google search fallback. True whether or not a
+    # website was found, so unresolvable handles aren't retried every run.
+    # Only meaningful after instagram_wikidata_checked=True (this step only
+    # runs on rows the Wikidata reverse lookup already gave up on).
+    instagram_profile_checked = Column(Boolean, nullable=False, server_default="false", default=False)
 
     def __str__(self) -> str:
         return self.name or f"Brand #{self.id}"
@@ -171,7 +182,11 @@ class InstagramPost(Base):
     instagram_handle       = Column(Text, nullable=False)
 
     # Post identity
-    post_id                = Column(Text, unique=True, nullable=False)
+    # Nullable — a "profile-only" row (brand_raw_id set, everything post-
+    # specific left NULL) gets saved when a brand's scrape returns zero
+    # posts worth keeping, so the brand's follower count is still on file.
+    # See enrich_instagram_posts's _build_profile_only_row.
+    post_id                = Column(Text, unique=True)
     post_url               = Column(Text)
     post_type              = Column(Text)   # Image, Video, Sidecar, etc.
     timestamp              = Column(Text)
@@ -195,6 +210,12 @@ class InstagramPost(Base):
 
     # LLM verification
     llm_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
+
+    # LLM-estimated 0-100 confidence that this brand post is a paid
+    # sponsorship with the creator(s) referenced via sponsors/tagged_users/
+    # mentions/coauthor_producers. Filled in by
+    # pipeline/enrichment/score_instagram_post_sponsorship.py.
+    sponsorship_confidence = Column(Integer)
 
     # User enrichment tracking
     is_users_scraped   = Column(Boolean, nullable=False, server_default="false", default=False)
@@ -599,6 +620,70 @@ class ContractReview(Base):
     creator = relationship("CreatorProfile", lazy="selectin", foreign_keys=[creator_profile_id])
 
 
+class TestBrandsWithInstagramPosts(Base):
+    """
+    Scratch/test table — see test_active_sponsorships.py. Every eligible
+    brand with at least one instagram_posts row, plus post/active-creator
+    counts. Broader net than TestActiveSponsorship. Not part of the core
+    enrichment pipeline.
+    """
+    __tablename__ = "test_brands_with_instagram_posts"
+
+    id                      = Column(Integer, primary_key=True)
+    brand_raw_id            = Column(Integer, nullable=False, unique=True)
+    brand_name              = Column(Text)
+    brand_niche             = Column(Text)
+    brand_website           = Column(Text)
+    brand_instagram_handle  = Column(Text)
+    instagram_post_count    = Column(Integer)
+    active_creator_count    = Column(Integer)
+    generated_at            = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class TestCreatorBrandPartnershipPost(Base):
+    """
+    Scratch/test table for content_creator_re evidence. One row per
+    LLM-confirmed creator/brand/post partnership, preserving the source
+    post URL that caused a bare/existing brands_raw row to be linked.
+    """
+    __tablename__ = "test_creator_brand_partnership_posts"
+    __table_args__ = (
+        UniqueConstraint("creator_username", "brand_raw_id", "post_url", name="uq_test_creator_brand_post"),
+    )
+
+    id                    = Column(Integer, primary_key=True)
+    brand_raw_id          = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
+    brand_name            = Column(Text)
+    brand_instagram_handle = Column(Text)
+    creator_username      = Column(Text, nullable=False, index=True)
+    creator_name          = Column(Text)
+    content_creator_re_id = Column(Integer, ForeignKey("content_creator_re.id"), index=True)
+    post_id               = Column(Text)
+    post_url              = Column(Text, nullable=False)
+    post_timestamp        = Column(Text)
+    llm_partnership       = Column(Boolean, nullable=False, server_default="true", default=True)
+
+    # Post content/collaboration signals, backfilled from Apify by
+    # pipeline/enrichment_re/backfill_partnership_post_content.py for rows
+    # that predate these columns.
+    caption               = Column(Text)
+    paid_partnership      = Column(Boolean)
+    mentions              = Column(JSONB)
+    tagged_users          = Column(JSONB)
+    coauthor_producers    = Column(JSONB)
+
+    # LLM-estimated 0-100 confidence that this post is a paid sponsorship
+    # with this specific brand. Filled in live by content_creator_re.py's
+    # brand_check prompt for newly-detected rows; backfilled for older rows
+    # by pipeline/enrichment_re/score_post_sponsorship.py.
+    sponsorship_confidence = Column(Integer)
+
+    detected_at           = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
+    content_creator_re = relationship("ContentCreatorRE", lazy="selectin", foreign_keys=[content_creator_re_id])
+
+
 class Prompt(Base):
     __tablename__ = "prompts"
 
@@ -625,6 +710,7 @@ def _brand_raw_fields(b: dict) -> dict:
         "description":           b.get("description") or None,
         "wikipedia_url":         b.get("wikipedia_url") or None,
         "source_confidence":     b.get("source_confidence"),
+        "refferls":              bool(b.get("refferls")),
         "website":               website,
         "domain":                b.get("domain") or None,
         "country":               b.get("country"),

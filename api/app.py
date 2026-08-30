@@ -10,9 +10,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
-from sqlalchemy import text
+from sqlalchemy import String, cast, or_, text
+from sqlalchemy.orm import aliased
+from sqlalchemy.sql import Select
 from config import ADMIN_PASSKEY, FRONTEND_ORIGINS, IS_PRODUCTION, JWT_SECRET, POSTHOG_PROJECT_TOKEN, POSTHOG_HOST
-from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, ContractReview, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Pitch, Prompt, RateEstimate, SavedBrand, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, ContractReview, CreatorProfile, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Pitch, Prompt, RateEstimate, SavedBrand, TestBrandsWithInstagramPosts, TestCreatorBrandPartnershipPost, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
 from api.schemas import CreatorProfileResponse, profile_to_response as _profile_to_response
 from api.advisory import router as advisory_router
@@ -37,11 +39,14 @@ from pipeline.helpers.prompts import (
     PITCH_PROMPT_NAME, PITCH_DEFAULT_PROMPT,
     RATE_INTEL_PROMPT_NAME, RATE_INTEL_DEFAULT_PROMPT,
     CONTRACT_ADVICE_PROMPT_NAME, CONTRACT_ADVICE_DEFAULT_PROMPT,
+    LINK_CLASSIFY_PROMPT_NAME, LINK_CLASSIFY_DEFAULT_PROMPT,
+    WEBSITE_PICK_PROMPT_NAME, WEBSITE_PICK_DEFAULT_PROMPT,
 )
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.enrichment.orchestrator import run_signal_enrichment
 from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 from pipeline.seed import run_seed
+from pipeline.enrichment_re.content_creator_re import add_content_creator_re
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +82,7 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS description TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS wikipedia_url TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS source_confidence INTEGER",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS refferls BOOLEAN NOT NULL DEFAULT false",
         # Full unique index on wikidata_id — PostgreSQL treats NULLs as distinct,
         # so multiple NULL rows are permitted even with a UNIQUE index.
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_brands_raw_wikidata_id ON brands_raw(wikidata_id)",
@@ -126,6 +132,7 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw DROP COLUMN IF EXISTS twitter_checked",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS initial_brand_scored BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS instagram_wikidata_checked BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS instagram_profile_checked BOOLEAN NOT NULL DEFAULT false",
         "DROP TABLE IF EXISTS tiktok_posts",
         "DROP TABLE IF EXISTS twitter_posts",
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS top_commenters",
@@ -133,6 +140,21 @@ def _run_migrations() -> None:
         "ALTER TABLE instagram_posts DROP COLUMN IF EXISTS confirmed_creators",
         "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS llm_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS is_users_scraped BOOLEAN NOT NULL DEFAULT false",
+        # instagram_posts: LLM-estimated 0-100 sponsorship confidence with the
+        # creator(s) referenced on the post, backfilled by
+        # pipeline/enrichment/score_instagram_post_sponsorship.py.
+        "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS sponsorship_confidence INTEGER",
+        # instagram_posts: allow a "profile-only" row (brand_raw_id + profile
+        # snapshot, no post fields) for brands whose scrape returns zero
+        # posts worth keeping — see enrich_instagram_posts's
+        # _build_profile_only_row. Partial unique index caps it at one such
+        # row per brand (real posts still have their own post_id and aren't
+        # affected, since this index only covers post_id IS NULL rows).
+        "ALTER TABLE instagram_posts ALTER COLUMN post_id DROP NOT NULL",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_instagram_posts_profile_only
+        ON instagram_posts(brand_raw_id) WHERE post_id IS NULL
+        """,
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS user_type TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS tier_fit TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS captions JSONB",
@@ -288,6 +310,21 @@ def _run_migrations() -> None:
         # sqladmin's auto-generated form doesn't force a value on every
         # edit (see CreatorProfileAdmin's on_model_change in this file).
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS password_hash TEXT",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_test_creator_brand_post
+        ON test_creator_brand_partnership_posts(creator_username, brand_raw_id, post_url)
+        """,
+        # test_creator_brand_partnership_posts: post content/collaboration
+        # signals, backfilled for pre-existing rows by
+        # pipeline/enrichment_re/backfill_partnership_post_content.py.
+        "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS caption TEXT",
+        "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS paid_partnership BOOLEAN",
+        "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS mentions JSONB",
+        "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS tagged_users JSONB",
+        "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS coauthor_producers JSONB",
+        # test_creator_brand_partnership_posts: LLM-estimated 0-100 sponsorship
+        # confidence, backfilled by pipeline/enrichment_re/score_post_sponsorship.py.
+        "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS sponsorship_confidence INTEGER",
     ]
     with engine.connect() as conn:
         for sql in stmts:
@@ -328,9 +365,14 @@ def _run_migrations() -> None:
             (PITCH_PROMPT_NAME,         PITCH_DEFAULT_PROMPT),
             (RATE_INTEL_PROMPT_NAME,    RATE_INTEL_DEFAULT_PROMPT),
             (CONTRACT_ADVICE_PROMPT_NAME, CONTRACT_ADVICE_DEFAULT_PROMPT),
+            (LINK_CLASSIFY_PROMPT_NAME, LINK_CLASSIFY_DEFAULT_PROMPT),
+            (WEBSITE_PICK_PROMPT_NAME,  WEBSITE_PICK_DEFAULT_PROMPT),
         ]:
             if not db.query(Prompt).filter(Prompt.name == name).first():
                 db.add(Prompt(name=name, content=content))
+        brand_check_prompt = db.query(Prompt).filter(Prompt.name == BRAND_CHECK_PROMPT_NAME).first()
+        if brand_check_prompt and "has_referral_code" not in (brand_check_prompt.content or ""):
+            brand_check_prompt.content = BRAND_CHECK_DEFAULT_PROMPT
         db.commit()
 
 
@@ -455,6 +497,40 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
     page_size = 15
 
 
+class TestBrandsWithInstagramPostsAdmin(ModelView, model=TestBrandsWithInstagramPosts):
+    name         = "Brand w/ IG Posts (test)"
+    name_plural  = "Brands w/ IG Posts (test)"
+    category     = "Test"
+    icon         = "fa-solid fa-flask"
+    column_list  = "__all__"
+    column_searchable_list = [TestBrandsWithInstagramPosts.brand_name]
+    column_sortable_list   = [c.name for c in TestBrandsWithInstagramPosts.__table__.columns]
+    column_default_sort    = [(TestBrandsWithInstagramPosts.instagram_post_count, True)]
+    page_size = 15
+
+
+class TestCreatorBrandPartnershipPostAdmin(ModelView, model=TestCreatorBrandPartnershipPost):
+    name         = "Creator Brand Post (test)"
+    name_plural  = "Creator Brand Posts (test)"
+    category     = "Test"
+    icon         = "fa-solid fa-flask-vial"
+    column_list  = "__all__"
+    column_labels = {
+        TestCreatorBrandPartnershipPost.brand_raw: "Brand",
+        TestCreatorBrandPartnershipPost.content_creator_re: "Content Creator RE",
+    }
+    column_searchable_list = [
+        TestCreatorBrandPartnershipPost.brand_name,
+        TestCreatorBrandPartnershipPost.brand_instagram_handle,
+        TestCreatorBrandPartnershipPost.creator_username,
+        TestCreatorBrandPartnershipPost.creator_name,
+        TestCreatorBrandPartnershipPost.post_url,
+    ]
+    column_sortable_list = [c.name for c in TestCreatorBrandPartnershipPost.__table__.columns]
+    column_default_sort  = [(TestCreatorBrandPartnershipPost.detected_at, True)]
+    page_size = 15
+
+
 class InstagramUserAdmin(ModelView, model=InstagramUser):
     name         = "Instagram User"
     name_plural  = "Instagram Users"
@@ -482,6 +558,51 @@ class ContentCreatorREAdmin(ModelView, model=ContentCreatorRE):
     column_default_sort    = [(ContentCreatorRE.id, True)]
     page_size = 15
 
+    async def on_model_change(self, data: dict, model, is_created: bool, request) -> None:
+        """
+        Reject a save (create or edit) whose "url" OR "username" already
+        exists on a DIFFERENT row — content_creator_re has no DB-level
+        unique constraint on either, so without this, adding the same
+        Instagram account twice (by URL or by username) would silently
+        create a duplicate scrape target. Raising here surfaces a clean
+        error on the form itself (sqladmin catches it and re-renders with
+        context["error"] = str(e), see application.py's create/edit
+        routes) rather than crashing — same pattern already used by
+        CreatorProfileAdmin.on_model_change for its own validation.
+        """
+        url      = (data.get("url") or "").strip()
+        username = (data.get("username") or "").strip()
+        if not url and not username:
+            return
+
+        db = SessionLocal()
+        try:
+            existing_url = None
+            if url:
+                q = db.query(ContentCreatorRE.id).filter(ContentCreatorRE.url == url)
+                if not is_created:
+                    q = q.filter(ContentCreatorRE.id != model.id)
+                existing_url = q.first()
+
+            existing_username = None
+            if username:
+                q = db.query(ContentCreatorRE.id).filter(ContentCreatorRE.username == username)
+                if not is_created:
+                    q = q.filter(ContentCreatorRE.id != model.id)
+                existing_username = q.first()
+        finally:
+            db.close()
+
+        if existing_url and existing_username:
+            raise ValueError(
+                f"This URL (row id={existing_url.id}) and username (row id={existing_username.id}) "
+                "are already in Content Creator RE — not saved."
+            )
+        if existing_url:
+            raise ValueError(f"This URL is already in Content Creator RE (row id={existing_url.id}) — not saved.")
+        if existing_username:
+            raise ValueError(f"This username is already in Content Creator RE (row id={existing_username.id}) — not saved.")
+
 
 class BrandInstagramUserAdmin(ModelView, model=BrandInstagramUser):
     name         = "Brand ↔ Instagram User"
@@ -492,6 +613,10 @@ class BrandInstagramUserAdmin(ModelView, model=BrandInstagramUser):
         BrandInstagramUser.brand_raw:      "Brand",
         BrandInstagramUser.instagram_user: "Instagram User",
     }
+    # BrandInstagramUser has no text columns of its own (just two FK ints) —
+    # dotted paths search the related BrandRaw/InstagramUser columns instead
+    # (sqladmin auto-joins them; see ModelView.search_query in sqladmin).
+    column_searchable_list = ["brand_raw.name", "brand_raw.instagram_handle", "instagram_user.username"]
     column_sortable_list = [c.name for c in BrandInstagramUser.__table__.columns]
     column_default_sort  = [(BrandInstagramUser.created_at, True)]
     page_size = 15
@@ -510,9 +635,38 @@ class InstagramCreatorCommenterAdmin(ModelView, model=InstagramCreatorCommenter)
         InstagramCreatorCommenter.comment_likes:  "Comment Likes",
         InstagramCreatorCommenter.comment_text:   "Comment",
     }
+    column_searchable_list = [
+        "brand_raw.name", "creator_user.username", "commenter_user.username",
+        InstagramCreatorCommenter.comment_text, InstagramCreatorCommenter.source_post_url,
+    ]
     column_sortable_list = [c.name for c in InstagramCreatorCommenter.__table__.columns]
     column_default_sort  = [(InstagramCreatorCommenter.created_at, True)]
     page_size = 15
+
+    def search_query(self, stmt: Select, term: str) -> Select:
+        """
+        Override sqladmin's default join-per-dotted-path search: creator_user
+        and commenter_user both point at instagram_users, and joining that
+        table twice unaliased makes Postgres raise DuplicateAlias ("table
+        name 'instagram_users' specified more than once"). Alias each side
+        explicitly instead.
+        """
+        creator_alias = aliased(InstagramUser)
+        commenter_alias = aliased(InstagramUser)
+        pattern = f"%{term}%"
+        return (
+            stmt
+            .join(InstagramCreatorCommenter.brand_raw)
+            .join(creator_alias, InstagramCreatorCommenter.creator_user_id == creator_alias.id)
+            .join(commenter_alias, InstagramCreatorCommenter.commenter_user_id == commenter_alias.id)
+            .filter(or_(
+                cast(BrandRaw.name, String).ilike(pattern),
+                cast(creator_alias.username, String).ilike(pattern),
+                cast(commenter_alias.username, String).ilike(pattern),
+                cast(InstagramCreatorCommenter.comment_text, String).ilike(pattern),
+                cast(InstagramCreatorCommenter.source_post_url, String).ilike(pattern),
+            ))
+        )
 
 
 class PromptAdmin(ModelView, model=Prompt):
@@ -532,6 +686,7 @@ class SavedBrandAdmin(ModelView, model=SavedBrand):
     icon         = "fa-solid fa-bookmark"
     column_list  = "__all__"
     column_labels = {SavedBrand.creator: "Creator", SavedBrand.brand_raw: "Brand"}
+    column_searchable_list = ["brand_raw.name", "creator.email", "creator.full_name"]
     column_sortable_list = [c.name for c in SavedBrand.__table__.columns]
     column_default_sort  = [(SavedBrand.created_at, True)]
     page_size = 15
@@ -555,6 +710,10 @@ class RateEstimateAdmin(ModelView, model=RateEstimate):
     icon         = "fa-solid fa-money-bill-trend-up"
     column_list  = "__all__"
     column_labels = {RateEstimate.creator: "Creator", RateEstimate.brand_raw: "Brand"}
+    column_searchable_list = [
+        "brand_raw.name", "creator.email", "creator.full_name",
+        RateEstimate.platform, RateEstimate.deliverable_type,
+    ]
     column_sortable_list = [c.name for c in RateEstimate.__table__.columns]
     column_default_sort  = [(RateEstimate.id, True)]
     page_size = 15
@@ -566,6 +725,7 @@ class ContractReviewAdmin(ModelView, model=ContractReview):
     icon         = "fa-solid fa-file-contract"
     column_list  = "__all__"
     column_labels = {ContractReview.creator: "Creator"}
+    column_searchable_list = ["creator.email", "creator.full_name", ContractReview.summary, ContractReview.contract_text]
     column_sortable_list = [c.name for c in ContractReview.__table__.columns]
     column_default_sort  = [(ContractReview.id, True)]
     page_size = 15
@@ -577,6 +737,7 @@ class InitialBrandScoreAdmin(ModelView, model=InitialBrandScore):
     icon         = "fa-solid fa-star"
     column_list  = "__all__"
     column_labels = {InitialBrandScore.brand_raw: "Brand"}
+    column_searchable_list = ["brand_raw.name", InitialBrandScore.score_band]
     column_sortable_list = [c.name for c in InitialBrandScore.__table__.columns]
     column_default_sort = [(InitialBrandScore.id, True)]
     page_size = 15
@@ -593,6 +754,7 @@ class BrandProfileAdmin(ModelView, model=BrandProfile):
     # with column_exclude_list) and from column_sortable_list.
     column_exclude_list = [BrandProfile.embedding]
     column_labels = {BrandProfile.brand_raw: "Brand"}
+    column_searchable_list = ["brand_raw.name", BrandProfile.typical_creator_tier, BrandProfile.contact_mode]
     column_sortable_list = [c.name for c in BrandProfile.__table__.columns if c.name != "embedding"]
     column_default_sort = [(BrandProfile.brand_raw_id, True)]
     page_size = 15
@@ -696,6 +858,8 @@ admin.add_view(BrandNicheAdmin)
 admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
 admin.add_view(InstagramPostAdmin)
+admin.add_view(TestBrandsWithInstagramPostsAdmin)
+admin.add_view(TestCreatorBrandPartnershipPostAdmin)
 admin.add_view(InstagramUserAdmin)
 admin.add_view(ContentCreatorREAdmin)
 admin.add_view(BrandInstagramUserAdmin)
@@ -842,6 +1006,11 @@ def matches_page():
     return FileResponse("frontend/matches.html")
 
 
+@app.get("/add-creators", include_in_schema=False)
+def add_creators_page():
+    return FileResponse("frontend/add-creators.html")
+
+
 class SeedJobResponse(BaseModel):
     job_id:  str
     status:  str
@@ -867,13 +1036,37 @@ class EnrichStatusResponse(BaseModel):
     results: dict | None = None
     error:   str | None  = None
 
-# 
+
+class BulkAddCreatorsRequest(BaseModel):
+    urls:  list[str]
+    niche: str
+
+
+class BulkAddCreatorsResponse(BaseModel):
+    added:   int
+    skipped: int
+    total:   int
+
+#
 # Endpoints
-# 
+#
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/content-creator-re/bulk-add", response_model=BulkAddCreatorsResponse)
+def bulk_add_content_creators(body: BulkAddCreatorsRequest):
+    """
+    Bulk-insert content_creator_re rows from pasted Instagram URLs, one
+    niche for the whole batch. Synchronous (no Apify/LLM calls — just URL
+    parsing + DB inserts) so no background job/polling needed, unlike
+    /seed. Skips a URL if its extracted username already exists.
+    """
+    urls = [u.strip() for u in body.urls if u.strip()]
+    added, skipped = add_content_creator_re(urls, body.niche)
+    return BulkAddCreatorsResponse(added=added, skipped=skipped, total=len(urls))
 
 
 @app.post("/seed", response_model=SeedJobResponse)

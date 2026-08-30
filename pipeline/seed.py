@@ -3,10 +3,16 @@ pipeline/seed.py
 
 Stage 1 of the brand enrichment pipeline.
 Populates brands_raw with raw brand names (and official websites) from
-Wikipedia + Wikidata.
+Wikidata.
+
+Wikipedia (pipeline/sources/wikipedia.py) was removed from this pipeline —
+its country/location/operating_area filters were silently no-ops (the
+function swallowed them via **_kwargs without ever applying them), so a
+frontend country selection only ever actually filtered Wikidata results.
+The module file itself is kept on disk but no longer imported/called here.
 
 Deduplication priority: wikidata_id > domain > normalized name (fuzzy).
-Source confidence: wikidata=100, wikipedia=80.
+Source confidence: wikidata=100.
 
 Usage:
     python main.py --niche footwear
@@ -22,7 +28,6 @@ from sqlalchemy.orm import Session
 from pipeline.db import SOURCE_CONFIDENCE, insert_brands_batch
 from pipeline.helpers.normalize import deduplicate, normalize
 from pipeline.sources.wikidata import search_wikidata_brands
-from pipeline.sources.wikipedia import search_wikipedia_brands
 
 logger = logging.getLogger(__name__)
 
@@ -58,14 +63,14 @@ def run_seed(
 ) -> int:
     """
     Seed brands_raw for any niche keyword.
-    Optional geo filters narrow both the Wikidata SPARQL query and the
-    Wikipedia category search to a specific geography.
+    Optional geo filters narrow the Wikidata SPARQL query to a specific
+    geography.
 
-    `niche` still drives every search query (Wikipedia category, Wikidata
-    SPARQL) exactly as typed. Pass niche_label to store a DIFFERENT value in
-    brands_raw.niche for every row this run inserts — e.g. search for
-    "k-pop groups" but file every result under the fixed label "Music".
-    Falls back to `niche` itself when not given.
+    `niche` still drives the search query (Wikidata SPARQL) exactly as
+    typed. Pass niche_label to store a DIFFERENT value in brands_raw.niche
+    for every row this run inserts — e.g. search for "k-pop groups" but
+    file every result under the fixed label "Music". Falls back to `niche`
+    itself when not given.
     """
     stored_niche = niche_label or niche
     geo_active = {
@@ -106,36 +111,7 @@ def run_seed(
             **geo_active,
         }
 
-    #  Source 1: Wikipedia 
-    logger.info("Scraping Wikipedia for niche '%s'", niche)
-    try:
-        wiki_records = search_wikipedia_brands(
-            niche,
-            country=country,
-            location=location,
-            operating_area=operating_area,
-        )
-        cat_url = f"https://en.wikipedia.org/wiki/Category:{niche.replace(' ', '_')}_brands"
-        for rec in wiki_records:
-            collected.append(_row(
-                name=rec["name"],
-                source="wikipedia",
-                source_url=cat_url,
-                website=rec.get("website", ""),
-                domain=rec.get("domain", ""),
-                wikidata_id=rec.get("wikidata_id", ""),
-                description=rec.get("description", ""),
-                wikipedia_url=rec.get("wikipedia_url", ""),
-            ))
-        logger.info(
-            "Wikipedia yielded %d names (%d with website)",
-            len(wiki_records),
-            sum(1 for r in wiki_records if r.get("website")),
-        )
-    except Exception:
-        logger.exception("Wikipedia scrape failed for niche '%s'", niche)
-
-    #  Source 2: Wikidata 
+    #  Source: Wikidata
     logger.info("Querying Wikidata for niche '%s'", niche)
     try:
         wikidata_records = search_wikidata_brands(
@@ -201,8 +177,9 @@ def run_seed(
         len(deduped_rows), len(qid_best), len(final_no_qid),
     )
 
-    # Interleave by source so every source contributes proportionally
-    # when a limit is applied (prevents Wikipedia filling all limit slots).
+    # Interleave by source so every source contributes proportionally when a
+    # limit is applied — a no-op today with only one source (wikidata), kept
+    # so it resumes working automatically if another source is added back.
     deduped_rows = _interleave_sources(deduped_rows)
 
     # Only seed brands that have a website — brands without one cannot be enriched

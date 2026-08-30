@@ -59,14 +59,17 @@ def _lookup(domain: str, tranco: dict[str, int]) -> tuple[bool, int | None]:
 
 def enrich_tranco(db: Session, limit: int = 500, brand_id: int | None = None) -> int:
     """
-    Process brands with domain set and tranco_checked=False.
-    Returns number of rows updated.
+    Process brands with domain set, has_official_website=True, and
+    tranco_checked=False. Returns number of rows updated.
 
     Pass brand_id to target one specific brand directly — this bypasses the
-    tranco_checked filter (so you can re-run/test a brand that was already
-    processed), but domain must still be set.
+    has_official_website/tranco_checked filters (so you can re-run/test a
+    brand that was already processed), but domain must still be set.
     """
-    query = db.query(BrandRaw).filter(BrandRaw.domain.isnot(None))
+    query = db.query(BrandRaw).filter(
+        BrandRaw.domain.isnot(None),
+        BrandRaw.has_official_website.is_(True),
+    )
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:

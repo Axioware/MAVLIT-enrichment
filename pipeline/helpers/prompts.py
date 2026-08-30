@@ -26,6 +26,8 @@ Prompt name -> which enrichment module actually calls it:
   brand_pitch_generation        — pipeline/pitching.py
   rate_intelligence_estimate    — pipeline/rate_intelligence.py
   contract_advice_review        — pipeline/contract_advice.py
+  instagram_link_classify       — pipeline/enrichment_re/brand_instagram_profile.py
+  brand_website_search_pick     — pipeline/enrichment_re/brand_instagram_profile.py
 """
 
 #  instagram_posts.py
@@ -35,7 +37,7 @@ FULL_DEFAULT_PROMPT = """You are an Instagram creator-partnership detection syst
 
 Your task is NOT to identify whether an account is a creator.
 
-Your task is ONLY to identify creators who are very likely participating in a brand collaboration, sponsorship, ambassador campaign, gifted promotion, paid partnership, or other promotional relationship with the brand in THIS specific Instagram post.
+Your task is ONLY to identify creators who are very likely participating in a brand collaboration, sponsorship, paid partnership, in THIS specific Instagram post.
 
 Brand:
 {brand_name}
@@ -317,31 +319,34 @@ Use empty lists if there isn't enough information to extract either one — do n
 
 BRAND_NICHE_TAGS_PROMPT_NAME = "brand_niche_tags"
 BRAND_NICHE_TAGS_DEFAULT_PROMPT = """\
-You are analyzing a brand's own website description to extract its niche category and specific sub-niche/category tags for a brand-creator sponsorship matching platform.
+You are analyzing a brand's own website description to extract its real brand name, niche category, and specific sub-niche/category tags for a brand-creator sponsorship matching platform.
 
 Brand: {brand_name}
 Niche: {niche}
 Website description: {description}
+
+If Brand above is "unknown", determine the brand's real, clean company/brand name from the website description — what the business actually calls itself, not a generic phrase pulled from the text. If Brand is already known (not "unknown"), treat it as a likely-correct hint — repeat it back unchanged if the description supports it or doesn't contradict it, but correct it to the accurate name instead if the description clearly shows it's wrong.
 
 If Niche above is "unknown", determine the single best-fit broad niche category for this brand from the description (e.g. "fashion", "beauty", "food_beverage", "tech", "fitness", "home_goods", "pets", "toys", "automotive", "travel"). If Niche is already known (not "unknown"), just repeat that same value back unchanged — do not second-guess it.
 
 Extract specific, concrete sub-niche tags/keywords that describe what this brand actually does or sells, beyond its broad niche category (e.g. for a "fashion" brand: "sustainable clothing", "streetwear", "plus-size fashion"; for a "tech" brand: "smart home devices", "gaming laptops", "wireless earbuds").
 
 Reply ONLY with this JSON object, no extra text:
-{"niche": "...", "tags": ["...", "..."]}
-Use an empty list for tags if the description doesn't give enough information — do not invent tags not supported by the input. If you truly cannot determine a niche from the description either, use "unknown" for niche.\
+{"name": "...", "niche": "...", "tags": ["...", "..."]}
+Use an empty list for tags if the description doesn't give enough information — do not invent tags not supported by the input. If you truly cannot determine a niche from the description either, use "unknown" for niche. If you truly cannot determine a real brand name from the description, use "unknown" for name.\
 """
 
 
 #  content_creator_re.py
 
 BRAND_CHECK_PROMPT_NAME = "brand_check"
-BRAND_CHECK_DEFAULT_PROMPT = """
-You are an Instagram sponsorship detection system.
+BRAND_CHECK_DEFAULT_PROMPT = """You are an Instagram sponsorship detection system.
 
 Your task is NOT to identify whether an account is a brand.
 
 Your task is ONLY to identify brands that are very likely sponsoring, partnering with, paying for, officially collaborating on, or being promoted in THIS specific Instagram post.
+
+For each confirmed brand, also determine whether the creator is using a discount code, referral code, affiliate code, promo code, coupon code, creator code, ambassador code, or "use my code" style offer for that brand in THIS post.
 
 Creator:
 Username: {creator_username}
@@ -366,7 +371,7 @@ coauthor_producers:
 
 IMPORTANT RULES
 
-1. Only return a username if there is strong evidence that the account is the sponsoring, advertising, promotional, ambassador, gifted, paid-partnership, official collaboration, or campaign brand for this post.
+1. Only return a username if there is strong evidence that the account is the sponsoring, advertising, promotional, ambassador, affiliate, gifted, paid-partnership, official collaboration, referral-code, affiliate-code, or campaign brand for this post.
 
 2. A username being a brand account is NOT sufficient.
 
@@ -408,27 +413,110 @@ IMPORTANT RULES
 
    * paid partnership marker is true and a referenced account appears to be the partnered brand
    * explicit sponsorship language such as:
-     "ad"
-     "#ad"
-     "#sponsored"
-     "#paidpartnership"
-     "partnered with"
-     "in partnership with"
-     "thanks to"
-     "gifted by"
-     "sponsored by"
-     "ambassador for"
-     "working with"
-     "campaign with"
+     - "ad"
+     - "#ad"
+     - "#sponsored"
+     - "#paidpartnership"
+     - "partnered with"
+     - "in partnership with"
+     - "thanks to"
+     - "gifted by"
+     - "sponsored by"
+     - "ambassador for"
+     - "working with"
+     - "campaign with"
    * clear promotion of a company's product, service, app, store, brand, or commercial offering
+   * creator-specific discount, referral, affiliate, ambassador, creator, or promo code offers that can be confidently linked to a specific referenced brand account
 
-8. If multiple brands appear, only return those that are clearly being promoted or sponsoring the post.
+8. Affiliate, referral, ambassador, and creator-code promotions count as brand partnerships.
 
-9. If you cannot confidently conclude that a referenced account is a sponsor/brand partner for THIS post, return an empty list.
+   If the creator promotes a product, service, app, subscription, store, or commercial offering and provides:
+
+   * a discount code
+   * promo code
+   * referral code
+   * creator code
+   * ambassador code
+   * affiliate code
+   * affiliate link
+   * referral link
+   * tracked purchase link
+   * commission-generating link
+
+   then treat the associated brand as a promotional/sponsoring brand for this post EVEN IF:
+
+   * paid partnership marker is false
+   * the creator never says "sponsored"
+   * the creator never says "paid partnership"
+
+   provided there is strong evidence connecting the promotion to a specific referenced brand account.
+
+9. Discount codes alone are NOT sufficient.
+
+   Do NOT return a brand merely because a code appears in the caption.
+
+   Return a brand only when:
+
+   * a specific referenced account is clearly associated with the promoted product/service, AND
+   * the code, link, or promotion appears intended to drive purchases, signups, downloads, or sales for that brand.
+
+10. If multiple brands appear, only return those that are clearly being promoted, sponsored, endorsed, advertised, or commercially partnered in the post.
+
+11. If you cannot confidently conclude that a referenced account is a sponsor/brand partner for THIS post, return an empty list.
+
+12. Brands essentially never share a single sponsored/paid-partnership post with each other or with a long list of other tagged accounts. If the post references more than a small handful of accounts in total (mentions + tagged_users + coauthor_producers combined), treat that as a strong signal this is a giveaway, brand round-up, general shoutout, event, community post, creator-network post, or participant list rather than a genuine brand partnership.
+
+    In such cases, return an empty list unless the evidence for one specific brand is overwhelming.
+
+13. The returned usernames MUST come from the referenced accounts provided in mentions, tagged_users, or coauthor_producers.
+
+    Never invent usernames.
+    Never infer usernames that are not explicitly present in the provided account lists.
+
+14. Focus on THIS specific post only.
+
+    Do not infer sponsorship based on:
+
+    * prior creator-brand relationships
+    * assumptions about the creator
+    * assumptions about the account
+    * historical partnerships
+    * outside knowledge
+
+15. Set has_referral_code=true ONLY when the caption/post clearly contains a creator-specific discount, referral, affiliate, ambassador, creator, or promo code offer for that brand.
+
+    A generic sale announcement, seasonal promotion, brand-wide discount, coupon campaign, "shop now" CTA, or ordinary sponsorship is NOT enough.
+
+16. If there is a visible code, put the exact code text in referral_code.
+
+    Examples:
+
+    * "Use code ALI10" → "ALI10"
+    * "Use creator code ALI" → "ALI"
+
+    If referral/discount-code evidence exists but no exact code text is visible, use:
+
+    * has_referral_code = true
+    * referral_code = null
+
+17. When in doubt, return an empty list.
 
 Return ONLY valid JSON:
 
-{"brands":["username1","username2"]}
+{
+  "brands": [
+    {
+      "username": "username1",
+      "has_referral_code": true,
+      "referral_code": "CODE10"
+    },
+    {
+      "username": "username2",
+      "has_referral_code": false,
+      "referral_code": null
+    }
+  ]
+}
 """
 
 
@@ -527,4 +615,62 @@ Review this contract for common creator-sponsorship red flags, including but not
 Reply ONLY with this JSON object, no extra text:
 {"looks_good": true, "issues": ["...", "..."], "summary": "..."}
 Set looks_good to false if there is at least one real concern worth flagging. issues should be short, specific, plain-language bullet points (empty list if none found). summary should be 2-3 sentences giving the creator an overall read.\
+"""
+
+
+#  brand_instagram_profile.py
+
+LINK_CLASSIFY_PROMPT_NAME = "instagram_link_classify"
+LINK_CLASSIFY_DEFAULT_PROMPT = """\
+You are classifying a URL found in an Instagram bio to determine what kind of link it is, and — only if it turns out to be the brand's own official website — extracting the brand's real, clean name.
+
+Instagram handle: {handle}
+Instagram display name (from Instagram, often messy marketing copy): {full_name}
+Bio: {bio}
+URL being classified: {url}
+
+Classify this URL into exactly one category:
+1. "website" — the brand's own official website/domain (online store, company site, product page hosted on the BRAND'S OWN domain) — not a social platform, link-aggregator tool, or third-party marketplace
+2. "social" — a profile on another social media platform (Facebook, TikTok, YouTube, Twitter/X, Pinterest, Threads, WhatsApp, Discord, etc.), or Instagram itself
+3. "linktree" — a link-in-bio aggregator page (e.g. Linktree, Beacons, Milkshake, Later, Campsite, Lnk.bio, Direct.me, and similar tools) that itself contains a list of other links
+4. "marketplace" — a listing, storefront, or store page for this brand hosted on a third-party marketplace/retail platform (Amazon — including Amazon Storefronts like "amazon.com/stores/page/...", Etsy, eBay, Walmart, AliExpress, Shopee, Temu, etc.). This is NOT the brand's own website, even if it's a dedicated branded page on that platform.
+5. "unknown" — cannot confidently tell from the URL/bio alone
+
+Only classify as "website" if you are genuinely confident this specific URL is the brand's own official site — a URL that merely mentions or is related to the brand (a fan page, a syndicated listing, an unofficial reseller) is NOT "website" even if none of the other categories fit well either. When unsure, use "unknown" rather than guessing "website" — reporting no website found is the correct outcome far more often than a confident-sounding wrong classification.
+
+Judge "website" by the DOMAIN, not the specific path or query string — a URL like "https://brand.com/register?ref=800000016" or "https://brand.com/shop/product123" is still the brand's own website (category "website"); a tracking parameter, referral code, or deep link does not make it a linktree or unknown. But a URL whose domain is a third-party marketplace (amazon.com, etsy.com, ebay.com, walmart.com, etc.) is ALWAYS "marketplace", never "website" — no matter how specific or branded-looking the path is (e.g. "amazon.com/stores/page/8A8B3EB2-E356-4C27-B4B2-12EEFCEB05CF" is "marketplace", not "website"). Only the domain root is kept once classified as "website", so don't let the path/query change your answer for a genuine brand domain.
+
+If, and only if, category is "website": also give the brand's real, clean name in the "name" field. The Instagram display name above is often marketing copy, not the real name — it can include emojis, taglines, "Official", "| Shop Now", pipe-separated slogans, or ALL CAPS styling. Derive the actual brand name from the display name, bio, and this website's own domain/identity together (e.g. domain "jpfans.com" supports a name like "JPfans"), preserving deliberate stylization (e.g. "adidas" lowercase, "eBay").
+
+If category is NOT "website" (social/linktree/marketplace/unknown), "name" MUST be an empty string — do not guess a name for a link that isn't the brand's own site.
+
+Reply ONLY with this JSON object, no extra text:
+{"category": "website", "name": "", "reason": "short one-line reason"}\
+"""
+
+WEBSITE_PICK_PROMPT_NAME = "brand_website_search_pick"
+WEBSITE_PICK_DEFAULT_PROMPT = """\
+You are identifying a brand's real official website from search results, and confirming or correcting its name.
+
+Instagram handle: {handle}
+Instagram bio: {bio}
+Instagram external URL (if any): {external_url}
+Currently saved brand name (if any): {saved_name}
+
+Search results for "{query}" (already deduplicated to one representative URL per domain — social/platform domains like Instagram, YouTube, Linktree, etc. have already been removed, and each is annotated with how many times that domain appeared across the full raw result set):
+{results}
+
+Decide which ONE of the results above (if any) is most likely the brand's own official website — not a marketplace listing (Amazon, Etsy shop page, etc.), not a press/news article, not an unrelated business that happens to share a similar name. A domain appearing many times across the raw results is a meaningful signal it's the real site (its own multiple pages tend to all get indexed), but isn't decisive on its own — still weigh it against the title/snippet content and the handle/bio/saved-name context.
+
+Judge by the DOMAIN of each result, not its specific path or query string — a result URL like "https://brand.com/register?ref=800000016" is still a valid pick if brand.com is genuinely the brand's own domain; a tracking parameter or deep link doesn't disqualify it. Only the domain root is kept once picked.
+
+IMPORTANT — do not pick just because it's the best of a mediocre set. Being the least-bad option among the candidates is NOT the same as being confidently the brand's own official website. A personal blog about the brand, a fan-run page, a syndicated directory listing, an app landing page, or an unofficial reseller are all still NOT the official website, even if nothing better is on the list and even if they're clearly related to the brand. If you are not genuinely confident any single result is the real official site, set "confident" to false and index to 0 — reporting no website found is the correct answer far more often than guessing wrong, and is strongly preferred over a confident-sounding wrong pick.
+
+If, and only if, "confident" is true (which requires index to not be 0): also give the brand's real, clean name in the "name" field, using the search result titles/snippets together with the saved name. If "Currently saved brand name" above is "unknown" or empty, determine the name from the search results. If a saved name IS given, treat it as a likely-correct hint — repeat it back unchanged if the results support it or don't contradict it, but correct it to the accurate name instead if the results clearly show the saved name is wrong.
+
+If "confident" is false, index MUST be 0 and "name" MUST be an empty string.
+
+Reply ONLY with this JSON object, no extra text:
+{"index": 0, "confident": false, "name": "", "reason": "short one-line reason"}
+Use the 1-based index of the correct result from the numbered list above only when confident is true; use index 0 and confident: false whenever you are not genuinely sure any result is the brand's real official website.\
 """

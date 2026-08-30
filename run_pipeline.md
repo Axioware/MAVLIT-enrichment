@@ -263,3 +263,35 @@ enrich_brand_wikidata_lookup(db, limit=50)
 db.close()
 "
     
+## brand_instagram_profile (Instagram bio/linktree/Google-search website resolution for bare brands)
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment_re.brand_instagram_profile import enrich_brand_instagram_profile
+db = SessionLocal()
+enrich_brand_instagram_profile(db, brand_id=73)
+db.close()
+"
+
+OR (batch, no brand_id — processes up to `limit` pending rows)
+
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment_re.brand_instagram_profile import enrich_brand_instagram_profile
+db = SessionLocal()
+enrich_brand_instagram_profile(db, limit=1)
+db.close()
+"
+
+## to run LLM per post re
+python -m pipeline.enrichment_re.score_post_sponsorship
+
+
+## to run LLM per post 
+python -m pipeline.enrichment.score_instagram_post_sponsorship
+
+
+## after all have to run LLM(one time) for niche of creators for specific selected niche

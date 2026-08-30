@@ -46,7 +46,7 @@ from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, OPENAI_KEY
 from pipeline.db import BrandInstagramUser, InstagramCreatorCommenter, InstagramPost, InstagramUser, Prompt
-from pipeline.helpers.apify import run_apify_actor
+from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
@@ -228,11 +228,17 @@ def _collect_commenter_records(posts: list[dict], n_per_post: int = 5) -> list[d
 
 #  Apify helpers 
 
-def _scrape_posts(username: str, n: int = 5) -> list[dict]:
+def _scrape_posts(username: str, n: int = 5) -> list[dict] | None:
     """
     Scrape n posts for a profile. addParentData=True embeds profile fields
     (fullName, biography, externalUrl, followersCount, businessAddress, etc.)
     into every post item so one call gets both posts AND profile data.
+
+    require_success=True so a failed run (actor limit reached, network
+    error, actor crash, etc.) returns None — distinguishable from a
+    genuinely empty [] result (e.g. a private/deleted account), which
+    callers need in order to avoid marking a row fully processed off the
+    back of a call that never actually ran.
     """
     items = run_apify_actor(
         _ACTOR_ID,
@@ -243,8 +249,9 @@ def _scrape_posts(username: str, n: int = 5) -> list[dict]:
             "resultsLimit":  n,
         },
         label=f"IGUsers @{username} (n={n})",
+        require_success=True,
     )
-    return (items or [])[:n]
+    return None if items is None else items[:n]
 
 
 def _profile_from_posts(posts: list[dict]) -> dict:
@@ -529,132 +536,165 @@ def enrich_instagram_users(
     logger.info("Instagram users: processing %d post(s)", len(posts))
     processed = 0
 
-    for post in posts:
-        creators = _collect_creators(post)   # {username: user_type}
+    try:
+        for post in posts:
+            creators = _collect_creators(post)   # {username: user_type}
 
-        if not creators:
-            post.is_users_scraped = True
-            db.commit()
-            processed += 1
-            continue
-
-        # Filter creators already in DB
-        existing = {
-            r.username for r in
-            db.query(InstagramUser.username)
-            .filter(InstagramUser.username.in_(creators))
-            .all()
-        }
-        new_creators = {u: t for u, t in creators.items() if u not in existing}
-        for username in existing:
-            _link_to_brand(db, post.brand_raw_id, username)
-            _link_existing_commenters_from_creator_snapshot(db, post.brand_raw_id, username)
-
-        logger.info(
-            "Instagram users: post %s → %d creator(s) (%d new, %d already in DB)",
-            post.post_id, len(creators), len(new_creators), len(existing),
-        )
-
-        for username, user_type in new_creators.items():
-            logger.info("Instagram users: scraping creator @%s (%s)", username, user_type)
-
-            #  a. Scrape top 5 posts (addParentData gets profile info too) 
-            raw_posts = _scrape_posts(username, n=5)
-            if not raw_posts:
-                logger.warning("Instagram users: no posts returned for @%s", username)
-                time.sleep(0.5)
+            if not creators:
+                post.is_users_scraped = True
+                db.commit()
+                processed += 1
                 continue
 
-            #  b. Extract profile data from first post's parent fields 
-            profile = _profile_from_posts(raw_posts)
+            # Set once any _scrape_posts() call for this post fails (actor limit
+            # reached, network error, etc.) — gates is_users_scraped below so a
+            # failed Apify run isn't indistinguishable from "nothing to scrape"
+            # and doesn't get silently treated as fully processed.
+            scrape_failed = False
 
-            #  c. Classify demographics + niche via LLM (niche: creators only)
-            demo  = _classify_demographics(db, username, profile)
-            time.sleep(0.3)
-            niche = _classify_niche(db, username, profile, raw_posts)
-            time.sleep(0.3)
-
-            #  d. Store content creator in instagram_users — one row per post
-            creator_rows = [
-                _build_post_row(username, user_type, profile, demo, item, niche=niche)
-                for item in raw_posts
-                if item.get("id")
-            ]
-            upsert_rows(db, InstagramUser, creator_rows, ["post_id"])
-            _link_to_brand(db, post.brand_raw_id, username)
-
-            logger.info(
-                "Instagram users: @%s stored — type=%s gender=%s country=%s age=%s niche=%s followers=%s",
-                username, user_type,
-                demo["gender"], demo["country"], demo["age_group"], niche,
-                profile.get("followersCount"),
-            )
-
-            #  e. Collect unique commenters from the 5 posts (up to 5/post)
-            commenter_records = _collect_commenter_records(raw_posts, n_per_post=5)
-            commenter_usernames = sorted({record["username"] for record in commenter_records})
-            if not commenter_usernames:
-                time.sleep(1.0)
-                continue
-
-            # Filter commenters already in DB
-            existing_c = {
+            # Filter creators already in DB
+            existing = {
                 r.username for r in
                 db.query(InstagramUser.username)
-                .filter(InstagramUser.username.in_(commenter_usernames))
+                .filter(InstagramUser.username.in_(creators))
                 .all()
             }
-            new_commenters = [u for u in commenter_usernames if u not in existing_c]
-            for commenter in existing_c:
-                _link_to_brand(db, post.brand_raw_id, commenter)
-                for record in commenter_records:
-                    if record["username"] == commenter:
-                        _link_commenter_to_creator(db, post.brand_raw_id, username, record)
+            new_creators = {u: t for u, t in creators.items() if u not in existing}
+            for username in existing:
+                _link_to_brand(db, post.brand_raw_id, username)
+                _link_existing_commenters_from_creator_snapshot(db, post.brand_raw_id, username)
 
             logger.info(
-                "Instagram users: @%s has %d unique commenter(s) (%d new)",
-                username, len(commenter_usernames), len(new_commenters),
+                "Instagram users: post %s → %d creator(s) (%d new, %d already in DB)",
+                post.post_id, len(creators), len(new_creators), len(existing),
             )
 
-            #  f. Scrape 1 post per commenter for profile data 
-            for commenter in new_commenters:
-                logger.info("Instagram users:   commenter @%s", commenter)
+            for username, user_type in new_creators.items():
+                logger.info("Instagram users: scraping creator @%s (%s)", username, user_type)
 
-                c_posts = _scrape_posts(commenter, n=1)
-                if not c_posts:
+                #  a. Scrape top 5 posts (addParentData gets profile info too)
+                raw_posts = _scrape_posts(username, n=5)
+                if raw_posts is None:
+                    logger.warning("Instagram users: Apify scrape failed for @%s — will retry", username)
+                    scrape_failed = True
+                    time.sleep(0.5)
+                    continue
+                if not raw_posts:
+                    logger.warning("Instagram users: no posts returned for @%s", username)
                     time.sleep(0.5)
                     continue
 
-                c_profile = _profile_from_posts(c_posts)
-                c_demo    = _classify_demographics(db, commenter, c_profile)
+                #  b. Extract profile data from first post's parent fields
+                profile = _profile_from_posts(raw_posts)
+
+                #  c. Classify demographics + niche via LLM (niche: creators only)
+                demo  = _classify_demographics(db, username, profile)
+                time.sleep(0.3)
+                niche = _classify_niche(db, username, profile, raw_posts)
                 time.sleep(0.3)
 
-                if c_posts[0].get("id"):
-                    # No conflict target: this row could violate EITHER the
-                    # partial username-where-commenter index OR the global
-                    # post_id unique constraint (this commenter's own most
-                    # recent post may already be stored under a different
-                    # username's creator row) — see upsert_rows' docstring.
-                    upsert_rows(db, InstagramUser, [
-                        _build_post_row(commenter, "commenter", c_profile, c_demo, c_posts[0])
-                    ], None)
-                _link_to_brand(db, post.brand_raw_id, commenter)
-                for record in commenter_records:
-                    if record["username"] == commenter:
-                        _link_commenter_to_creator(db, post.brand_raw_id, username, record)
+                #  d. Store content creator in instagram_users — one row per post
+                creator_rows = [
+                    _build_post_row(username, user_type, profile, demo, item, niche=niche)
+                    for item in raw_posts
+                    if item.get("id")
+                ]
+                upsert_rows(db, InstagramUser, creator_rows, ["post_id"])
+                _link_to_brand(db, post.brand_raw_id, username)
 
                 logger.info(
-                    "Instagram users:   commenter @%s stored — gender=%s country=%s",
-                    commenter, c_demo["gender"], c_demo["country"],
+                    "Instagram users: @%s stored — type=%s gender=%s country=%s age=%s niche=%s followers=%s",
+                    username, user_type,
+                    demo["gender"], demo["country"], demo["age_group"], niche,
+                    profile.get("followersCount"),
                 )
+
+                #  e. Collect unique commenters from the 5 posts (up to 5/post)
+                commenter_records = _collect_commenter_records(raw_posts, n_per_post=5)
+                commenter_usernames = sorted({record["username"] for record in commenter_records})
+                if not commenter_usernames:
+                    time.sleep(1.0)
+                    continue
+
+                # Filter commenters already in DB
+                existing_c = {
+                    r.username for r in
+                    db.query(InstagramUser.username)
+                    .filter(InstagramUser.username.in_(commenter_usernames))
+                    .all()
+                }
+                new_commenters = [u for u in commenter_usernames if u not in existing_c]
+                for commenter in existing_c:
+                    _link_to_brand(db, post.brand_raw_id, commenter)
+                    for record in commenter_records:
+                        if record["username"] == commenter:
+                            _link_commenter_to_creator(db, post.brand_raw_id, username, record)
+
+                logger.info(
+                    "Instagram users: @%s has %d unique commenter(s) (%d new)",
+                    username, len(commenter_usernames), len(new_commenters),
+                )
+
+                #  f. Scrape 1 post per commenter for profile data
+                for commenter in new_commenters:
+                    logger.info("Instagram users:   commenter @%s", commenter)
+
+                    c_posts = _scrape_posts(commenter, n=1)
+                    if c_posts is None:
+                        logger.warning("Instagram users: Apify scrape failed for commenter @%s — will retry", commenter)
+                        scrape_failed = True
+                        time.sleep(0.5)
+                        continue
+                    if not c_posts:
+                        time.sleep(0.5)
+                        continue
+
+                    c_profile = _profile_from_posts(c_posts)
+                    c_demo    = _classify_demographics(db, commenter, c_profile)
+                    time.sleep(0.3)
+
+                    if c_posts[0].get("id"):
+                        # No conflict target: this row could violate EITHER the
+                        # partial username-where-commenter index OR the global
+                        # post_id unique constraint (this commenter's own most
+                        # recent post may already be stored under a different
+                        # username's creator row) — see upsert_rows' docstring.
+                        upsert_rows(db, InstagramUser, [
+                            _build_post_row(commenter, "commenter", c_profile, c_demo, c_posts[0])
+                        ], None)
+                    _link_to_brand(db, post.brand_raw_id, commenter)
+                    for record in commenter_records:
+                        if record["username"] == commenter:
+                            _link_commenter_to_creator(db, post.brand_raw_id, username, record)
+
+                    logger.info(
+                        "Instagram users:   commenter @%s stored — gender=%s country=%s",
+                        commenter, c_demo["gender"], c_demo["country"],
+                    )
+                    time.sleep(1.0)
+
                 time.sleep(1.0)
 
-            time.sleep(1.0)
+            if scrape_failed:
+                db.commit()  # keep whatever rows were already stored above
+                logger.warning(
+                    "Instagram users: post %s — at least one Apify scrape failed — "
+                    "leaving is_users_scraped=False so this post is retried instead "
+                    "of being treated as fully processed",
+                    post.post_id,
+                )
+                continue
 
-        post.is_users_scraped = True
-        db.commit()
-        processed += 1
-        logger.info("Instagram users: post %s done", post.post_id)
+            post.is_users_scraped = True
+            db.commit()
+            processed += 1
+            logger.info("Instagram users: post %s done", post.post_id)
+    except ApifyQuotaExceeded as exc:
+        logger.error(
+            "Instagram users: %s — stopping this run early after %d post(s) processed; "
+            "remaining posts stay is_users_scraped=False for the next run",
+            exc, processed,
+        )
 
     logger.info("Instagram users: %d post(s) processed", processed)
     return processed

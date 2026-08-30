@@ -34,12 +34,12 @@ import json
 import logging
 import time
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, ENABLE_INSTA_LLM, OPENAI_KEY
 from pipeline.db import BrandRaw, InstagramPost, Prompt
-from pipeline.helpers.apify import run_apify_actor
+from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import (
@@ -244,7 +244,35 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
     }
 
 
-#  Main enrichment function 
+def _build_profile_only_row(brand_raw_id: int, handle: str, items: list[dict]) -> dict:
+    """
+    Row for a brand whose scrape returned zero posts worth keeping (no
+    sponsorship signal survived filtering, or the account had no posts at
+    all) — keeps the brand's profile snapshot (followers, bio, etc.)
+    without any post-specific fields, so every checked brand still has at
+    least one instagram_posts row to read a follower count from.
+
+    Profile fields come from the first raw item's metaData (addParentData
+    embeds the same profile snapshot on every item), since a filtered-out
+    item still carries it. items may be empty (account had zero posts at
+    all) — falls back to no profile data in that case.
+    """
+    meta = (items[0].get("metaData") or {}) if items else {}
+    return {
+        "brand_raw_id":           brand_raw_id,
+        "instagram_handle":       handle,
+        "followers_count":        meta.get("followersCount"),
+        "follows_count":          meta.get("followsCount"),
+        "posts_count":            meta.get("postsCount"),
+        "is_business_account":    meta.get("isBusinessAccount"),
+        "verified":               meta.get("verified"),
+        "biography":              meta.get("biography"),
+        "external_url":           meta.get("externalUrl"),
+        "business_category_name": meta.get("businessCategoryName"),
+    }
+
+
+#  Main enrichment function
 
 def enrich_instagram_posts(
     db: Session,
@@ -313,113 +341,151 @@ def enrich_instagram_posts(
         len(brands), ENABLE_INSTA_LLM, max_creators or "disabled",
     )
     total_posts = 0
+    checked_count = 0
 
-    for brand in brands:
-        handle = normalize_handle(brand.instagram_handle)
-        items  = _scrape_handle(handle, posts_limit)
+    try:
+        for brand in brands:
+            handle = normalize_handle(brand.instagram_handle)
+            items  = _scrape_handle(handle, posts_limit)
 
-        inserted          = 0
-        skipped_no_signal = 0
-        skipped_llm       = 0
-        dropped_cap       = 0
-        unique_creators: set[str] = set()
-
-        for item in items:
-            if max_creators and len(unique_creators) >= max_creators:
-                dropped_cap += 1
+            if items is None:
+                logger.warning(
+                    "Instagram: '%s' (@%s) — Apify scrape failed (actor limit reached, network "
+                    "error, etc.) — leaving instagram_checked=False so this brand is retried "
+                    "instead of being treated as fully processed",
+                    brand.name, handle,
+                )
+                time.sleep(1.0)
                 continue
 
-            # sponsors/tagged_users/mentions/coauthor_producers are the only
-            # fields that actually name a creator — paid_partnership is just
-            # a boolean flag Apify sets on the post and never identifies who
-            # the partner is, so it must never by itself justify saving a row.
-            has_sponsors = bool(item.get("sponsors"))
-            has_coauth   = bool(_real_coauthors(item, handle))
-            has_social   = bool(item.get("taggedUsers") or item.get("mentions"))
+            inserted          = 0
+            skipped_no_signal = 0
+            skipped_llm       = 0
+            dropped_cap       = 0
+            unique_creators: set[str] = set()
 
-            if ENABLE_INSTA_LLM:
-                #  Full LLM mode: all signals filtered
-                if not (has_sponsors or has_coauth or has_social):
-                    skipped_no_signal += 1
+            for item in items:
+                if max_creators and len(unique_creators) >= max_creators:
+                    dropped_cap += 1
                     continue
 
-                filtered = _llm_filter_all(db, item, brand.name, handle)
-                if filtered is None:          # no API key
-                    skipped_llm += 1
-                    continue
+                # sponsors/tagged_users/mentions/coauthor_producers are the only
+                # fields that actually name a creator — paid_partnership is just
+                # a boolean flag Apify sets on the post and never identifies who
+                # the partner is, so it must never by itself justify saving a row.
+                has_sponsors = bool(item.get("sponsors"))
+                has_coauth   = bool(_real_coauthors(item, handle))
+                has_social   = bool(item.get("taggedUsers") or item.get("mentions"))
 
-                has_creator = (
-                    filtered.get("sponsors")
-                    or filtered.get("tagged_users")
-                    or filtered.get("mentions")
-                    or filtered.get("coauthor_producers")
-                )
-                if not has_creator:
-                    skipped_llm += 1
-                    continue
+                if ENABLE_INSTA_LLM:
+                    #  Full LLM mode: all signals filtered
+                    if not (has_sponsors or has_coauth or has_social):
+                        skipped_no_signal += 1
+                        continue
 
-                row = _build_row(brand.id, handle, item)
-                if row:
-                    # tagged_users/coauthor_producers/mentions: the LLM is
-                    # handed Apify's raw dicts (id/username/full_name/
-                    # is_verified) so it can judge who's a real creator, but
-                    # it also echoes that same dict shape back — reduce to
-                    # bare usernames here so only usernames ever land in the
-                    # DB, same as when ENABLE_INSTA_LLM is off.
-                    row["paid_partnership"]   = bool(filtered.get("paid_partnership"))
-                    row["sponsors"]           = filtered.get("sponsors") or None
-                    row["tagged_users"]       = _usernames_only(filtered.get("tagged_users"))
-                    row["mentions"]           = _usernames_only(filtered.get("mentions"))
-                    row["coauthor_producers"] = _usernames_only(filtered.get("coauthor_producers"))
-                    row["llm_checked"]        = True
-                    inserted += upsert_rows(db, InstagramPost, [row], ["post_id"])
-                    unique_creators |= _row_creators(row)
-                time.sleep(0.3)
+                    filtered = _llm_filter_all(db, item, brand.name, handle)
+                    if filtered is None:          # no API key
+                        skipped_llm += 1
+                        continue
 
-            else:
-                #  Coauthor-only LLM mode
-                # Direct signals (sponsors/tagged/mentions) saved as-is.
-                # coauthorProducers always goes through LLM.
-                has_direct = has_sponsors or has_social
+                    has_creator = (
+                        filtered.get("sponsors")
+                        or filtered.get("tagged_users")
+                        or filtered.get("mentions")
+                        or filtered.get("coauthor_producers")
+                    )
+                    if not has_creator:
+                        skipped_llm += 1
+                        continue
 
-                filtered_coauthors: list | None = None
-                if has_coauth:
-                    filtered_coauthors = _usernames_only(_llm_filter_coauthors(db, item, brand.name, handle))
+                    row = _build_row(brand.id, handle, item)
+                    if row:
+                        # tagged_users/coauthor_producers/mentions: the LLM is
+                        # handed Apify's raw dicts (id/username/full_name/
+                        # is_verified) so it can judge who's a real creator, but
+                        # it also echoes that same dict shape back — reduce to
+                        # bare usernames here so only usernames ever land in the
+                        # DB, same as when ENABLE_INSTA_LLM is off.
+                        row["paid_partnership"]   = bool(filtered.get("paid_partnership"))
+                        row["sponsors"]           = filtered.get("sponsors") or None
+                        row["tagged_users"]       = _usernames_only(filtered.get("tagged_users"))
+                        row["mentions"]           = _usernames_only(filtered.get("mentions"))
+                        row["coauthor_producers"] = _usernames_only(filtered.get("coauthor_producers"))
+                        row["llm_checked"]        = True
+                        inserted += upsert_rows(db, InstagramPost, [row], ["post_id"])
+                        unique_creators |= _row_creators(row)
                     time.sleep(0.3)
 
-                if not has_direct and not filtered_coauthors:
+                else:
+                    #  Coauthor-only LLM mode
+                    # Direct signals (sponsors/tagged/mentions) saved as-is.
+                    # coauthorProducers always goes through LLM.
+                    has_direct = has_sponsors or has_social
+
+                    filtered_coauthors: list | None = None
                     if has_coauth:
-                        skipped_llm += 1
-                    else:
-                        skipped_no_signal += 1
-                    continue
+                        filtered_coauthors = _usernames_only(_llm_filter_coauthors(db, item, brand.name, handle))
+                        time.sleep(0.3)
 
-                row = _build_row(brand.id, handle, item)
-                if row:
-                    if filtered_coauthors is not None:
-                        row["coauthor_producers"] = filtered_coauthors or None
-                    # llm_checked stays False in this mode
-                    inserted += upsert_rows(db, InstagramPost, [row], ["post_id"])
-                    unique_creators |= _row_creators(row)
+                    if not has_direct and not filtered_coauthors:
+                        if has_coauth:
+                            skipped_llm += 1
+                        else:
+                            skipped_no_signal += 1
+                        continue
 
-        total_posts += inserted
-        logger.info(
-            "Instagram: '%s' (@%s) → %d saved | %d no signal | %d LLM-rejected | "
-            "%d dropped (cap reached) | %d unique creators | %d total fetched",
-            brand.name, handle, inserted, skipped_no_signal, skipped_llm,
-            dropped_cap, len(unique_creators), len(items),
+                    row = _build_row(brand.id, handle, item)
+                    if row:
+                        if filtered_coauthors is not None:
+                            row["coauthor_producers"] = filtered_coauthors or None
+                        # llm_checked stays False in this mode
+                        inserted += upsert_rows(db, InstagramPost, [row], ["post_id"])
+                        unique_creators |= _row_creators(row)
+
+            if inserted == 0:
+                upsert_rows(
+                    db, InstagramPost,
+                    [_build_profile_only_row(brand.id, handle, items)],
+                    ["brand_raw_id"], index_where=text("post_id IS NULL"),
+                )
+
+            total_posts += inserted
+            logger.info(
+                "Instagram: '%s' (@%s) → %d saved | %d no signal | %d LLM-rejected | "
+                "%d dropped (cap reached) | %d unique creators | %d total fetched",
+                brand.name, handle, inserted, skipped_no_signal, skipped_llm,
+                dropped_cap, len(unique_creators), len(items),
+            )
+
+            brand.instagram_checked = True
+            db.commit()
+            checked_count += 1
+            time.sleep(1.0)
+    except ApifyQuotaExceeded as exc:
+        logger.error(
+            "Instagram: %s — stopping this run early after %d/%d brand(s) checked; "
+            "remaining brands stay instagram_checked=False for the next run",
+            exc, checked_count, len(brands),
         )
 
-        brand.instagram_checked = True
-        db.commit()
-        time.sleep(1.0)
+    logger.info("Instagram: %d/%d brands checked, %d posts stored", checked_count, len(brands), total_posts)
+    # checked_count, not len(brands) — a batch where every brand hits an
+    # Apify failure (e.g. actor limit reached) must return 0 so
+    # drain_pending_step's `while True: ... if not processed: break` stops
+    # this step instead of looping forever re-selecting the same still-
+    # unchecked brands every batch.
+    return checked_count
 
-    logger.info("Instagram: %d brands processed, %d posts stored", len(brands), total_posts)
-    return len(brands)
 
-
-def _scrape_handle(handle: str, posts_limit: int) -> list[dict]:
-    """Run Apify actor for one Instagram handle and return raw items."""
+def _scrape_handle(handle: str, posts_limit: int) -> list[dict] | None:
+    """
+    Run Apify actor for one Instagram handle and return raw items.
+    require_success=True so a failed run (actor limit reached, network
+    error, actor crash, etc.) returns None — distinguishable from a
+    genuinely empty [] result, which enrich_instagram_posts() needs to
+    avoid marking a brand instagram_checked=True off the back of a call
+    that never actually ran.
+    """
     logger.info("Instagram: scraping @%s (last %d posts)", handle, posts_limit)
     run_input = {
         "addParentData": True,
@@ -427,4 +493,4 @@ def _scrape_handle(handle: str, posts_limit: int) -> list[dict]:
         "resultsLimit":  posts_limit,
         "resultsType":   _RESULTS_TYPE,
     }
-    return run_apify_actor(_ACTOR_ID, run_input, label=f"Instagram @{handle}")
+    return run_apify_actor(_ACTOR_ID, run_input, label=f"Instagram @{handle}", require_success=True)

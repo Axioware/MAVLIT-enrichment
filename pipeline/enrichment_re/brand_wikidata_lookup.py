@@ -59,6 +59,27 @@ def _extract_domain(url: str) -> str:
         return ""
 
 
+def _website_score(url: str) -> int:
+    """
+    Wikidata sometimes lists multiple P856 (official website) values for one
+    entity with no reliable rank/language distinction — e.g. Maybelline
+    (Q1351054) has both maybelline.com and the Brazil-specific
+    maybelline.com.br at the same "normal" rank. Prefer a generic top-level
+    domain (.com/.org/.net/.io) over one with a country-code suffix
+    (.com.br, .co.uk, etc.), which is almost always the brand's global site
+    rather than a regional mirror.
+    """
+    domain = _extract_domain(url)
+    if not domain:
+        return -1
+    parts = domain.split(".")
+    if len(parts) == 2 and parts[-1] in ("com", "org", "net", "io"):
+        return 2
+    if len(parts) == 2:
+        return 1
+    return 0
+
+
 def _fetch_by_instagram_handles(handles: list[str]) -> dict[str, dict]:
     """
     Reverse SPARQL lookup: given bare Instagram usernames, find the
@@ -112,8 +133,10 @@ SELECT ?ig ?entity ?entityLabel ?entityDescription ?website ?instanceOfLabel WHE
                 entry["name"] = label
         if "entityDescription" in row and not entry.get("description"):
             entry["description"] = row["entityDescription"]["value"]
-        if "website" in row and not entry.get("website"):
-            entry["website"] = row["website"]["value"]
+        if "website" in row:
+            candidate = row["website"]["value"]
+            if not entry.get("website") or _website_score(candidate) > _website_score(entry["website"]):
+                entry["website"] = candidate
         if "instanceOfLabel" in row and not entry.get("entity_type"):
             entry["entity_type"] = row["instanceOfLabel"]["value"]
     return results
