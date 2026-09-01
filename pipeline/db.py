@@ -67,6 +67,9 @@ class BrandRaw(Base):
     has_official_website     = Column(Boolean)
     website_source           = Column(Text)   # 'wikidata' | 'none'
 
+    #  Brand market tier
+    brand_tier               = Column(Text)
+
     #  Signal detection 
     is_shopify      = Column(Boolean)
     is_woocommerce  = Column(Boolean)

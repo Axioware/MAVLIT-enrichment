@@ -293,5 +293,7 @@ python -m pipeline.enrichment_re.score_post_sponsorship
 ## to run LLM per post 
 python -m pipeline.enrichment.score_instagram_post_sponsorship
 
+## to run brand tier
+python -m pipeline.enrichment.brand_tier
 
 ## after all have to run LLM(one time) for niche of creators for specific selected niche

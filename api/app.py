@@ -114,6 +114,7 @@ def _run_migrations() -> None:
         # Signal enrichment — website
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS has_official_website BOOLEAN",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS website_source TEXT",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS brand_tier TEXT",
         "ALTER TABLE brands_raw DROP COLUMN IF EXISTS google_discovered_website",
         # Signal enrichment — detection
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS is_shopify BOOLEAN",
