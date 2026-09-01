@@ -28,16 +28,55 @@ from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 
 logger = logging.getLogger(__name__)
 
-BRAND_TIER_PROMPT = """You are classifying a brand's commercial market tier.
+BRAND_TIER_PROMPT = """
+You are classifying a brand's sponsorship accessibility tier for influencer marketing.
 
-Choose exactly one value for this brand:
+Your goal is NOT to measure product quality, popularity, or reputation.
+
+Your goal is to estimate how realistic it would be for an independent Instagram content creator (10K–1M followers) to directly approach this brand and secure a sponsorship or partnership.
+
+Choose exactly one value:
+
 - lower-range
 - midlower-range
 - midhigher-range
 - higher-range
 
-Use the brand's likely scale, commercial weight, premium positioning, and market reach.
-A higher-range brand is usually a large, well-known, high-budget, premium or mass-market brand such as Amazon, Sony Music, or similar large companies.
+Definitions:
+
+lower-range:
+- Small businesses, startups, local brands, niche ecommerce stores, independent creators' businesses, small agencies, small SaaS companies, boutique brands, small online shops.
+- Limited budget and limited market presence.
+- Often actively seeking creators.
+- A creator can realistically contact decision-makers directly.
+
+midlower-range:
+- Established small-to-medium businesses.
+- Regional brands or growing online brands.
+- May have marketing staff but limited influencer budgets.
+- Creator outreach is still realistic.
+
+midhigher-range:
+- Well-established national brands.
+- Significant marketing budgets.
+- Recognized within their industry.
+- May work with influencers regularly.
+- Creator outreach is possible but increasingly competitive.
+
+higher-range:
+- Large corporations, multinational companies, major entertainment companies, major record labels, major sports organizations, major retailers, public companies, Fortune 500 companies, major consumer brands, major technology companies, major media companies, government organizations, universities, major nonprofits, or globally recognized brands.
+- Usually have dedicated marketing, PR, sponsorship, talent, or agency teams.
+- Partnerships are typically managed through formal processes, agencies, or existing networks.
+- Most independent creators cannot easily secure partnerships through cold outreach.
+
+Important rules:
+
+- Be highly skeptical of assigning anything except higher-range to globally recognized brands.
+- Brands such as Amazon, Apple, Google, Microsoft, Sony, Sony Music, Disney, Marvel, Netflix, Adidas, Nike, Coca-Cola, Samsung, Universal Music, Warner Music, BMW, Mercedes-Benz, Spotify, TikTok, Meta, YouTube, and similar organizations are always higher-range.
+- Large parent companies, major subsidiaries, and major corporate brands should generally be higher-range.
+- Government agencies, universities, major hospitals, museums, sports leagues, and major public institutions should generally be higher-range.
+- If information is limited, estimate based on brand name, website, description, and likely commercial scale.
+- When uncertain between two tiers, choose the larger tier.
 
 Brand name: {brand_name}
 Brand niche: {niche}
@@ -45,12 +84,9 @@ Brand description: {description}
 Website/domain: {website}
 Source: {source}
 
-If the brand is clearly small or niche with limited commercial presence, choose lower-range.
-If it is moderate, choose midlower-range or midhigher-range.
-If it is clearly major, premium, or very broad-market, choose higher-range.
-
 Respond with ONLY valid JSON:
-{"brand_tier": "lower-range"}
+
+{"brand_tier":"lower-range"}
 """
 
 _NORMALIZED_VALUES = {
