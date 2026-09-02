@@ -76,7 +76,7 @@ Important rules:
 - Large parent companies, major subsidiaries, and major corporate brands should generally be higher-range.
 - Government agencies, universities, major hospitals, museums, sports leagues, and major public institutions should generally be higher-range.
 - If information is limited, estimate based on brand name, website, description, and likely commercial scale.
-- If you are genuinely unsure, do not force a tier. Return an empty string for "brand_tier" instead of guessing.
+- If you are genuinely unsure, do not force a tier. Set "brand_tier" to null instead of guessing.
 - Only return a tier when the evidence is strong enough to support it.
 
 Brand name: {brand_name}
@@ -87,7 +87,7 @@ Instagram handle: {instagram_handle}
 
 Respond with ONLY valid JSON:
 
-{"brand_tier":""}
+{"brand_tier":null}
 """
 
 _NORMALIZED_VALUES = {
@@ -104,9 +104,13 @@ _NORMALIZED_VALUES = {
 
 
 def _normalize_brand_tier(value: object) -> str | None:
+    if value is None:
+        return None
     if not isinstance(value, str):
         return None
     cleaned = value.strip().lower().replace("_", "-")
+    if cleaned in {"", "null", "none", "n/a", "na", "unknown", "unsure"}:
+        return None
     return _NORMALIZED_VALUES.get(cleaned)
 
 
@@ -127,7 +131,11 @@ def _classify_brand_tier(db: Session, brand: BrandRaw) -> str | None:
     if not isinstance(result, dict):
         return None
 
-    inferred = result.get("brand_tier") or result.get("tier") or result.get("brandTier")
+    inferred = result.get("brand_tier")
+    if inferred is None:
+        inferred = result.get("tier")
+    if inferred is None:
+        inferred = result.get("brandTier")
     return _normalize_brand_tier(inferred)
 
 
