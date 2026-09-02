@@ -76,17 +76,18 @@ Important rules:
 - Large parent companies, major subsidiaries, and major corporate brands should generally be higher-range.
 - Government agencies, universities, major hospitals, museums, sports leagues, and major public institutions should generally be higher-range.
 - If information is limited, estimate based on brand name, website, description, and likely commercial scale.
-- When uncertain between two tiers, choose the larger tier.
+- If you are genuinely unsure, do not force a tier. Return an empty string for "brand_tier" instead of guessing.
+- Only return a tier when the evidence is strong enough to support it.
 
 Brand name: {brand_name}
 Brand niche: {niche}
 Brand description: {description}
 Website/domain: {website}
-Source: {source}
+Instagram handle: {instagram_handle}
 
 Respond with ONLY valid JSON:
 
-{"brand_tier":"lower-range"}
+{"brand_tier":""}
 """
 
 _NORMALIZED_VALUES = {
@@ -120,7 +121,7 @@ def _classify_brand_tier(db: Session, brand: BrandRaw) -> str | None:
         niche=brand.niche or "unknown",
         description=(brand.description or "")[:800] or "none provided",
         website=brand.website or brand.domain or "none provided",
-        source=brand.source or "unknown",
+        instagram_handle=brand.instagram_handle or "none provided",
     )
     result = call_gpt_json(prompt, context=f"brand tier for brand_id={brand.id}")
     if not isinstance(result, dict):
