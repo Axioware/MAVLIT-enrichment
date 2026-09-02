@@ -295,5 +295,6 @@ python -m pipeline.enrichment.score_instagram_post_sponsorship
 
 ## to run brand tier
 python -m pipeline.enrichment.brand_tier
+python -m pipeline.enrichment.brand_tier --brand-id 1614
 
 ## after all have to run LLM(one time) for niche of creators for specific selected niche

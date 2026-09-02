@@ -101,23 +101,24 @@ _NORMALIZED_VALUES = {
     "higher range": "higher-range",
     "higherrange": "higher-range",
 }
+NO_TIER_SENTINEL = "null"
 
 
-def _normalize_brand_tier(value: object) -> str | None:
+def _normalize_brand_tier(value: object) -> str:
     if value is None:
-        return None
+        return NO_TIER_SENTINEL
     if not isinstance(value, str):
-        return None
+        return NO_TIER_SENTINEL
     cleaned = value.strip().lower().replace("_", "-")
     if cleaned in {"", "null", "none", "n/a", "na", "unknown", "unsure"}:
-        return None
-    return _NORMALIZED_VALUES.get(cleaned)
+        return NO_TIER_SENTINEL
+    return _NORMALIZED_VALUES.get(cleaned) or NO_TIER_SENTINEL
 
 
-def _classify_brand_tier(db: Session, brand: BrandRaw) -> str | None:
+def _classify_brand_tier(db: Session, brand: BrandRaw) -> str:
     if not OPENAI_KEY:
         logger.warning("OPENAI_KEY not set — skipping brand tier classification for brand_id=%s", brand.id)
-        return None
+        return NO_TIER_SENTINEL
 
     prompt = fill_template(
         BRAND_TIER_PROMPT,
@@ -129,7 +130,7 @@ def _classify_brand_tier(db: Session, brand: BrandRaw) -> str | None:
     )
     result = call_gpt_json(prompt, context=f"brand tier for brand_id={brand.id}")
     if not isinstance(result, dict):
-        return None
+        return NO_TIER_SENTINEL
 
     inferred = result.get("brand_tier")
     if inferred is None:
@@ -157,8 +158,16 @@ def score_brand_tier(db: Session, limit: int | None = None, brand_raw_id: int | 
 
     for row in rows:
         tier = _classify_brand_tier(db, row)
-        if tier is None:
-            logger.warning("Brand tier scoring: id=%s name=%s — LLM call failed or returned invalid result", row.id, row.name)
+        if tier == NO_TIER_SENTINEL:
+            logger.info(
+                "Brand tier scoring: id=%s name=%s — LLM returned no confirmed tier; storing '%s' to prevent retry",
+                row.id,
+                row.name,
+                NO_TIER_SENTINEL,
+            )
+            row.brand_tier = tier
+            db.commit()
+            updated += 1
             continue
 
         row.brand_tier = tier
