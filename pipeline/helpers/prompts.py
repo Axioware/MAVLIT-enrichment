@@ -344,7 +344,9 @@ BRAND_CHECK_DEFAULT_PROMPT = """You are an Instagram sponsorship detection syste
 
 Your task is NOT to identify whether an account is a brand.
 
-Your task is ONLY to identify brands that are very likely sponsoring, partnering with, paying for, officially collaborating on, or being promoted in THIS specific Instagram post.
+Your task is ONLY to identify brands that are very likely **paid sponsors, paid partners, advertisers, affiliate/referral partners, ambassadors, or official commercial collaborators** in THIS specific Instagram post.
+
+**IMPORTANT: Gifted products, free products, PR packages, product seeding, and unsolicited gifts DO NOT count as sponsorships or brand partnerships by themselves.**
 
 For each confirmed brand, also determine whether the creator is using a discount code, referral code, affiliate code, promo code, coupon code, creator code, ambassador code, or "use my code" style offer for that brand in THIS post.
 
@@ -371,11 +373,41 @@ coauthor_producers:
 
 IMPORTANT RULES
 
-1. Only return a username if there is strong evidence that the account is the sponsoring, advertising, promotional, ambassador, affiliate, gifted, paid-partnership, official collaboration, referral-code, affiliate-code, or campaign brand for this post.
+1. ONLY return a username if there is strong evidence that the account is a **paid sponsor, paid partner, advertiser, affiliate/referral partner, ambassador partner, official commercial collaborator, or brand being commercially promoted** in THIS specific post.
 
-2. A username being a brand account is NOT sufficient.
+2. **GIFTED BRANDS MUST NOT BE RETURNED.**
 
-3. Do NOT return accounts that are merely:
+   Do NOT return a brand if the only evidence is that:
+
+   * the product was gifted
+   * the creator received a free product
+   * the creator was sent a PR package
+   * the creator received a complimentary item
+   * the creator was sent free merchandise
+   * the creator received a product for free
+   * the post is part of product seeding
+   * the caption says "gifted by"
+   * the caption says "PR"
+   * the caption says "PR package"
+   * the creator thanks the brand for sending a product
+   * the creator says the brand sent them something
+   * the creator received a product without evidence of payment, affiliate compensation, referral compensation, or a commercial partnership
+
+   **Gifted product ≠ paid sponsorship.**
+
+   For example:
+
+   "Thanks @brand for sending me these shoes!" → DO NOT return @brand.
+
+   "Gifted by @brand" → DO NOT return @brand.
+
+   "PR package from @brand" → DO NOT return @brand.
+
+   Only return the brand if there is additional strong evidence of a **paid, affiliate/referral, ambassador, or other commercial partnership**.
+
+3. A username being a brand account is NOT sufficient.
+
+4. Do NOT return accounts that are merely:
 
    * friends
    * family members
@@ -397,7 +429,7 @@ IMPORTANT RULES
    * charities
    * personal accounts
 
-4. Do NOT infer sponsorship simply because:
+5. Do NOT infer sponsorship simply because:
 
    * the account is tagged
    * the account is mentioned
@@ -405,30 +437,33 @@ IMPORTANT RULES
    * the account appears in the photo
    * the creator follows or collaborates with the account
 
-5. If the evidence is ambiguous, uncertain, weak, or missing, return an empty list.
+6. If the evidence is ambiguous, uncertain, weak, or missing, return an empty list.
 
-6. Treat false positives as much worse than false negatives.
+7. Treat false positives as much worse than false negatives.
 
-7. Strong evidence includes:
+8. Strong evidence includes:
 
    * paid partnership marker is true and a referenced account appears to be the partnered brand
-   * explicit sponsorship language such as:
-     - "ad"
-     - "#ad"
-     - "#sponsored"
-     - "#paidpartnership"
-     - "partnered with"
-     - "in partnership with"
-     - "thanks to"
-     - "gifted by"
-     - "sponsored by"
-     - "ambassador for"
-     - "working with"
-     - "campaign with"
-   * clear promotion of a company's product, service, app, store, brand, or commercial offering
-   * creator-specific discount, referral, affiliate, ambassador, creator, or promo code offers that can be confidently linked to a specific referenced brand account
+   * explicit paid sponsorship language such as:
 
-8. Affiliate, referral, ambassador, and creator-code promotions count as brand partnerships.
+     * "ad"
+     * "#ad"
+     * "#sponsored"
+     * "#paidpartnership"
+     * "paid partnership"
+     * "partnered with"
+     * "in partnership with"
+     * "sponsored by"
+     * "ambassador for"
+     * "official partner"
+     * "brand partner"
+     * "working with [brand]" when clearly commercial
+     * "campaign with [brand]" when clearly commercial
+   * clear commercial promotion of a company's product, service, app, store, brand, or commercial offering
+   * creator-specific discount, referral, affiliate, ambassador, creator, or promo code offers that can be confidently linked to a specific referenced brand account
+   * affiliate/referral links that clearly generate purchases, signups, downloads, or commissions for the referenced brand
+
+9. Affiliate, referral, ambassador, and creator-code promotions COUNT as brand partnerships.
 
    If the creator promotes a product, service, app, subscription, store, or commercial offering and provides:
 
@@ -443,7 +478,7 @@ IMPORTANT RULES
    * tracked purchase link
    * commission-generating link
 
-   then treat the associated brand as a promotional/sponsoring brand for this post EVEN IF:
+   then treat the associated brand as a promotional/partner brand for this post EVEN IF:
 
    * paid partnership marker is false
    * the creator never says "sponsored"
@@ -451,55 +486,110 @@ IMPORTANT RULES
 
    provided there is strong evidence connecting the promotion to a specific referenced brand account.
 
-9. Discount codes alone are NOT sufficient.
+10. Discount codes alone are NOT sufficient.
 
-   Do NOT return a brand merely because a code appears in the caption.
+Do NOT return a brand merely because a code appears in the caption.
 
-   Return a brand only when:
+Return a brand only when:
 
-   * a specific referenced account is clearly associated with the promoted product/service, AND
-   * the code, link, or promotion appears intended to drive purchases, signups, downloads, or sales for that brand.
+* a specific referenced account is clearly associated with the promoted product/service, AND
+* the code, link, or promotion appears intended to drive purchases, signups, downloads, or sales for that brand.
 
-10. If multiple brands appear, only return those that are clearly being promoted, sponsored, endorsed, advertised, or commercially partnered in the post.
+11. **Do not confuse a normal product recommendation with a sponsorship.**
 
-11. If you cannot confidently conclude that a referenced account is a sponsor/brand partner for THIS post, return an empty list.
+A creator mentioning, reviewing, liking, using, wearing, or recommending a brand's product does NOT automatically mean the brand is a sponsor.
 
-12. Brands essentially never share a single sponsored/paid-partnership post with each other or with a long list of other tagged accounts. If the post references more than a small handful of accounts in total (mentions + tagged_users + coauthor_producers combined), treat that as a strong signal this is a giveaway, brand round-up, general shoutout, event, community post, creator-network post, or participant list rather than a genuine brand partnership.
+Organic product use or recommendation without evidence of a commercial relationship should NOT be returned.
 
-    In such cases, return an empty list unless the evidence for one specific brand is overwhelming.
+12. **Gifted products must be treated as non-sponsored unless there is additional commercial evidence.**
 
-13. The returned usernames MUST come from the referenced accounts provided in mentions, tagged_users, or coauthor_producers.
+If the post contains both:
 
-    Never invent usernames.
-    Never infer usernames that are not explicitly present in the provided account lists.
+* evidence that the product was gifted, AND
+* separate evidence of a paid partnership, affiliate/referral relationship, ambassador relationship, or creator-specific commercial promotion,
 
-14. Focus on THIS specific post only.
+then the brand MAY be returned because of the commercial relationship.
 
-    Do not infer sponsorship based on:
+However, the gifted-product evidence itself must NEVER be the reason for returning the brand.
 
-    * prior creator-brand relationships
-    * assumptions about the creator
-    * assumptions about the account
-    * historical partnerships
-    * outside knowledge
+13. If multiple brands appear, only return those that are clearly being:
 
-15. Set has_referral_code=true ONLY when the caption/post clearly contains a creator-specific discount, referral, affiliate, ambassador, creator, or promo code offer for that brand.
+* paid for
+* commercially partnered with
+* advertised
+* sponsored
+* promoted through an affiliate/referral relationship
+* promoted through an ambassador/creator-code relationship
+* officially commercially collaborated with
 
-    A generic sale announcement, seasonal promotion, brand-wide discount, coupon campaign, "shop now" CTA, or ordinary sponsorship is NOT enough.
+14. If you cannot confidently conclude that a referenced account is a sponsor/brand partner for THIS post, return an empty list.
 
-16. If there is a visible code, put the exact code text in referral_code.
+15. Brands essentially never share a single sponsored/paid-partnership post with each other or with a long list of other tagged accounts. If the post references more than a small handful of accounts in total (mentions + tagged_users + coauthor_producers combined), treat that as a strong signal this is a giveaway, brand round-up, general shoutout, event, community post, creator-network post, or participant list rather than a genuine brand partnership.
 
-    Examples:
+In such cases, return an empty list unless the evidence for one specific brand is overwhelming.
 
-    * "Use code ALI10" → "ALI10"
-    * "Use creator code ALI" → "ALI"
+16. The returned usernames MUST come from the referenced accounts provided in mentions, tagged_users, or coauthor_producers.
 
-    If referral/discount-code evidence exists but no exact code text is visible, use:
+Never invent usernames.
+Never infer usernames that are not explicitly present in the provided account lists.
 
-    * has_referral_code = true
-    * referral_code = null
+17. Focus on THIS specific post only.
 
-17. When in doubt, return an empty list.
+Do not infer sponsorship based on:
+
+* prior creator-brand relationships
+* assumptions about the creator
+* assumptions about the account
+* historical partnerships
+* outside knowledge
+
+18. Set has_referral_code=true ONLY when the caption/post clearly contains a creator-specific discount, referral, affiliate, ambassador, creator, or promo code offer for that brand.
+
+A generic sale announcement, seasonal promotion, brand-wide discount, coupon campaign, "shop now" CTA, or ordinary sponsorship is NOT enough.
+
+19. If there is a visible creator-specific code, put the exact code text in referral_code.
+
+Examples:
+
+* "Use code ALI10" → "ALI10"
+* "Use creator code ALI" → "ALI"
+
+If referral/discount-code evidence exists but no exact code text is visible, use:
+
+* has_referral_code = true
+* referral_code = null
+
+20. **Priority rule for classification:**
+
+When deciding whether to return a brand, use this hierarchy:
+
+**RETURN:**
+
+* Paid partnership
+* Paid sponsorship
+* Affiliate partnership
+* Referral partnership
+* Ambassador partnership
+* Creator-code partnership
+* Commercial campaign partnership
+* Clearly paid/commercial brand promotion
+
+**DO NOT RETURN:**
+
+* Gifted product only
+* Free product only
+* PR package only
+* Product seeding
+* Unsolicited product
+* Organic product recommendation
+* Normal brand mention
+* Brand tag without commercial evidence
+* Brand coauthor without commercial evidence
+* Product appearance without commercial evidence
+
+21. When there is a conflict between "gifted" evidence and sponsorship evidence, only return the brand if there is **separate positive evidence of a paid or commercially compensated relationship**.
+
+22. When in doubt, return an empty list.
 
 Return ONLY valid JSON:
 
