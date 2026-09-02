@@ -59,12 +59,34 @@ A tag, mention, or product reference alone is weak evidence.
 Strong evidence includes:
 - Instagram paid partnership label
 - explicit sponsorship disclosure (#ad, #sponsored, paid partnership, partner, advertisement)
+- explicit statement that the product was gifted, gifted by the brand, PR package, gifted collaboration, or received for free
 - affiliate/referral/discount code
 - language indicating a commercial relationship
 - direct promotional call-to-action for the brand
 - giveaway or campaign run jointly with the brand
 - clear indication the creator is representing the brand
 - multiple pieces of evidence pointing to the same brand
+
+IMPORTANT GIFTED CONTENT RULE:
+
+If the post clearly indicates that the creator received the product/service for free from THIS specific brand AND the post contains a disclosure or clear gifted/PR/collaboration indication, classify it as a GIFTED COMMERCIAL COLLABORATION.
+
+For a clearly disclosed gifted collaboration, the confidence score MUST be exactly 60.
+
+Examples of gifted evidence:
+
+* "Gifted by @brand"
+* "PR package from @brand"
+* "Thanks @brand for sending me this"
+* "This product was gifted to me by @brand"
+* "Gifted collaboration with @brand"
+* "Received this product from @brand"
+* "#gifted" when it clearly refers to THIS brand/product
+* Clear disclosure that the creator received the product for free from the brand
+
+A gifted collaboration should NOT receive a score above 60 unless there is additional strong evidence that the relationship is also a PAID sponsorship or paid partnership.
+
+If the post only shows or mentions a product without indicating that it was gifted, DO NOT classify it as gifted.
 
 IMPORTANT:
 
@@ -97,27 +119,54 @@ Discount code provided
 Result:
 High confidence.
 
+Brand = Nike
+Caption says "Gifted by @Nike" and promotes the Nike product
+
+Result:
+confidence_pct = 60
+
 Scoring rubric:
 
 0-10:
-No evidence of sponsorship.
+No evidence of sponsorship or commercial relationship.
 Ordinary mention, tag, review, lifestyle content, or unrelated brand.
 
 11-25:
-Brand appears but no evidence of a commercial relationship.
+Brand appears but there is no meaningful evidence of a commercial relationship.
 
 26-40:
-Some weak signals but sponsorship is speculative.
+Some weak signals exist, but sponsorship is speculative.
 
-41-60:
-Possible sponsorship but evidence is incomplete.
+41-59:
+Possible commercial relationship, but evidence is incomplete and does not meet the gifted threshold.
+
+60:
+CLEARLY DISCLOSED GIFTED COMMERCIAL COLLABORATION.
+The creator explicitly indicates that THIS specific brand gifted, sent, provided, or gave the product/service for free.
 
 61-80:
-Strong evidence of a commercial relationship.
+Strong evidence of a paid/commercial relationship.
+Examples include strong promotional language, campaign participation, affiliate relationship, or other convincing commercial signals without an explicit paid sponsorship disclosure.
 
 81-100:
-Very strong evidence.
-Explicit sponsorship disclosures, paid partnership indicators, affiliate codes, campaign language, or multiple strong signals.
+Very strong evidence of a PAID sponsorship or paid partnership.
+Examples include:
+
+* Instagram paid partnership label
+* explicit #ad or #sponsored disclosure
+* explicit paid sponsorship language
+* clear paid campaign language
+* multiple strong commercial signals
+
+IMPORTANT SCORING RULES:
+
+* Disclosed gifted collaboration = EXACTLY 60.
+* Do NOT score clearly disclosed gifted content below 60.
+* Do NOT score clearly disclosed gifted content above 60 unless there is additional evidence of a paid sponsorship/paid partnership.
+* Paid sponsorship/paid partnership should generally score above 60.
+* Weak mentions, tags, product appearances, reviews, or enthusiasm should remain below 60.
+* Evidence involving another brand should not increase the score for THIS brand.
+* Do not infer sponsorship from brand popularity, creator niche, previous collaborations, or product ownership.
 
 Evaluate only the information provided below.
 
