@@ -297,4 +297,44 @@ python -m pipeline.enrichment.score_instagram_post_sponsorship
 python -m pipeline.enrichment.brand_tier
 python -m pipeline.enrichment.brand_tier --brand-id 1614
 
+## to run geo_reach.py (geographic market reach scoring, scrapes brands_raw.website)
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.geo_reach.geo_reach import enrich_geo_reach
+db = SessionLocal()
+enrich_geo_reach(db, limit=1)
+db.close()
+"
+
+OR (target one specific brand by brand_raw id)
+
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.geo_reach.geo_reach import enrich_geo_reach
+db = SessionLocal()
+enrich_geo_reach(db, brand_id=5318)
+db.close()
+"
+
+or
+
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.geo_reach.geo_reach import enrich_geo_reach
+db = SessionLocal()
+enrich_geo_reach(db, limit=1, niche='fashion')
+db.close()
+"
+
+or (CLI form)
+
+python3 -m pipeline.enrichment.geo_reach.geo_reach --limit 1
+python3 -m pipeline.enrichment.geo_reach.geo_reach --brand-id 5318
+
 ## after all have to run LLM(one time) for niche of creators for specific selected niche

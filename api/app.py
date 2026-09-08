@@ -326,6 +326,12 @@ def _run_migrations() -> None:
         # test_creator_brand_partnership_posts: LLM-estimated 0-100 sponsorship
         # confidence, backfilled by pipeline/enrichment_re/score_post_sponsorship.py.
         "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS sponsorship_confidence INTEGER",
+        # Geographic reach scoring — pipeline/enrichment/geo_reach/geo_reach.py
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS geo_reach_score INTEGER",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS geo_reach_label TEXT",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS geo_reach_locations JSONB",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS geo_reach_pages_scraped JSONB",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS geo_reach_checked BOOLEAN NOT NULL DEFAULT false",
     ]
     with engine.connect() as conn:
         for sql in stmts:

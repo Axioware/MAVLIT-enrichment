@@ -98,6 +98,22 @@ class BrandRaw(Base):
     # runs on rows the Wikidata reverse lookup already gave up on).
     instagram_profile_checked = Column(Boolean, nullable=False, server_default="false", default=False)
 
+    #  Geographic reach scoring (pipeline/enrichment/geo_reach/geo_reach.py)
+    # 0-100 score per the rubric documented in that module — how wide a
+    # geographic footprint the brand's own website shows evidence of.
+    geo_reach_score          = Column(Integer)
+    # Canonical bucket name for geo_reach_score (e.g. "single_state"),
+    # derived from the score, not the LLM's own wording.
+    geo_reach_label          = Column(Text)
+    # Memory #1: merged list of every city/state/country/reach signal found
+    # across all pages crawled for this brand, so a location found on one
+    # page is never lost when a later page adds a different one.
+    geo_reach_locations      = Column(JSONB)
+    # Memory #2: per-page crawl log (url, status, locations_found) — which
+    # pages were already scraped, so a re-run never re-fetches the same page.
+    geo_reach_pages_scraped  = Column(JSONB)
+    geo_reach_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
+
     def __str__(self) -> str:
         return self.name or f"Brand #{self.id}"
 
