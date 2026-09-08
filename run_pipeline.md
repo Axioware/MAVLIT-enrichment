@@ -337,4 +337,7 @@ or (CLI form)
 python3 -m pipeline.enrichment.geo_reach.geo_reach --limit 1
 python3 -m pipeline.enrichment.geo_reach.geo_reach --brand-id 5318
 
-## after all have to run LLM(one time) for niche of creators for specific selected niche
+
+## TASKS
+### after all have to run LLM(one time) for niche of creators for specific selected niche
+### have to make another pipeline so that it scrape creator re and brands after month or two month for recency posts
