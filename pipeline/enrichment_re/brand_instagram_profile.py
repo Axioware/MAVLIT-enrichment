@@ -1,21 +1,34 @@
 """
 pipeline/enrichment_re/brand_instagram_profile.py
 
-Third-tier name/website resolution for bare brands_raw rows (name IS NULL,
-instagram_handle set) that pipeline/enrichment_re/brand_wikidata_lookup.py
-already checked and failed to resolve (instagram_wikidata_checked=True).
-Where that step queries Wikidata by instagram_handle, this one goes
-straight to the source: the brand's own Instagram profile.
+Name/website resolution AND verification straight from a brand's own
+Instagram profile — runs on any brands_raw row with an instagram_handle,
+whether or not it already has a name/website (e.g. from Wikidata).
+
+Two brand states, one resolution pipeline:
+  - Bare rows (name IS NULL) — the same third-tier fallback this module
+    always did, after pipeline/enrichment_re/brand_wikidata_lookup.py
+    already tried and failed to match one by instagram_handle
+    (instagram_wikidata_checked=True). See that gate in the query below —
+    it's kept so a bare row is still given the (more authoritative)
+    Wikidata reverse lookup a chance first, rather than racing it.
+  - Already-named rows (name IS NOT NULL, e.g. normally seeded from
+    Wikidata) — the brand's existing name/website are passed into both LLM
+    calls below as context, so the Instagram-derived evidence can either
+    corroborate an existing website or, when it's confidently found to be
+    wrong, correct it. See "Existing website is never blindly overwritten"
+    below for exactly when a replacement is allowed to happen.
 
 Resolution order, first hit wins:
   1. Scrape the profile (Apify, same actor/addParentData trick used
      elsewhere) for fullName + biography + externalUrl.
   2. Classify the bio's externalUrl via LLM (instagram_link_classify) as
-     "website" / "social" / "linktree" / "marketplace" / "unknown". This same
-     call also derives the brand's real name (from fullName/bio/the
-     website's own domain together) whenever — and only whenever — it
-     lands on "website"; every other category returns an empty name.
-       - "website"  -> store the URL and the LLM-derived name directly.
+     "website" / "social" / "linktree" / "marketplace" / "unknown" — given
+     the brand's already-known name/website (if any) as extra context. This
+     same call also derives/confirms the brand's real name whenever — and
+     only whenever — it lands on "website"; every other category returns
+     an empty name.
+       - "website"  -> the URL and the LLM-derived/confirmed name.
        - "linktree" -> scrape that link-in-bio page's outbound links and
          classify each one the same way until one comes back "website"
          (carrying its own derived name along with it).
@@ -29,21 +42,29 @@ Resolution order, first hit wins:
      across a long result list, each individually outranked by
      single-appearance social/platform links. The top _TOP_CANDIDATES
      domains go to a second LLM call (brand_website_search_pick) — given
-     the profile's own bio/external URL, plus whatever name step 2 may
-     already have derived, as context to rule out lookalikes and
-     marketplace/press listings and to confirm-or-correct that name —
-     which one (if any) is the real official site, and the brand's real
-     name to go with it.
+     the profile's own bio/external URL, the brand's already-known
+     name/website (if any), plus whatever name step 2 may already have
+     derived, as context to rule out lookalikes and marketplace/press
+     listings and to confirm-or-correct that name — which one (if any) is
+     the real official site, and the brand's real name to go with it.
 
-Every brand this module ever touches has name IS NULL by construction (the
-module's own query filter), so there is never an already-set name for
-either LLM call here to correct in practice — both simply derive one fresh
-whenever they land on a real website, and produce nothing when they don't.
+Existing website is never blindly overwritten (see _apply_result):
+  - No website resolved this run + one already saved -> left untouched.
+  - No website resolved this run + none already saved -> has_official_website
+    set False (still distinguishable from "never attempted").
+  - A website IS resolved (both LLM calls above only ever return one when
+    they're themselves confident it's correct) but its domain matches what
+    was already saved -> nothing to change, already correct.
+  - A website IS resolved AND its domain differs from what was already
+    saved (or nothing was saved) -> replaces brands_raw.website/domain/
+    website_source. This is the only path that ever changes an existing
+    value, and only fires on a confident, differing result.
+An existing NAME is still only ever filled when blank (`if name and not
+brand.name`) — never corrected, even though the LLM may suggest one; only
+website is eligible for correction here.
 
-Sets instagram_profile_checked=True whether or not a website was found, so
-unresolved handles aren't retried every run — has_official_website is set
-False in that case so the row is still distinguishable from "never
-attempted".
+Sets instagram_profile_checked=True whether or not anything changed, so a
+row isn't retried every run.
 """
 
 import json
@@ -53,6 +74,7 @@ from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -217,18 +239,27 @@ def _scrape_profile(handle: str) -> dict | None:
 
 #  Link classification (bio URL, and linktree outbound links)
 
-def _classify_link(db: Session, handle: str, full_name: str, bio: str, url: str) -> tuple[str, str]:
+def _classify_link(
+    db: Session, handle: str, full_name: str, bio: str, url: str,
+    known_name: str = "", existing_website: str = "",
+) -> tuple[str, str]:
     """
     Returns (category, name). category is one of 'website' / 'social' /
     'linktree' / 'marketplace' / 'unknown'. name is only ever non-empty when
-    category == 'website' — the prompt is instructed to derive the brand's
-    real name (from full_name/bio/domain together) in that case only, and
-    to leave it blank otherwise; enforced again here in case the model
-    doesn't comply.
+    category == 'website' — the prompt is instructed to derive/confirm the
+    brand's real name (from full_name/bio/domain, and known_name if given,
+    together) in that case only, and to leave it blank otherwise; enforced
+    again here in case the model doesn't comply.
+
+    known_name/existing_website (both optional) are the brand's already-
+    known real name/website, if any (e.g. from Wikidata) — passed as context
+    only, to help judge this URL and confirm/correct the name; they never by
+    themselves change the category verdict.
     """
     prompt = fill_template(
         _get_prompt(db, LINK_CLASSIFY_PROMPT_NAME, LINK_CLASSIFY_DEFAULT_PROMPT),
         handle=handle, full_name=full_name or "", bio=bio[:500], url=url,
+        known_name=known_name or "none", existing_website=existing_website or "none",
     )
     result = call_gpt_json(prompt, context=f"link_classify @{handle} {url}")
     category = str(result.get("category") or "unknown").strip().lower()
@@ -318,18 +349,19 @@ def _scrape_outbound_links(url: str) -> list[str]:
 
 def _resolve_from_profile(
     db: Session, handle: str, full_name: str, bio: str, external_url: str,
+    known_name: str = "", existing_website: str = "",
 ) -> tuple[str | None, str | None, str]:
     """Returns (website, website_source, name) — name is "" whenever website is None."""
     if not external_url:
         return None, None, ""
 
-    category, name = _classify_link(db, handle, full_name, bio, external_url)
+    category, name = _classify_link(db, handle, full_name, bio, external_url, known_name, existing_website)
     if category == "website":
         return external_url, "instagram_bio", name
 
     if category == "linktree":
         for link in _scrape_outbound_links(external_url):
-            link_category, link_name = _classify_link(db, handle, full_name, bio, link)
+            link_category, link_name = _classify_link(db, handle, full_name, bio, link, known_name, existing_website)
             if link_category == "website":
                 return link, "instagram_linktree", link_name
 
@@ -469,16 +501,23 @@ def _rank_domain_candidates(handle: str, results: list[dict]) -> list[dict]:
 
 def _resolve_from_search(
     db: Session, handle: str, bio: str, external_url: str, saved_name: str,
+    existing_website: str = "",
 ) -> tuple[str | None, str | None, str]:
     """
     Returns (website, website_source, name). Candidates sent to the LLM are
     ranked DOMAINS (see _rank_domain_candidates), not raw top-N URLs — a
     domain's frequency across many result pages is itself a strong signal
     that a naive "first N URLs" cutoff would discard. name is derived from
-    the search results (using saved_name — whatever brand_instagram_
-    profile.py's own LINK_CLASSIFY tier may already have found earlier in
-    the same call — as a hint the LLM can confirm or correct), and is ""
-    whenever website is None.
+    the search results (using saved_name — the brand's already-known name if
+    any, else whatever brand_instagram_profile.py's own LINK_CLASSIFY tier
+    may already have found earlier in the same call — as a hint the LLM can
+    confirm or correct), and is "" whenever website is None.
+
+    existing_website (optional) is the brand's already-known website, if
+    any — passed as context so the LLM can weigh agreement/disagreement
+    with it (see WEBSITE_PICK_DEFAULT_PROMPT); the "confident" gate below is
+    what actually decides whether a caller is allowed to treat this as a
+    replacement for it.
     """
     query = f"{handle} official website"
     raw_results = _searxng_search(query)
@@ -497,6 +536,7 @@ def _resolve_from_search(
         _get_prompt(db, WEBSITE_PICK_PROMPT_NAME, WEBSITE_PICK_DEFAULT_PROMPT),
         handle=handle, bio=bio[:500], external_url=external_url or "none",
         saved_name=saved_name or "unknown",
+        existing_website=existing_website or "none",
         query=query, results=listing,
     )
     result = call_gpt_json(prompt, context=f"website_pick @{handle}")
@@ -526,6 +566,50 @@ def _resolve_from_search(
 
 #  Apply + commit
 
+def _apply_website(brand: BrandRaw, website: str | None, website_source: str | None) -> None:
+    """
+    Applies a newly-resolved website to `brand`, WITHOUT ever blindly
+    clobbering a website the brand already had:
+      - No website resolved this run + one already saved -> untouched.
+      - No website resolved this run + none already saved -> marked
+        has_official_website=False (still distinguishable from "never
+        attempted").
+      - A website WAS resolved (callers only ever pass one here when their
+        own LLM step was itself confident in it) but its domain matches
+        what's already saved -> nothing to change, already correct.
+      - A website WAS resolved and its domain differs from what's already
+        saved (or nothing was saved) -> replaces website/domain/
+        website_source. The only path that actually changes an existing
+        value.
+    """
+    if not website:
+        if not brand.website:
+            brand.has_official_website = False
+        return
+
+    website = _normalize_website(website)
+    new_domain = _extract_domain(website)
+    existing_domain = brand.domain or _extract_domain(brand.website or "")
+
+    if existing_domain and new_domain == existing_domain:
+        logger.info(
+            "Brand Instagram profile lookup: id=%s resolved website confirms existing domain %s — no change",
+            brand.id, existing_domain,
+        )
+        return
+
+    if existing_domain:
+        logger.info(
+            "Brand Instagram profile lookup: id=%s replacing website %s -> %s (source=%s)",
+            brand.id, brand.website, website, website_source,
+        )
+
+    brand.website = website
+    brand.domain = new_domain
+    brand.has_official_website = True
+    brand.website_source = website_source
+
+
 def _apply_result(
     db: Session, brand: BrandRaw, name: str, website: str | None, website_source: str | None,
 ) -> None:
@@ -533,39 +617,27 @@ def _apply_result(
         brand.name = name
         brand.name_normalized = normalize(name)
 
-    if website:
-        website = _normalize_website(website)
-        brand.website = website
-        brand.domain = _extract_domain(website)
-        brand.has_official_website = True
-        brand.website_source = website_source
-    else:
-        brand.has_official_website = False
-
+    _apply_website(brand, website, website_source)
     brand.instagram_profile_checked = True
 
     try:
         db.commit()
     except IntegrityError:
         # name_normalized collided with an existing brand (e.g. a properly
-        # seeded row for the same real-world brand already exists) — leave
-        # this row's NAME bare rather than crash the batch, but still mark
-        # checked. db.rollback() discards every staged change on `brand`,
-        # not just the colliding name (SQLAlchemy expires the whole
-        # instance) — website/domain/has_official_website/website_source
-        # are unrelated to the collision and must be re-applied here too
-        # (using `website`, already normalized above), or a name collision
-        # would silently wipe out perfectly good website data as well.
+        # seeded row for the same real-world brand already exists) — only
+        # reachable when brand.name was blank before this call (an already-
+        # named brand never re-assigns name above, so never re-triggers this
+        # constraint). Leave this row's NAME bare rather than crash the
+        # batch, but still mark checked. db.rollback() discards every staged
+        # change on `brand`, not just the colliding name (SQLAlchemy expires
+        # the whole instance) — website/domain/has_official_website/
+        # website_source are unrelated to the collision and must be
+        # re-applied here too, or a name collision would silently wipe out
+        # perfectly good website data as well.
         db.rollback()
         brand.name = None
         brand.name_normalized = None
-        if website:
-            brand.website = website
-            brand.domain = _extract_domain(website)
-            brand.has_official_website = True
-            brand.website_source = website_source
-        else:
-            brand.has_official_website = False
+        _apply_website(brand, website, website_source)
         brand.instagram_profile_checked = True
         db.commit()
         logger.warning(
@@ -579,36 +651,45 @@ def _apply_result(
 
 def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int | None = None) -> int:
     """
-    For bare brands_raw rows (name IS NULL, instagram_handle set) that
-    brand_wikidata_lookup.py already checked and failed to resolve
-    (instagram_wikidata_checked=True), scrape the brand's own Instagram
-    profile to backfill name and website — see module docstring for the
-    full resolution order.
+    Scrapes the brand's own Instagram profile to backfill name/website for
+    bare brands_raw rows, AND to verify/correct the website already saved
+    on named ones (e.g. from Wikidata) — see module docstring for the full
+    resolution order and the "existing website is never blindly overwritten"
+    rules.
 
-    Pass brand_id to target one specific brand directly — bypasses both the
-    instagram_wikidata_checked and instagram_profile_checked filters.
+    Batch mode (no brand_id) processes:
+      - Any row with instagram_profile_checked=False and a name already set
+        (nothing to wait on — there's no Wikidata reverse-lookup step for
+        these, they're eligible immediately).
+      - A bare row (name IS NULL) only once brand_wikidata_lookup.py has
+        already tried and failed to match it (instagram_wikidata_checked=
+        True) — keeps that more authoritative lookup as the first attempt
+        for bare rows instead of racing it.
 
-    Returns number of brand rows processed (resolved or not).
+    Pass brand_id to target one specific brand directly — bypasses both of
+    the above gates (and instagram_profile_checked) entirely.
+
+    Returns number of brand rows processed (resolved, corrected, or not).
     """
     if not APIFY_TOKEN:
         logger.warning("APIFY_TOKEN not set — skipping brand_instagram_profile enrichment")
         return 0
 
-    query = db.query(BrandRaw).filter(
-        BrandRaw.name.is_(None),
-        BrandRaw.instagram_handle.isnot(None),
-    )
+    query = db.query(BrandRaw).filter(BrandRaw.instagram_handle.isnot(None))
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:
         query = query.filter(
-            BrandRaw.instagram_wikidata_checked == True,
             BrandRaw.instagram_profile_checked == False,
+            or_(
+                BrandRaw.name.isnot(None),
+                BrandRaw.instagram_wikidata_checked == True,
+            ),
         )
 
     brands: list[BrandRaw] = query.limit(limit).all()
     if not brands:
-        logger.info("Brand Instagram profile lookup: no pending bare brands")
+        logger.info("Brand Instagram profile lookup: no pending brands")
         return 0
 
     logger.info("Brand Instagram profile lookup: processing %d brand(s)", len(brands))
@@ -637,13 +718,26 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
             bio          = profile.get("biography", "")
             external_url = profile.get("externalUrl", "")
 
-            website, website_source, name = _resolve_from_profile(db, handle, full_name, bio, external_url)
+            # Already-known name/website (e.g. from Wikidata, for a
+            # non-bare brand) — passed into both resolution tiers as
+            # context so the LLM can corroborate or correct them, per the
+            # module docstring's "existing website is never blindly
+            # overwritten" rule enforced in _apply_website.
+            known_name       = brand.name or ""
+            existing_website = brand.website or ""
+
+            website, website_source, name = _resolve_from_profile(
+                db, handle, full_name, bio, external_url, known_name, existing_website,
+            )
             if not website:
-                # name is always "" here — LINK_CLASSIFY only derives one
-                # when it finds "website" itself, which this branch means it
-                # didn't — passed through anyway as the search-pick prompt's
-                # saved_name hint, in case that ever changes.
-                website, website_source, name = _resolve_from_search(db, handle, bio, external_url, name)
+                # Prefer the brand's already-known name as the search-pick
+                # prompt's saved_name hint; fall back to whatever (if
+                # anything) the profile tier derived — it's always "" here
+                # in practice since LINK_CLASSIFY only derives a name when
+                # it lands on "website", which this branch means it didn't.
+                website, website_source, name = _resolve_from_search(
+                    db, handle, bio, external_url, known_name or name, existing_website,
+                )
 
             _apply_result(db, brand, name, website, website_source)
             # Read back from `brand` (not the local `website`/`name` vars) —

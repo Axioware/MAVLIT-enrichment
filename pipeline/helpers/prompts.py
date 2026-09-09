@@ -718,6 +718,8 @@ Instagram handle: {handle}
 Instagram display name (from Instagram, often messy marketing copy): {full_name}
 Bio: {bio}
 URL being classified: {url}
+Brand's already-known real name (if any, e.g. from Wikidata — a likely-correct hint to confirm or correct, not a fact to blindly repeat): {known_name}
+Brand's already-saved website (if any, e.g. from Wikidata — may already be correct, outdated, or wrong): {existing_website}
 
 Classify this URL into exactly one category:
 1. "website" — the brand's own official website/domain (online store, company site, product page hosted on the BRAND'S OWN domain) — not a social platform, link-aggregator tool, or third-party marketplace
@@ -730,7 +732,11 @@ Only classify as "website" if you are genuinely confident this specific URL is t
 
 Judge "website" by the DOMAIN, not the specific path or query string — a URL like "https://brand.com/register?ref=800000016" or "https://brand.com/shop/product123" is still the brand's own website (category "website"); a tracking parameter, referral code, or deep link does not make it a linktree or unknown. But a URL whose domain is a third-party marketplace (amazon.com, etsy.com, ebay.com, walmart.com, etc.) is ALWAYS "marketplace", never "website" — no matter how specific or branded-looking the path is (e.g. "amazon.com/stores/page/8A8B3EB2-E356-4C27-B4B2-12EEFCEB05CF" is "marketplace", not "website"). Only the domain root is kept once classified as "website", so don't let the path/query change your answer for a genuine brand domain.
 
-If, and only if, category is "website": also give the brand's real, clean name in the "name" field. The Instagram display name above is often marketing copy, not the real name — it can include emojis, taglines, "Official", "| Shop Now", pipe-separated slogans, or ALL CAPS styling. Derive the actual brand name from the display name, bio, and this website's own domain/identity together (e.g. domain "jpfans.com" supports a name like "JPfans"), preserving deliberate stylization (e.g. "adidas" lowercase, "eBay").
+Use the "already-known" fields above as context, not a shortcut:
+- If this URL's domain matches the already-saved website, that's a strong confirming signal this is genuinely "website" (not proof by itself — still judge the URL/bio on their own merits).
+- If it differs from the already-saved website, that does NOT automatically make this URL wrong, nor does it mean the already-saved one was wrong — a brand can own more than one domain, and a previously saved website can itself be outdated or incorrect. Classify this URL on its own evidence.
+
+If, and only if, category is "website": also give the brand's real, clean name in the "name" field. The Instagram display name above is often marketing copy, not the real name — it can include emojis, taglines, "Official", "| Shop Now", pipe-separated slogans, or ALL CAPS styling. Derive the actual brand name from the display name, bio, and this website's own domain/identity together (e.g. domain "jpfans.com" supports a name like "JPfans"), preserving deliberate stylization (e.g. "adidas" lowercase, "eBay"). If an already-known real name was given above, treat it as a strong hint — repeat it back unchanged if this website supports it or doesn't contradict it, correct it only if this website's own evidence clearly shows it's wrong.
 
 If category is NOT "website" (social/linktree/marketplace/unknown), "name" MUST be an empty string — do not guess a name for a link that isn't the brand's own site.
 
@@ -746,6 +752,7 @@ Instagram handle: {handle}
 Instagram bio: {bio}
 Instagram external URL (if any): {external_url}
 Currently saved brand name (if any): {saved_name}
+Currently saved website for this brand (if any, e.g. from Wikidata — may already be correct, outdated, or wrong): {existing_website}
 
 Search results for "{query}" (already deduplicated to one representative URL per domain — social/platform domains like Instagram, YouTube, Linktree, etc. have already been removed, and each is annotated with how many times that domain appeared across the full raw result set):
 {results}
@@ -755,6 +762,8 @@ Decide which ONE of the results above (if any) is most likely the brand's own of
 Judge by the DOMAIN of each result, not its specific path or query string — a result URL like "https://brand.com/register?ref=800000016" is still a valid pick if brand.com is genuinely the brand's own domain; a tracking parameter or deep link doesn't disqualify it. Only the domain root is kept once picked.
 
 IMPORTANT — do not pick just because it's the best of a mediocre set. Being the least-bad option among the candidates is NOT the same as being confidently the brand's own official website. A personal blog about the brand, a fan-run page, a syndicated directory listing, an app landing page, or an unofficial reseller are all still NOT the official website, even if nothing better is on the list and even if they're clearly related to the brand. If you are not genuinely confident any single result is the real official site, set "confident" to false and index to 0 — reporting no website found is the correct answer far more often than guessing wrong, and is strongly preferred over a confident-sounding wrong pick.
+
+Weighing the currently saved website (if one is given above): if its domain also appears among the candidates and nothing else looks more clearly correct, that agreement is a good reason to confidently pick it. If NONE of the candidates is confidently the real official site, and a currently saved website was already given, lean toward "confident": false rather than replacing a plausibly-correct existing website with a weaker guess — a wrong replacement is worse than leaving a decent existing value alone. Only pick a result on a DIFFERENT domain than the currently saved website when the evidence genuinely shows that different domain is correct (not merely different).
 
 If, and only if, "confident" is true (which requires index to not be 0): also give the brand's real, clean name in the "name" field, using the search result titles/snippets together with the saved name. If "Currently saved brand name" above is "unknown" or empty, determine the name from the search results. If a saved name IS given, treat it as a likely-correct hint — repeat it back unchanged if the results support it or don't contradict it, but correct it to the accurate name instead if the results clearly show the saved name is wrong.
 

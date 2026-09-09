@@ -16,9 +16,10 @@ End-to-end reverse-engineering pipeline:
           scores the creator/brand/post evidence rows step 1 just wrote
           into test_creator_brand_partnership_posts)
        3. brand_wikidata_lookup.py
-       4. brand_instagram_profile.py (only picks up what step 3 left bare —
-          see its own docstring for the Instagram bio/linktree/Google-search
-          resolution order)
+       4. brand_instagram_profile.py (backfills what step 3 left bare, AND
+          verifies/corrects the website on brands step 3 already resolved —
+          see its own docstring for the resolution order and exactly when
+          an existing website is eligible to be replaced)
        5. wikidata_socials.py
        6. shopify_detect.py
        7. tranco.py

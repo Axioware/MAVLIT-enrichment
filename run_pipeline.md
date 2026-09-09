@@ -263,7 +263,7 @@ enrich_brand_wikidata_lookup(db, limit=50)
 db.close()
 "
     
-## brand_instagram_profile (Instagram bio/linktree/Google-search website resolution for bare brands)
+## brand_instagram_profile (Instagram bio/linktree/Google-search website resolution — backfills bare brands, verifies/corrects the website on already-named ones)
 python3 -c "
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 from dotenv import load_dotenv; load_dotenv()

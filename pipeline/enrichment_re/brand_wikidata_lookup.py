@@ -59,25 +59,51 @@ def _extract_domain(url: str) -> str:
         return ""
 
 
+# ccTLDs treated the same as a plain global domain when picking among
+# multiple P856 values — a brand's US/Canada site is exactly as acceptable
+# as its .com, and both are preferred over e.g. a Japan/Germany regional
+# mirror.
+_PREFERRED_COUNTRY_TLDS = frozenset(["us", "ca"])
+_GENERIC_TLDS = frozenset(["com", "org", "net", "io"])
+
+
+def _domain_country_tld(domain: str) -> str | None:
+    """
+    Returns the ccTLD label that makes this domain country-specific (e.g.
+    "de"/"jp"/"br" for brand.de / brand.co.jp / brand.com.br), or None for a
+    plain global domain (brand.com, brand.org, ...). In a compound suffix
+    (co.uk, com.br, co.jp, ...) the LAST label is the real country code —
+    the one before it (co/com/org/...) is just a generic category, not a
+    signal — so this only needs to check the final label regardless of how
+    many parts the domain has.
+    """
+    parts = domain.split(".")
+    if not parts:
+        return None
+    tld = parts[-1]
+    return None if tld in _GENERIC_TLDS else tld
+
+
 def _website_score(url: str) -> int:
     """
     Wikidata sometimes lists multiple P856 (official website) values for one
     entity with no reliable rank/language distinction — e.g. Maybelline
     (Q1351054) has both maybelline.com and the Brazil-specific
-    maybelline.com.br at the same "normal" rank. Prefer a generic top-level
-    domain (.com/.org/.net/.io) over one with a country-code suffix
-    (.com.br, .co.uk, etc.), which is almost always the brand's global site
-    rather than a regional mirror.
+    maybelline.com.br at the same "normal" rank. Prefer:
+      2 — a plain global domain (.com/.org/.net/.io) OR a US/Canada one
+          (.us/.ca, including a compound like brand.com.us) — this pipeline
+          wants a US/Canada or global site over any other country's.
+      1 — any other country-specific domain (brand.de, brand.co.jp,
+          brand.com.br, ...) — still usable if it's the only P856 value on
+          offer, just never preferred over a US/Canada/global one.
     """
     domain = _extract_domain(url)
     if not domain:
         return -1
-    parts = domain.split(".")
-    if len(parts) == 2 and parts[-1] in ("com", "org", "net", "io"):
+    country = _domain_country_tld(domain)
+    if country is None or country in _PREFERRED_COUNTRY_TLDS:
         return 2
-    if len(parts) == 2:
-        return 1
-    return 0
+    return 1
 
 
 def _fetch_by_instagram_handles(handles: list[str]) -> dict[str, dict]:
