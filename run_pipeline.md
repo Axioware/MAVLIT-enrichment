@@ -332,10 +332,25 @@ enrich_geo_reach(db, limit=1, niche='fashion')
 db.close()
 "
 
+or (filter by the NICHE OF THE CONTENT CREATOR who discovered the brand — i.e. content_creator_re.niche via
+test_creator_brand_partnership_posts — rather than the brand's own brands_raw.niche; useful for
+reverse-engineering-sourced brands that don't carry their own niche)
+
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.geo_reach.geo_reach import enrich_geo_reach
+db = SessionLocal()
+enrich_geo_reach(db, limit=1, creator_niche='Fitness')
+db.close()
+"
+
 or (CLI form)
 
 python3 -m pipeline.enrichment.geo_reach.geo_reach --limit 1
 python3 -m pipeline.enrichment.geo_reach.geo_reach --brand-id 5318
+python3 -m pipeline.enrichment.geo_reach.geo_reach --limit 1 --creator-niche Fitness
 
 
 ## TASKS

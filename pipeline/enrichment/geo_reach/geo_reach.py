@@ -62,7 +62,7 @@ from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
 from config import OPENAI_KEY
-from pipeline.db import BrandRaw, InstagramPost, SessionLocal
+from pipeline.db import BrandRaw, ContentCreatorRE, InstagramPost, SessionLocal, TestCreatorBrandPartnershipPost
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 
 logger = logging.getLogger(__name__)
@@ -426,8 +426,19 @@ def enrich_geo_reach(
     limit: int | None = None,
     brand_id: int | None = None,
     niche: str | None = None,
+    creator_niche: str | None = None,
 ) -> int:
-    """Score geographic reach for pending brands_raw rows that have a website."""
+    """
+    Score geographic reach for pending brands_raw rows that have a website.
+
+    niche filters on the brand's OWN brands_raw.niche. creator_niche instead
+    filters on the niche of the content_creator_re row(s) that discovered
+    this brand — via test_creator_brand_partnership_posts.brand_raw_id ->
+    content_creator_re.niche — for reverse-engineering-sourced brands that
+    don't necessarily carry their own niche but were found through a
+    creator in a given niche (e.g. every brand a "fitness" creator was
+    caught partnering with). Both can be combined (AND) if given together.
+    """
     if not OPENAI_KEY:
         logger.warning("OPENAI_KEY not set — skipping geo reach scoring")
         return 0
@@ -441,6 +452,17 @@ def enrich_geo_reach(
         query = query.filter(BrandRaw.id == brand_id)
     if niche is not None:
         query = query.filter(BrandRaw.niche == niche)
+    if creator_niche is not None:
+        creator_brand_ids = (
+            db.query(TestCreatorBrandPartnershipPost.brand_raw_id)
+            .join(
+                ContentCreatorRE,
+                TestCreatorBrandPartnershipPost.content_creator_re_id == ContentCreatorRE.id,
+            )
+            .filter(ContentCreatorRE.niche == creator_niche)
+            .distinct()
+        )
+        query = query.filter(BrandRaw.id.in_(creator_brand_ids))
     if limit is not None:
         query = query.limit(limit)
 
@@ -464,11 +486,17 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="Max number of brands to score in this run.")
     parser.add_argument("--brand-id", type=int, default=None, dest="brand_id", help="Limit to one brands_raw.id.")
     parser.add_argument("--niche", type=str, default=None, help="Limit to one brands_raw.niche value.")
+    parser.add_argument(
+        "--creator-niche", type=str, default=None, dest="creator_niche",
+        help="Limit to brands discovered via a content_creator_re row with this niche.",
+    )
     args = parser.parse_args()
 
     db = SessionLocal()
     try:
-        updated = enrich_geo_reach(db, limit=args.limit, brand_id=args.brand_id, niche=args.niche)
+        updated = enrich_geo_reach(
+            db, limit=args.limit, brand_id=args.brand_id, niche=args.niche, creator_niche=args.creator_niche,
+        )
         print(f"geo_reach: updated={updated}")
     finally:
         db.close()
