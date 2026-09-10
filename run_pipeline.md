@@ -114,7 +114,7 @@ from pipeline.db import SessionLocal
 from pipeline.enrichment.wikidata_socials import enrich_wikidata_socials
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 db = SessionLocal()
-enrich_wikidata_socials(db, limit=1)
+enrich_wikidata_socials(db, limit=1000)
 db.close()
 "
 
@@ -137,7 +137,7 @@ from pipeline.db import SessionLocal
 from pipeline.enrichment.shopify_detect import enrich_shopify
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 db = SessionLocal()
-enrich_shopify(db, limit=1)
+enrich_shopify(db, limit=1000)
 db.close()
 "
 
@@ -161,7 +161,7 @@ from pipeline.db import SessionLocal
 from pipeline.enrichment.tranco import enrich_tranco
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 db = SessionLocal()
-enrich_tranco(db, limit=1)
+enrich_tranco(db, limit=1000)
 db.close()
 "
 
