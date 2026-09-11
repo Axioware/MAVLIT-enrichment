@@ -282,7 +282,7 @@ from dotenv import load_dotenv; load_dotenv()
 from pipeline.db import SessionLocal
 from pipeline.enrichment_re.brand_instagram_profile import enrich_brand_instagram_profile
 db = SessionLocal()
-enrich_brand_instagram_profile(db, limit=1)
+enrich_brand_instagram_profile(db, limit=100)
 db.close()
 "
 
