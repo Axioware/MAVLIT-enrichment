@@ -1,3 +1,4 @@
+-- brands per niche for the specified content creators(BETWEEN 169 AND 182)(.csv query)
 WITH best_per_brand AS (
   SELECT DISTINCT ON (tcbp.brand_raw_id)
     ccr.username AS creator_username,
@@ -34,7 +35,7 @@ ORDER BY
   brand_name ASC;
 
 
--- count
+-- count for brands per niche for the specified content creators(BETWEEN 0 AND 182)
 WITH best_per_brand AS (
   SELECT DISTINCT ON (tcbp.brand_raw_id)
     ccr.username AS creator_username,
@@ -66,7 +67,7 @@ WHERE niche IN ('Music', 'Beauty', 'Fitness', 'Health')
 GROUP BY niche
 ORDER BY distinct_brand_count DESC;
 
-
+// Example output:
   -[ RECORD 1 ]-----+--------
 niche             | Beauty
 partnership_count | 47
@@ -77,7 +78,11 @@ partnership_count | 19
 niche             | Music
 partnership_count | 18
 
--- remove other creator brands 
+
+
+
+-- same query as above but remove brands that are also associated with other content creatr
+--example brand A is associated with content creator 1 and content creator 2, then brand A will be removed from the result set if you want to see creator 2
 WITH best_per_brand AS (
   SELECT DISTINCT ON (tcbp.brand_raw_id)
     ccr.username AS creator_username,
