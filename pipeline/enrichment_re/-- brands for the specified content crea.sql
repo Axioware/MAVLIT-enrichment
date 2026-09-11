@@ -11,7 +11,7 @@ WITH best_per_brand AS (
     ON tcbp.content_creator_re_id = ccr.id
   JOIN brands_raw br
     ON br.id = tcbp.brand_raw_id
-  WHERE ccr.id BETWEEN 128 AND 168
+  WHERE ccr.id BETWEEN 169 AND 182
     AND tcbp.sponsorship_confidence >= 90
     AND br.refferls = false
     AND tcbp.post_timestamp >= '2026-01-01'
@@ -48,7 +48,7 @@ WITH best_per_brand AS (
     ON tcbp.content_creator_re_id = ccr.id
   JOIN brands_raw br
     ON br.id = tcbp.brand_raw_id
-  WHERE ccr.id BETWEEN 0 AND 168
+  WHERE ccr.id BETWEEN 0 AND 182
     AND tcbp.sponsorship_confidence >= 90
     AND br.refferls = false
     AND tcbp.post_timestamp >= '2026-01-01'
@@ -92,7 +92,7 @@ WITH best_per_brand AS (
     ON tcbp.content_creator_re_id = ccr.id
   JOIN brands_raw br
     ON br.id = tcbp.brand_raw_id
-  WHERE ccr.id BETWEEN 128 AND 168
+  WHERE ccr.id BETWEEN 169 AND 182
     AND tcbp.sponsorship_confidence >= 90
     AND br.refferls = false
     AND tcbp.post_timestamp >= '2026-01-01'
