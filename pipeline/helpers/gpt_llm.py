@@ -33,10 +33,15 @@ def fill_template(template: str, **kwargs) -> str:
     return re.sub(r'\{(\w+)\}', lambda m: kwargs.get(m.group(1), m.group(0)), template)
 
 
-def call_gpt_json(prompt: str, context: str = "") -> dict:
+def call_gpt_json(prompt: str, context: str = "", timeout: float = _TIMEOUT) -> dict:
     """
     Send prompt to OpenAI (gpt-5-mini) and parse the JSON response.
     Returns {} on any failure so callers can apply their own fallback.
+
+    timeout overrides the default 60s — pass a larger value for prompts
+    with an unusually large payload (e.g. ranking up to 50 candidates in
+    apollo_contacts.py, which can genuinely take longer than 60s and would
+    otherwise silently fall back to non-LLM ranking every time it does).
     """
     if not OPENAI_KEY:
         logger.warning("OPENAI_KEY not set — skipping LLM call%s", f" ({context})" if context else "")
@@ -50,7 +55,7 @@ def call_gpt_json(prompt: str, context: str = "") -> dict:
                 "messages": [{"role": "user", "content": prompt}],
                 "response_format": {"type": "json_object"},
             },
-            timeout=_TIMEOUT,
+            timeout=timeout,
         )
         resp.raise_for_status()
         raw = resp.json()["choices"][0]["message"]["content"].strip()

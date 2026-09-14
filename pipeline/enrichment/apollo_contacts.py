@@ -101,6 +101,16 @@ _WEBHOOK_RESULT_URL = "https://api.apollo.io/api/v1/webhook_result/{}"
 _PHONE_WEBHOOK_PLACEHOLDER = "https://example.com/apollo-phone-webhook-unused"
 _HEADERS    = {"Content-Type": "application/json", "X-Api-Key": APOLLO_API_KEY}
 _TIMEOUT    = 20
+# call_gpt_json's own default (60s) is tuned for typical prompts — ranking
+# up to 50 candidates in one call is a genuinely larger payload (the model
+# has to generate reasoning for all 50 picks) and can take longer than
+# that, which would otherwise make this silently fall back to
+# keyword/order ranking (see _rank_all_candidates) far more often than
+# actual model failures warrant. Confirmed live: a full 50-candidate batch
+# for a well-known brand (Nike) took ~98s — 120s still isn't reliably
+# enough margin above that, so this is set generously above the observed
+# worst case rather than just above the average.
+_RANK_TIMEOUT = 180.0
 _SEARCH_PER_PAGE = 50   # search is free — no credit reason to keep this small
 _ENRICH_TOP_N = 5       # only this many ranked candidates get the paid email enrich call
 _PHONE_TOP_N = 2        # of those, only this many (rank <= this) also get phone reveal — extra ~8 credits each
@@ -320,7 +330,7 @@ def _rank_all_candidates(db: Session, people: list[dict], brand_name: str, fallb
         candidates=json.dumps(candidates, indent=2),
     )
 
-    result = call_gpt_json(prompt, context=f"apollo full ranking for {brand_name}")
+    result = call_gpt_json(prompt, context=f"apollo full ranking for {brand_name}", timeout=_RANK_TIMEOUT)
     picks = result.get("picks", []) if isinstance(result, dict) else []
 
     by_id = {p.get("id"): p for p in people}
