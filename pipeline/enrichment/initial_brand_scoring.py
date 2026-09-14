@@ -567,7 +567,6 @@ def run_brand_scoring(db: Session, limit: int = 500, brand_id: int | None = None
             db.query(BrandRaw)
             .filter(
                 BrandRaw.has_official_website == True,
-                BrandRaw.wikidata_enriched  == True,
                 BrandRaw.shopify_checked    == True,
                 BrandRaw.tranco_checked     == True,
                 BrandRaw.meta_ads_fetched   == True,
