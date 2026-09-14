@@ -484,6 +484,16 @@ class BrandContact(Base):
 
     fetched_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
+    #  LinkedIn employment verification (pipeline/enrichment/linkedin_verify.py)
+    # NULL until a verification attempt has been made against linkedin_url.
+    linkedin_verified_at = Column(TIMESTAMP(timezone=True))
+    # True/False only once linkedin_verified_at is set: whether the LLM
+    # judged the LinkedIn profile's current employer to be the same company
+    # as this brand. Stays NULL when verification itself failed
+    # (private/deleted profile, actor error) — distinct from a checked
+    # "no longer there" (False).
+    still_at_brand = Column(Boolean)
+
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
 
     def __str__(self) -> str:

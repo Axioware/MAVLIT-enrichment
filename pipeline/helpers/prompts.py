@@ -773,3 +773,24 @@ Reply ONLY with this JSON object, no extra text:
 {"index": 0, "confident": false, "name": "", "reason": "short one-line reason"}
 Use the 1-based index of the correct result from the numbered list above only when confident is true; use index 0 and confident: false whenever you are not genuinely sure any result is the brand's real official website.\
 """
+
+
+#  pipeline/enrichment/linkedin_verify.py
+
+LINKEDIN_COMPANY_MATCH_PROMPT_NAME = "linkedin_company_match"
+LINKEDIN_COMPANY_MATCH_DEFAULT_PROMPT = """\
+You are checking whether a person's current employer, as shown on their public LinkedIn profile, is still the same company as a specific brand — to confirm whether a previously-found contact at that brand is still there.
+
+Brand name: {brand_name}
+Brand domain (if known): {brand_domain}
+
+LinkedIn profile's current employer: {current_company}
+LinkedIn current-employer company page URL (if any): {current_company_url}
+
+Decide whether the LinkedIn current employer is the SAME real-world company as the brand — allowing for naming differences that don't change the underlying company (legal suffixes like "Inc"/"LLC"/"Ltd"/"Co", punctuation, capitalization, a parent/holding company name being used interchangeably with a well-known sub-brand it's known to own, regional divisions of the same company). Do NOT match a different, unrelated company just because it's in the same industry or has a superficially similar name (e.g. "Nike" is not "Nike Foundation" is not "Nike Golf" unless you're confident those are genuinely the same operating entity being pitched).
+
+If the current employer is missing/empty, that means LinkedIn doesn't show one (private, unemployed, hidden) — answer "match": false, since there's nothing to confirm they're still there.
+
+Reply ONLY with this JSON object, no extra text:
+{"match": false, "reason": "short one-line reason"}
+"""

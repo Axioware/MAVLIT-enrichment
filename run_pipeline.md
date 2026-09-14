@@ -238,6 +238,30 @@ print('processed:', processed)
 db.close()
 "
 
+## run linkedin_verify.py (checks Apollo-enriched contacts still work at the brand, via LinkedIn)
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.linkedin_verify import run_linkedin_verify
+db = SessionLocal()
+processed = run_linkedin_verify(db, limit=20)
+print('processed:', processed)
+db.close()
+"
+
+OR (target one specific brand_contacts row by its id — bypasses the is_enriched/already-verified filters)
+
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.linkedin_verify import run_linkedin_verify
+db = SessionLocal()
+run_linkedin_verify(db, contact_id=123)
+db.close()
+"
+
 
 # Reverse Engineering 
 

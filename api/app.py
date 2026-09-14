@@ -332,6 +332,12 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS geo_reach_locations JSONB",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS geo_reach_pages_scraped JSONB",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS geo_reach_checked BOOLEAN NOT NULL DEFAULT false",
+        # LinkedIn employment verification — pipeline/enrichment/linkedin_verify.py
+        "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS linkedin_verified_at TIMESTAMPTZ",
+        "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS still_at_brand BOOLEAN",
+        # linkedin_current_company (raw employer name from LinkedIn) dropped —
+        # still_at_brand's LLM verdict is kept, the raw string isn't.
+        "ALTER TABLE brand_contacts DROP COLUMN IF EXISTS linkedin_current_company",
     ]
     with engine.connect() as conn:
         for sql in stmts:
