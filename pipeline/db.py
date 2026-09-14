@@ -494,6 +494,17 @@ class BrandContact(Base):
     # "no longer there" (False).
     still_at_brand = Column(Boolean)
 
+    #  Email deliverability verification (pipeline/enrichment/hunter_verify.py)
+    # NULL until a verification attempt has been made against email.
+    hunter_verified_at = Column(TIMESTAMP(timezone=True))
+    # Hunter.io's own classification: "valid", "invalid", "accept_all",
+    # "webmail", "disposable", or "unknown". NULL if the API call itself
+    # failed (not the same as a checked "unknown").
+    hunter_status = Column(Text)
+    # Hunter.io's 0-100 deliverability confidence score. NULL if the API
+    # call itself failed.
+    hunter_score = Column(Integer)
+
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
 
     def __str__(self) -> str:

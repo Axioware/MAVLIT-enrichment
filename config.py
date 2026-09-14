@@ -33,6 +33,10 @@ YOUTUBE_API_KEY_11 = os.getenv("YOUTUBE_API_KEY_11", "")
 YOUTUBE_API_KEY_12 = os.getenv("YOUTUBE_API_KEY_12", "")
 APIFY_TOKEN       = os.getenv("APIFY_TOKEN", "")
 
+# Hunter.io Email Verifier — pipeline/enrichment/hunter_verify.py, checks
+# deliverability of emails Apollo already found and saved in brand_contacts.
+HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
+
 # Local SearXNG instance — fallback website discovery in
 # pipeline/enrichment_re/brand_instagram_profile.py when a brand's Instagram
 # bio link doesn't resolve to a website. Requires JSON output enabled on the

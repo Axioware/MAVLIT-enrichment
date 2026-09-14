@@ -262,6 +262,30 @@ run_linkedin_verify(db, contact_id=123)
 db.close()
 "
 
+## run hunter_verify.py (checks Apollo-found emails are actually deliverable, via Hunter.io)
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.hunter_verify import run_hunter_verify
+db = SessionLocal()
+processed = run_hunter_verify(db, limit=50)
+print('processed:', processed)
+db.close()
+"
+
+OR (target one specific brand_contacts row by its id — bypasses the already-verified filter, forces a re-check)
+
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.hunter_verify import run_hunter_verify
+db = SessionLocal()
+run_hunter_verify(db, contact_id=123)
+db.close()
+"
+
 
 # Reverse Engineering 
 

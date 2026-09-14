@@ -338,6 +338,10 @@ def _run_migrations() -> None:
         # linkedin_current_company (raw employer name from LinkedIn) dropped —
         # still_at_brand's LLM verdict is kept, the raw string isn't.
         "ALTER TABLE brand_contacts DROP COLUMN IF EXISTS linkedin_current_company",
+        # Email deliverability verification — pipeline/enrichment/hunter_verify.py
+        "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS hunter_verified_at TIMESTAMPTZ",
+        "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS hunter_status TEXT",
+        "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS hunter_score INTEGER",
     ]
     with engine.connect() as conn:
         for sql in stmts:
