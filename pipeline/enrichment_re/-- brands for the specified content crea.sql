@@ -15,6 +15,8 @@ WITH best_per_brand AS (
   WHERE ccr.id BETWEEN 1 AND 208
     AND tcbp.sponsorship_confidence >= 90
     AND br.refferls = false
+    AND br.geo_reach_score IS NOT NULL
+    AND br.geo_reach_score BETWEEN 0 AND 40
     AND tcbp.post_timestamp >= '2026-01-01'
     AND tcbp.post_timestamp < '2027-01-01'
   ORDER BY
@@ -49,9 +51,11 @@ WITH best_per_brand AS (
     ON tcbp.content_creator_re_id = ccr.id
   JOIN brands_raw br
     ON br.id = tcbp.brand_raw_id
-  WHERE ccr.id BETWEEN 0 AND 182
+  WHERE ccr.id BETWEEN 1 AND 208
     AND tcbp.sponsorship_confidence >= 90
     AND br.refferls = false
+    AND br.geo_reach_score IS NOT NULL
+    AND br.geo_reach_score BETWEEN 0 AND 40
     AND tcbp.post_timestamp >= '2026-01-01'
     AND tcbp.post_timestamp < '2027-01-01'
   ORDER BY
