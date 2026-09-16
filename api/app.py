@@ -22,6 +22,7 @@ from api.brands import router as brands_router
 from api.dashboard import router as dashboard_api_router
 from api.pitches import router as pitches_router
 from api.saved_brands import router as saved_brands_router
+from api.brand_catalog import router as brand_catalog_router
 from pipeline.matching.matcher import get_matches
 from pipeline.enrichment.creator_signals import compute_creator_signals
 from pipeline.helpers.passwords import hash_password
@@ -412,6 +413,7 @@ app.include_router(saved_brands_router)
 app.include_router(pitches_router)
 app.include_router(dashboard_api_router)
 app.include_router(advisory_router)
+app.include_router(brand_catalog_router)
 
 # Lets a separate frontend app (different domain, see FRONTEND_ORIGINS in
 # config.py) call this API with credentials (cookies) from the browser.
@@ -1026,6 +1028,11 @@ def matches_page():
 @app.get("/add-creators", include_in_schema=False)
 def add_creators_page():
     return FileResponse("frontend/add-creators.html")
+
+
+@app.get("/brand-catalog", include_in_schema=False)
+def brand_catalog_page():
+    return FileResponse("frontend/brand-catalog.html")
 
 
 class SeedJobResponse(BaseModel):

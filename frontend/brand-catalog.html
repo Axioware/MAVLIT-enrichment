@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/posthog-init.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MAVLIT Pipeline</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    /*  Nav  */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      height: 56px;
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+    }
+    .nav-brand {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      color: #38bdf8;
+      text-decoration: none;
+    }
+    .nav-link {
+      font-size: .85rem;
+      color: #94a3b8;
+      text-decoration: none;
+      padding: .35rem .75rem;
+      border-radius: 6px;
+      transition: background .15s, color .15s;
+    }
+    .nav-link:hover { background: #334155; color: #e2e8f0; }
+    .nav-right { display: flex; align-items: center; gap: .75rem; }
+
+    /*  Layout  */
+    main {
+      max-width: 980px;
+      margin: 3rem auto;
+      padding: 0 1.5rem;
+    }
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: .4rem;
+    }
+    .subtitle {
+      color: #64748b;
+      font-size: .9rem;
+      margin-bottom: 2rem;
+    }
+
+    /*  Search bar  */
+    .search-row {
+      display: flex;
+      gap: .75rem;
+      margin-bottom: 1.5rem;
+    }
+    .search-row input, .search-row select {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: .65rem 1rem;
+      color: #f1f5f9;
+      font-size: .9rem;
+      outline: none;
+      transition: border-color .15s;
+    }
+    .search-row input { flex: 1; }
+    .search-row input:focus, .search-row select:focus { border-color: #38bdf8; }
+    .search-row select {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2364748b' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right .85rem center;
+      padding-right: 2rem;
+      min-width: 160px;
+    }
+
+    /*  Brand list  */
+    .brand-list { display: flex; flex-direction: column; gap: .6rem; }
+    .brand-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: .9rem 1.25rem;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .brand-row:hover { border-color: #38bdf8; background: #24344d; }
+    .brand-row-name { font-weight: 600; color: #f1f5f9; font-size: .95rem; }
+    .brand-row-meta { color: #64748b; font-size: .8rem; margin-top: .15rem; }
+    .brand-row-niche {
+      font-size: .75rem;
+      color: #38bdf8;
+      background: rgba(56,189,248,.1);
+      border: 1px solid rgba(56,189,248,.25);
+      border-radius: 999px;
+      padding: .2rem .65rem;
+      white-space: nowrap;
+    }
+
+    .empty-state { color: #475569; font-size: .9rem; text-align: center; padding: 3rem 0; }
+
+    .pager { display: flex; justify-content: center; gap: .75rem; margin-top: 1.5rem; }
+    .pager button {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #cbd5e1;
+      border-radius: 8px;
+      padding: .5rem 1.1rem;
+      font-size: .85rem;
+      cursor: pointer;
+      transition: border-color .15s;
+    }
+    .pager button:hover:not(:disabled) { border-color: #38bdf8; }
+    .pager button:disabled { opacity: .4; cursor: not-allowed; }
+    .pager-info { color: #64748b; font-size: .8rem; align-self: center; }
+
+    /*  Detail view  */
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      color: #38bdf8;
+      text-decoration: none;
+      font-size: .85rem;
+      margin-bottom: 1.5rem;
+      cursor: pointer;
+    }
+    .back-link:hover { text-decoration: underline; }
+
+    .brand-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: .5rem;
+    }
+    .brand-title { font-size: 1.6rem; font-weight: 700; color: #f1f5f9; }
+    .brand-domain { color: #64748b; font-size: .85rem; margin-top: .25rem; }
+    .brand-domain a { color: #38bdf8; text-decoration: none; }
+    .brand-domain a:hover { text-decoration: underline; }
+
+    .pill-row { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0 2rem; }
+    .pill {
+      font-size: .75rem;
+      color: #cbd5e1;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 999px;
+      padding: .3rem .8rem;
+    }
+    .pill b { color: #f1f5f9; }
+
+    .section-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #f1f5f9;
+      margin: 2rem 0 1rem;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    .section-title .count {
+      font-size: .75rem;
+      color: #64748b;
+      font-weight: 400;
+    }
+
+    /*  Ad card — same layout for every brand  */
+    .ad-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+    .ad-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+    }
+    .ad-card-page { font-weight: 600; color: #f1f5f9; font-size: .9rem; margin-bottom: .3rem; }
+    .ad-card-dates { color: #64748b; font-size: .75rem; margin-bottom: .75rem; }
+    .ad-platforms { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .75rem; }
+    .ad-platform-pill {
+      font-size: .68rem;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+      color: #94a3b8;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 5px;
+      padding: .15rem .45rem;
+    }
+    .ad-body {
+      color: #cbd5e1;
+      font-size: .82rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      flex: 1;
+      margin-bottom: .9rem;
+      display: -webkit-box;
+      -webkit-line-clamp: 6;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .ad-body.expanded { -webkit-line-clamp: unset; }
+    .ad-body-toggle {
+      color: #38bdf8;
+      font-size: .75rem;
+      cursor: pointer;
+      margin-bottom: .9rem;
+      display: inline-block;
+    }
+    .ad-stats { display: flex; gap: 1rem; border-top: 1px solid #334155; padding-top: .75rem; }
+    .ad-stat { flex: 1; }
+    .ad-stat-label { font-size: .65rem; color: #475569; text-transform: uppercase; letter-spacing: .03em; }
+    .ad-stat-value { font-size: .8rem; color: #e2e8f0; font-weight: 600; margin-top: .15rem; }
+
+    .no-ads {
+      color: #475569;
+      font-size: .85rem;
+      background: #1e293b;
+      border: 1px dashed #334155;
+      border-radius: 10px;
+      padding: 1.5rem;
+      text-align: center;
+    }
+
+    .loading { color: #475569; font-size: .9rem; text-align: center; padding: 2rem 0; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a class="nav-brand" href="/">&#9889; MAVLIT Pipeline</a>
+  <div class="nav-right">
+    <a class="nav-link" href="/">Brand Seeder</a>
+    <a class="nav-link" href="/add-creators">Add Creators</a>
+    <a class="nav-link" href="/brand-catalog">Brand Catalog</a>
+    <a class="nav-link" href="/admin" target="_blank">Database Admin &#8599;</a>
+  </div>
+</nav>
+
+<main>
+  <div id="listView">
+    <h1>Brand Catalog</h1>
+    <p class="subtitle">Every brand in <code>brands_raw</code> — open one to see real Meta Ad examples pulled from <code>meta_ads</code>.</p>
+
+    <div class="search-row">
+      <input id="searchInput" type="text" placeholder="Search brand name..." />
+      <select id="nicheSelect"><option value="">All niches</option></select>
+    </div>
+
+    <div class="brand-list" id="brandList"></div>
+    <div class="pager" id="pager" style="display:none">
+      <button id="prevBtn">&larr; Prev</button>
+      <span class="pager-info" id="pagerInfo"></span>
+      <button id="nextBtn">Next &rarr;</button>
+    </div>
+  </div>
+
+  <div id="detailView" style="display:none"></div>
+</main>
+
+<script>
+  const PAGE_SIZE = 30;
+  let offset = 0;
+  let total = 0;
+  let searchTimer = null;
+
+  function esc(s) {
+    return (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function loadNiches() {
+    fetch('/api/brand-catalog/niches')
+      .then(r => r.json())
+      .then(data => {
+        const sel = document.getElementById('nicheSelect');
+        for (const n of data.niches) {
+          const opt = document.createElement('option');
+          opt.value = n; opt.textContent = n;
+          sel.appendChild(opt);
+        }
+      });
+  }
+
+  function loadBrands() {
+    const q = document.getElementById('searchInput').value.trim();
+    const niche = document.getElementById('nicheSelect').value;
+    const params = new URLSearchParams({ limit: PAGE_SIZE, offset });
+    if (q) params.set('q', q);
+    if (niche) params.set('niche', niche);
+
+    document.getElementById('brandList').innerHTML = '<div class="loading">Loading brands…</div>';
+
+    fetch('/api/brand-catalog?' + params.toString())
+      .then(r => r.json())
+      .then(data => {
+        total = data.total;
+        const listEl = document.getElementById('brandList');
+        if (!data.brands.length) {
+          listEl.innerHTML = '<div class="empty-state">No brands match.</div>';
+        } else {
+          listEl.innerHTML = data.brands.map(b => `
+            <div class="brand-row" onclick="openBrand(${b.id})">
+              <div>
+                <div class="brand-row-name">${esc(b.name)}</div>
+                <div class="brand-row-meta">${esc(b.domain || b.website || 'no website')}</div>
+              </div>
+              ${b.niche ? `<span class="brand-row-niche">${esc(b.niche)}</span>` : ''}
+            </div>
+          `).join('');
+        }
+
+        const pager = document.getElementById('pager');
+        if (total > PAGE_SIZE) {
+          pager.style.display = 'flex';
+          const shown_from = total ? offset + 1 : 0;
+          const shown_to = Math.min(offset + PAGE_SIZE, total);
+          document.getElementById('pagerInfo').textContent = `${shown_from}-${shown_to} of ${total}`;
+          document.getElementById('prevBtn').disabled = offset === 0;
+          document.getElementById('nextBtn').disabled = offset + PAGE_SIZE >= total;
+        } else {
+          pager.style.display = 'none';
+        }
+      });
+  }
+
+  document.getElementById('searchInput').addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { offset = 0; loadBrands(); }, 300);
+  });
+  document.getElementById('nicheSelect').addEventListener('change', () => { offset = 0; loadBrands(); });
+  document.getElementById('prevBtn').addEventListener('click', () => { offset = Math.max(0, offset - PAGE_SIZE); loadBrands(); });
+  document.getElementById('nextBtn').addEventListener('click', () => { offset += PAGE_SIZE; loadBrands(); });
+
+  function fmtRange(range) {
+    if (!range) return '—';
+    const lo = range.lower_bound, hi = range.upper_bound;
+    if (lo == null && hi == null) return '—';
+    if (hi == null) return `${Number(lo).toLocaleString()}+`;
+    return `${Number(lo).toLocaleString()}–${Number(hi).toLocaleString()}`;
+  }
+
+  function adCardHtml(ad, idx) {
+    const body = (ad.ad_creative_bodies && ad.ad_creative_bodies.length) ? ad.ad_creative_bodies[0] : '(no ad text)';
+    const dateRange = [ad.start_date, ad.end_date].filter(Boolean).join(' → ') || 'date unknown';
+    const platforms = (ad.publisher_platforms || []).map(p => `<span class="ad-platform-pill">${esc(p)}</span>`).join('');
+    return `
+      <div class="ad-card">
+        <div class="ad-card-page">${esc(ad.page_name || 'Unknown page')}</div>
+        <div class="ad-card-dates">${esc(dateRange)}</div>
+        <div class="ad-platforms">${platforms}</div>
+        <div class="ad-body" id="adBody${idx}">${esc(body)}</div>
+        <span class="ad-body-toggle" onclick="toggleAdBody(${idx})" id="adToggle${idx}">Show more</span>
+        <div class="ad-stats">
+          <div class="ad-stat">
+            <div class="ad-stat-label">Impressions</div>
+            <div class="ad-stat-value">${fmtRange(ad.impressions)}</div>
+          </div>
+          <div class="ad-stat">
+            <div class="ad-stat-label">Spend (${esc(ad.currency || 'USD')})</div>
+            <div class="ad-stat-value">${fmtRange(ad.spend)}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function toggleAdBody(idx) {
+    const el = document.getElementById('adBody' + idx);
+    const toggle = document.getElementById('adToggle' + idx);
+    const expanded = el.classList.toggle('expanded');
+    toggle.textContent = expanded ? 'Show less' : 'Show more';
+  }
+
+  function openBrand(id) {
+    document.getElementById('listView').style.display = 'none';
+    const detail = document.getElementById('detailView');
+    detail.style.display = 'block';
+    detail.innerHTML = '<div class="loading">Loading brand…</div>';
+    history.pushState({ brandId: id }, '', '?id=' + id);
+
+    fetch('/api/brand-catalog/' + id)
+      .then(r => { if (!r.ok) throw new Error('Brand not found'); return r.json(); })
+      .then(b => {
+        const pills = [];
+        if (b.niche) pills.push(`<span class="pill">Niche: <b>${esc(b.niche)}</b></span>`);
+        if (b.country) pills.push(`<span class="pill">Country: <b>${esc(b.country)}</b></span>`);
+        if (b.brand_tier) pills.push(`<span class="pill">Tier: <b>${esc(b.brand_tier)}</b></span>`);
+        if (b.geo_reach_label) pills.push(`<span class="pill">Reach: <b>${esc(b.geo_reach_label)}</b> (${esc(b.geo_reach_score)})</span>`);
+        if (b.instagram_handle) pills.push(`<span class="pill">IG: <b>${esc(b.instagram_handle)}</b></span>`);
+
+        const adsHtml = b.meta_ads.length
+          ? `<div class="ad-grid">${b.meta_ads.map((ad, i) => adCardHtml(ad, i)).join('')}</div>`
+          : `<div class="no-ads">No Meta Ads found for this brand yet.</div>`;
+
+        detail.innerHTML = `
+          <span class="back-link" onclick="closeBrand()">&larr; Back to all brands</span>
+          <div class="brand-header">
+            <div>
+              <div class="brand-title">${esc(b.name)}</div>
+              <div class="brand-domain">${b.website ? `<a href="${esc(b.website)}" target="_blank" rel="noopener">${esc(b.website)}</a>` : 'no website'}</div>
+            </div>
+          </div>
+          <div class="pill-row">${pills.join('')}</div>
+          ${b.description ? `<p style="color:#94a3b8;font-size:.85rem;line-height:1.6;max-width:640px">${esc(b.description)}</p>` : ''}
+          <div class="section-title">Meta Ad Examples <span class="count">(showing ${b.meta_ads.length} of ${b.meta_ads_total})</span></div>
+          ${adsHtml}
+        `;
+      })
+      .catch(err => {
+        detail.innerHTML = `<span class="back-link" onclick="closeBrand()">&larr; Back to all brands</span><div class="empty-state">${esc(err.message)}</div>`;
+      });
+  }
+
+  function closeBrand() {
+    document.getElementById('detailView').style.display = 'none';
+    document.getElementById('listView').style.display = 'block';
+    history.pushState({}, '', location.pathname);
+  }
+
+  window.addEventListener('popstate', () => {
+    const id = new URLSearchParams(location.search).get('id');
+    if (id) openBrand(id); else closeBrand();
+  });
+
+  // Init
+  loadNiches();
+  loadBrands();
+  const initialId = new URLSearchParams(location.search).get('id');
+  if (initialId) openBrand(initialId);
+</script>
+</body>
+</html>
