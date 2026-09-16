@@ -109,6 +109,10 @@ class BrandRaw(Base):
     # across all pages crawled for this brand, so a location found on one
     # page is never lost when a later page adds a different one.
     geo_reach_locations      = Column(JSONB)
+    # Compact country-code output derived during geo reach scoring. Stores
+    # ISO-style alpha-2 country codes (e.g. ["US"], ["US", "CA"]) or
+    # ["GLOBAL"] for worldwide/global reach.
+    geo_reach_country_codes  = Column(JSONB)
     # Memory #2: per-page crawl log (url, status, locations_found) — which
     # pages were already scraped, so a re-run never re-fetches the same page.
     geo_reach_pages_scraped  = Column(JSONB)

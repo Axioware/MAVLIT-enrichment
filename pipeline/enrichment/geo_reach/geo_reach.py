@@ -58,7 +58,8 @@ all 5 pages are exhausted without a confident answer, one last "you must
 decide now" call is made using everything accumulated. Both the merged
 locations list and the per-page crawl log are persisted (geo_reach_locations
 / geo_reach_pages_scraped) so a later look at the row shows exactly what was
-found and where.
+found and where. A separate compact list of country codes is persisted in
+geo_reach_country_codes (e.g. ["US"], ["US", "CA"], or ["GLOBAL"]).
 
 The brand's own Instagram bio (instagram_posts.biography, most recent row)
 is passed to the LLM alongside the page text as extra context.
@@ -137,6 +138,53 @@ _SCORE_LABELS = {
     0: "global",
 }
 
+_COUNTRY_CODE_ALIASES = {
+    "america": "US",
+    "united states": "US",
+    "united states of america": "US",
+    "usa": "US",
+    "u.s.": "US",
+    "u.s.a.": "US",
+    "us": "US",
+    "canada": "CA",
+    "ca": "CA",
+    "united kingdom": "GB",
+    "uk": "GB",
+    "great britain": "GB",
+    "england": "GB",
+    "scotland": "GB",
+    "wales": "GB",
+    "northern ireland": "GB",
+    "australia": "AU",
+    "new zealand": "NZ",
+    "germany": "DE",
+    "france": "FR",
+    "italy": "IT",
+    "spain": "ES",
+    "netherlands": "NL",
+    "belgium": "BE",
+    "switzerland": "CH",
+    "austria": "AT",
+    "ireland": "IE",
+    "sweden": "SE",
+    "norway": "NO",
+    "denmark": "DK",
+    "finland": "FI",
+    "poland": "PL",
+    "portugal": "PT",
+    "japan": "JP",
+    "south korea": "KR",
+    "korea": "KR",
+    "china": "CN",
+    "india": "IN",
+    "mexico": "MX",
+    "brazil": "BR",
+    "argentina": "AR",
+    "south africa": "ZA",
+    "united arab emirates": "AE",
+    "uae": "AE",
+}
+
 _RUBRIC_TEXT = """100 = Doesn't operate in the United States at all — footprint entirely in other country/countries, including Canada (any scope there — one city, nationwide, several countries, doesn't matter, as long as none of it is the United States)
 90 = Single city/town, and that city is in the United States
 80 = Single US state
@@ -184,6 +232,7 @@ Do NOT treat country-of-origin, manufacturing-location, or "Made in X" / "Design
 
 Instructions:
 - "locations_found": a JSON array of any NEW city/state/province/country names or explicit reach statements found on THIS page (e.g. "Austin, Texas", "nationwide USA", "ships worldwide") that aren't already in the accumulated list above, and that reflect actual reach per the distinction above (not origin/HQ). Empty array if this page has nothing new and usable.
+- "country_codes": a JSON array of uppercase country codes for every country where the brand operates based on the FULL picture so far (accumulated_locations plus locations_found). Use ISO alpha-2 codes only, e.g. "US" for United States, "CA" for Canada, "GB" for United Kingdom. If the evidence is a city/state/province, infer and output that location's country code. If the brand is truly global/worldwide, return ["GLOBAL"] instead of listing countries. Return [] only when there is no usable reach evidence.
 - Judge the full picture: accumulated_locations combined with this page's locations_found together.
 - Be careful with "store locator" / "find a store" / interactive map pages: they very often default to showing only the stores nearest to a visitor (e.g. IP-geolocated) or a small default subset, NOT the complete list. A handful of stores clustered in one city/state on such a page is weak, inconclusive evidence — do NOT treat it as proof of a narrow single-city/single-state footprint. Prefer explicit aggregate statements instead ("1,900+ stores nationwide", "stores in all 50 states", "operating in 40 countries", "we ship worldwide").
 - "confidence": an integer 0-100 — how confident you are, using accumulated_locations plus this page combined, that you could commit to a final score right now. A single passing mention (one country name, one city, an origin/HQ claim) is weak evidence — keep confidence LOW for that. Only report 90+ when the evidence is explicit and leaves little real doubt (e.g. a clear aggregate statement of reach, or a store/shipping list that itself spans the full claimed area). When in doubt, prefer a lower number — there are more pages left to check.
@@ -191,7 +240,7 @@ Instructions:
 - "reasoning": one short sentence.
 
 Respond with ONLY valid JSON:
-{"locations_found": [], "confidence": 0, "score": null, "reasoning": ""}
+{"locations_found": [], "country_codes": [], "confidence": 0, "score": null, "reasoning": ""}
 """
 
 GEO_REACH_FINAL_PROMPT = """
@@ -211,9 +260,10 @@ Reminders:
 - Country-of-origin / "Made in X" / manufacturing-location claims, and a company's registered legal/HQ address, are NOT evidence of reach — ignore any such signals in the list above when scoring. Only actual sell/ship/operate/service evidence counts.
 - If these signals came mainly from a "store locator" style page, they may only be a nearby/default subset rather than the brand's full footprint — weigh that possibility, but you must still pick your best-supported answer now.
 - If there is truly no usable reach evidence at all once origin/HQ-only signals are discounted, set "score" to null instead of guessing.
+- Return "country_codes" as a JSON array of uppercase ISO alpha-2 country codes for every country where the brand operates. If the evidence is a city/state/province, infer and output that location's country code. If the score is 0/global, return ["GLOBAL"]. Return [] only when there is no usable reach evidence.
 
 Respond with ONLY valid JSON:
-{"score": null, "reasoning": ""}
+{"score": null, "country_codes": [], "reasoning": ""}
 """
 
 
@@ -331,6 +381,37 @@ def _normalize_confidence(value: object) -> int:
     return max(0, min(100, num))
 
 
+def _normalize_country_codes(value: object, score: int | None = None) -> list[str]:
+    if score == 0:
+        return ["GLOBAL"]
+    if not isinstance(value, list):
+        return []
+
+    codes: list[str] = []
+    seen: set[str] = set()
+    for raw in value:
+        if not isinstance(raw, str):
+            continue
+        item = raw.strip()
+        if not item:
+            continue
+
+        upper = item.upper()
+        if upper == "GLOBAL":
+            code = "GLOBAL"
+        elif re.fullmatch(r"[A-Z]{2}", upper):
+            code = upper
+        else:
+            code = _COUNTRY_CODE_ALIASES.get(item.lower())
+
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        codes.append(code)
+
+    return ["GLOBAL"] if "GLOBAL" in seen else codes
+
+
 def _get_brand_bio(db: Session, brand_raw_id: int) -> str:
     post = (
         db.query(InstagramPost)
@@ -367,12 +448,13 @@ def _call_geo_llm_final(brand: BrandRaw, bio: str, accumulated: list[str]) -> di
     return result if isinstance(result, dict) else {}
 
 
-def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None, list[str], list[dict]]:
+def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None, list[str], list[str], list[dict]]:
     origin = _normalize_origin(brand.website)
 
     visited: set[str] = set()
     queue: list[str] = [origin]
     accumulated: list[str] = []
+    country_codes: list[str] = []
     pages_log: list[dict] = []
     final_score: int | None = None
 
@@ -406,9 +488,15 @@ def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None,
         accumulated = _merge_locations(accumulated, new_locs)
         confidence = _normalize_confidence(result.get("confidence"))
         page_score = _normalize_score(result.get("score"))
+        page_country_codes = _normalize_country_codes(result.get("country_codes"), page_score)
+        if page_country_codes:
+            country_codes = page_country_codes
         pages_log.append({
             "url": url, "status": "ok",
-            "locations_found": new_locs, "confidence": confidence, "score_guess": page_score,
+            "locations_found": new_locs,
+            "country_codes": page_country_codes,
+            "confidence": confidence,
+            "score_guess": page_score,
         })
 
         # Only end the crawl early on a high numeric confidence — a boolean
@@ -422,25 +510,29 @@ def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None,
     if final_score is None and accumulated:
         result = _call_geo_llm_final(brand, bio, accumulated)
         final_score = _normalize_score(result.get("score"))
+        final_country_codes = _normalize_country_codes(result.get("country_codes"), final_score)
+        if final_country_codes or final_score == 0:
+            country_codes = final_country_codes
 
     label = _SCORE_LABELS.get(final_score) if final_score is not None else None
-    return final_score, label, accumulated, pages_log
+    return final_score, label, accumulated, country_codes, pages_log
 
 
 def _score_brand_geo_reach(db: Session, brand: BrandRaw) -> None:
     bio = _get_brand_bio(db, brand.id)
-    score, label, locations, pages = _crawl_and_score(brand, bio)
+    score, label, locations, country_codes, pages = _crawl_and_score(brand, bio)
 
     brand.geo_reach_score = score
     brand.geo_reach_label = label
     brand.geo_reach_locations = locations
+    brand.geo_reach_country_codes = country_codes
     brand.geo_reach_pages_scraped = pages
     brand.geo_reach_checked = True
     db.commit()
 
     logger.info(
-        "geo_reach: id=%s name=%s -> score=%s label=%s pages_scraped=%d locations=%s",
-        brand.id, brand.name, score, label, len(pages), locations,
+        "geo_reach: id=%s name=%s -> score=%s label=%s country_codes=%s pages_scraped=%d locations=%s",
+        brand.id, brand.name, score, label, country_codes, len(pages), locations,
     )
 
 

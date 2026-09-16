@@ -331,6 +331,7 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS geo_reach_score INTEGER",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS geo_reach_label TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS geo_reach_locations JSONB",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS geo_reach_country_codes JSONB",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS geo_reach_pages_scraped JSONB",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS geo_reach_checked BOOLEAN NOT NULL DEFAULT false",
         # LinkedIn employment verification — pipeline/enrichment/linkedin_verify.py
