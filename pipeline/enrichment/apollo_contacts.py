@@ -10,7 +10,7 @@ only. Also updates brand_match_profile's contact routing fields
 (has_marketing_contact, contact_mode, best_contact_title_score) per the
 matching design doc, based on the top-ranked (rank=1) contact.
 
-Runs only for brands in initial_brand_score with total_score >= 50.
+Runs for any brand with an initial_brand_score row (no minimum score).
 
 Pipeline (adapted from apollo_sponsorship_finder.py, minus the CSV/testing bits):
   1) SEARCH    -> Apollo /api/v1/mixed_people/api_search. FREE (0 credits).
@@ -572,10 +572,10 @@ def find_brand_contact(db: Session, brand_raw_id: int) -> list[dict]:
 
 def run_apollo_contacts(db: Session, limit: int = 20, brand_id: int | None = None) -> int:
     """
-    Find Apollo contacts for brands scored >= 50 in initial_brand_score that
-    haven't been attempted yet (no brand_contacts row at all). Pass brand_id
-    to target one specific brand directly (bypasses the score filter and the
-    already-attempted check, for testing).
+    Find Apollo contacts for every brand with an initial_brand_score row
+    (any score — no minimum) that hasn't been attempted yet (no
+    brand_contacts row at all). Pass brand_id to target one specific brand
+    directly (bypasses the already-attempted check, for testing).
 
     limit defaults small (20) since each brand costs up to ENRICH_TOP_N
     Apollo enrichment credits — raise it deliberately, don't crank it up by
@@ -592,10 +592,7 @@ def run_apollo_contacts(db: Session, limit: int = 20, brand_id: int | None = Non
         query = query.filter(BrandRaw.id == brand_id)
     else:
         query = (
-            query.filter(
-                InitialBrandScore.total_score >= 50,
-                BrandRaw.has_official_website == True,
-            )
+            query.filter(BrandRaw.has_official_website == True)
             .outerjoin(BrandContact, BrandContact.brand_raw_id == BrandRaw.id)
             .filter(BrandContact.id.is_(None))
         )
