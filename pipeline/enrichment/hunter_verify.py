@@ -52,30 +52,64 @@ _VALID_STATUSES = frozenset(["valid", "invalid", "accept_all", "webmail", "dispo
 
 
 def _verify_email(email: str) -> dict | None:
-    """
-    Returns Hunter's raw verification dict ({"status", "score", ...}) or
-    None on any failure (network error, invalid key, rate limit, malformed
-    email param) — callers must leave the contact's hunter_* fields
-    unset/retryable in that case, not record a false "unknown".
-    """
     try:
-        resp = httpx.get(_VERIFY_URL, params={"email": email, "api_key": HUNTER_API_KEY}, timeout=_TIMEOUT)
+        resp = httpx.get(
+            _VERIFY_URL,
+            params={
+                "email": email,
+                "api_key": HUNTER_API_KEY,
+            },
+            timeout=_TIMEOUT,
+        )
+
         if resp.status_code == 429:
-            logger.warning("Hunter verify: rate limited (429) for %s", email)
+            logger.warning(
+                "Hunter verify: rate limited (429) for %s",
+                email,
+            )
             return None
+
         if resp.status_code == 222:
-            # Documented non-error outcome: "unexpected SMTP server
-            # response — retry later" (confirmed live: body is just
-            # {"errors": [...]}, no "data" key at all). Not a real
-            # failure — the mailbox's own mail server misbehaved this
-            # attempt, so leave this contact retryable rather than
-            # logging it as an exception.
-            logger.info("Hunter verify: 222 (retry later) for %s", email)
+            logger.info(
+                "Hunter verify: 222 (retry later) for %s",
+                email,
+            )
             return None
+
         resp.raise_for_status()
+
         return resp.json().get("data")
-    except Exception:
-        logger.exception("Hunter verify request failed for %s", email)
+
+    except httpx.ReadTimeout:
+        logger.warning(
+            "Hunter verify: timeout after %ss for %s",
+            _TIMEOUT,
+            email,
+        )
+        return None
+
+    except httpx.ConnectError:
+        logger.warning(
+            "Hunter verify: connection error for %s",
+            email,
+        )
+        return None
+
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "Hunter verify: HTTP %s for %s: %s",
+            exc.response.status_code,
+            email,
+            exc.response.text[:500],
+        )
+        return None
+
+    except httpx.RequestError as exc:
+        logger.warning(
+            "Hunter verify: request error for %s: %s",
+            email,
+            exc,
+        )
         return None
 
 

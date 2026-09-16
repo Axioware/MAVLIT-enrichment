@@ -6,27 +6,29 @@ geographic footprint the brand actually operates in — a single town, a
 handful of states, one whole country, or worldwide — and stores that as a
 0-100 score.
 
-Score rubric (brands_raw.geo_reach_score / geo_reach_label) — the US and
-Canada are treated as ONE combined target region for the granular tiers;
-any footprint entirely outside the US/Canada collapses to a single top
-bucket regardless of how narrow or wide it is there:
+Score rubric (brands_raw.geo_reach_score / geo_reach_label) — the United
+States is the only target region for the granular tiers. Canada is treated
+like any other non-US country; a footprint in Canada but not the US is
+outside the target region, no matter how broad it is there:
 
-    100 = outside_us_canada             Doesn't operate in the US or Canada
+    100 = outside_us                    Doesn't operate in the United States
                                          at all — footprint entirely in
-                                         other country/countries
-     90 = single_city_us_canada         Single city/town, in the US/Canada
-     80 = single_state_us_canada        Single state/province, US/Canada
-     70 = few_states_us_canada          2-5 states/provinces, US/Canada
-     60 = many_states_us_canada         6-15 states/provinces, US/Canada
-     40 = nationwide_us_canada          Most/all of the US or Canada,
+                                         other country/countries, including
+                                         Canada
+     90 = single_city_us                Single city/town in the US
+     80 = single_state_us               Single US state
+     70 = few_states_us                 2-5 US states
+     60 = many_states_us                6-15 US states
+     40 = nationwide_us                 Most/all of the United States,
                                          nowhere else
-     20 = multi_country_with_us_canada  US/Canada PLUS at least one other
-                                         country (e.g. US + Germany)
+     20 = multi_country_with_us         United States PLUS at least one other
+                                         country (e.g. US + Canada,
+                                         US + Germany)
       0 = global                        Global/worldwide presence
 
 This ordering is intentional, not a mistake — it exists so a simple
-"score DESC" sort surfaces non-US/Canada brands first, then narrows down
-through the US/Canada footprint from smallest to nationwide, since that's
+"score DESC" sort surfaces non-US brands first, then narrows down through
+the US footprint from smallest to nationwide, since that's
 the filtering the score is meant to drive.
 
 Crawl design
@@ -125,30 +127,30 @@ _LINK_KEYWORDS = (
 
 _ALLOWED_SCORES = {100, 90, 80, 70, 60, 40, 20, 0}
 _SCORE_LABELS = {
-    100: "outside_us_canada",
-    90: "single_city_us_canada",
-    80: "single_state_us_canada",
-    70: "few_states_us_canada",
-    60: "many_states_us_canada",
-    40: "nationwide_us_canada",
-    20: "multi_country_with_us_canada",
+    100: "outside_us",
+    90: "single_city_us",
+    80: "single_state_us",
+    70: "few_states_us",
+    60: "many_states_us",
+    40: "nationwide_us",
+    20: "multi_country_with_us",
     0: "global",
 }
 
-_RUBRIC_TEXT = """100 = Doesn't operate in the US or Canada at all — footprint entirely in other country/countries (any scope there — one city, nationwide, several countries, doesn't matter, as long as none of it is the US/Canada)
-90 = Single city/town, and that city is in the US or Canada
-80 = Single state/province, and that state/province is in the US or Canada
-70 = 2-5 states/provinces, all within the US and/or Canada
-60 = 6-15 states/provinces, all within the US and/or Canada
-40 = Most/all of the US or Canada (nationwide), with no presence in any other country
-20 = Multiple countries where the US or Canada is one of them, PLUS at least one other country (e.g. US + Germany, or Canada + Japan) — not yet truly worldwide
+_RUBRIC_TEXT = """100 = Doesn't operate in the United States at all — footprint entirely in other country/countries, including Canada (any scope there — one city, nationwide, several countries, doesn't matter, as long as none of it is the United States)
+90 = Single city/town, and that city is in the United States
+80 = Single US state
+70 = 2-5 US states, with no presence in any other country
+60 = 6-15 US states, with no presence in any other country
+40 = Most/all of the United States (nationwide), with no presence in any other country
+20 = Multiple countries where the United States is one of them, PLUS at least one other country (e.g. US + Canada, or US + Germany) — not yet truly worldwide
 0 = Global/worldwide presence
 
 How to apply this — check in this order:
-1. Does the brand operate ANYWHERE in the US or Canada (stores, shipping, service area, stated market)? If NO — it only operates in some other country or countries and nowhere in the US/Canada — the score is 100, no matter how narrow or wide its footprint is in those other countries. Stop here, skip the rest.
-2. If it DOES operate somewhere in the US or Canada, is its overall presence truly global/worldwide (available essentially everywhere)? If yes, score 0.
-3. If it operates in the US/Canada PLUS one or more other countries, but is not truly worldwide, score 20.
-4. If it operates ONLY within the US and/or Canada (no other country at all), score by how much of the US/Canada it covers: a single city/town is 90, a single state/province is 80, 2-5 states/provinces is 70, 6-15 states/provinces is 60, most/all of the US or Canada (nationwide) is 40."""
+1. Does the brand operate ANYWHERE in the United States (stores, shipping, service area, stated market)? If NO — it only operates in Canada and/or other non-US countries — the score is 100, no matter how narrow or wide its footprint is there. Stop here, skip the rest.
+2. If it DOES operate somewhere in the United States, is its overall presence truly global/worldwide (available essentially everywhere)? If yes, score 0.
+3. If it operates in the United States PLUS one or more other countries, but is not truly worldwide, score 20. Canada counts as an "other country" only when the United States is also present; Canada plus another non-US country without the United States is score 100, not 20.
+4. If it operates ONLY within the United States (no other country at all), score by how much of the US it covers: a single city/town is 90, a single state is 80, 2-5 states is 70, 6-15 states is 60, most/all of the United States (nationwide) is 40."""
 
 # A page's LLM call is only allowed to end the crawl early when it reports
 # confidence at/above this bar — otherwise the crawler keeps going, using
