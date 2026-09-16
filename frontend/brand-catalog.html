@@ -212,11 +212,15 @@
       flex: 1;
       margin-bottom: .9rem;
       display: -webkit-box;
+      line-clamp: 6;
       -webkit-line-clamp: 6;
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
-    .ad-body.expanded { -webkit-line-clamp: unset; }
+    .ad-body.expanded {
+      line-clamp: unset;
+      -webkit-line-clamp: unset;
+    }
     .ad-body-toggle {
       color: #38bdf8;
       font-size: .75rem;
