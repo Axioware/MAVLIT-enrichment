@@ -54,8 +54,10 @@ WITH best_per_brand AS (
   WHERE ccr.id BETWEEN 1 AND 208
     AND tcbp.sponsorship_confidence >= 90
     AND br.refferls = false
-    AND br.geo_reach_score IS NOT NULL
-    AND br.geo_reach_score BETWEEN 0 AND 40
+    AND (
+      br.geo_reach_score BETWEEN 0 AND 40
+      OR br.geo_reach_score IS NULL
+    )
     AND tcbp.post_timestamp >= '2026-01-01'
     AND tcbp.post_timestamp < '2027-01-01'
   ORDER BY
