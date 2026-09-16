@@ -47,6 +47,23 @@ class CreatorProfileResponse(BaseModel):
     updated_at: str | None = None
 
 
+def _as_list(value):
+    """
+    CreatorProfile's list-shaped JSONB columns (sub_niches/
+    excluded_categories/audience_top_countries/content_tags) are meant to
+    hold a JSON array, but sqladmin's generic JSON form widget defaults an
+    untouched JSONB field to "{}" (an empty OBJECT) rather than "[]" on
+    create — confirmed live, this crashed /auth/login with a pydantic
+    ValidationError ("Input should be a valid list") for any admin-created
+    row that left one of these at that default. The admin form no longer
+    exposes these fields at all (see CreatorProfileAdmin), but this stays
+    as a second line of defense against the same shape mismatch from any
+    other source (a stray manual UPDATE, a future admin field, etc.) —
+    silently drops a non-list value to None instead of 500ing the request.
+    """
+    return value if isinstance(value, list) else None
+
+
 def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
     return CreatorProfileResponse(
         id=row.id,
@@ -58,9 +75,9 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         location_country=row.location_country,
         bio_tagline=row.bio_tagline,
         content_niche=row.content_niche,
-        sub_niches=row.sub_niches,
+        sub_niches=_as_list(row.sub_niches),
         content_description=row.content_description,
-        excluded_categories=row.excluded_categories,
+        excluded_categories=_as_list(row.excluded_categories),
         instagram_handle=row.instagram_handle,
         youtube_channel=row.youtube_channel,
         facebook_page=row.facebook_page,
@@ -78,9 +95,9 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         audience_age_bracket=row.audience_age_bracket,
         audience_age_min=row.audience_age_min,
         audience_age_max=row.audience_age_max,
-        audience_top_countries=row.audience_top_countries,
+        audience_top_countries=_as_list(row.audience_top_countries),
         creator_tier=row.creator_tier,
-        content_tags=row.content_tags,
+        content_tags=_as_list(row.content_tags),
         created_at=str(row.created_at) if row.created_at else "",
         updated_at=str(row.updated_at) if row.updated_at else None,
     )

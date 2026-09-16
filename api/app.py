@@ -811,11 +811,29 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
     # ALSO be excluded from the form (sqladmin has no form converter for
     # pgvector's type and hard-crashes create/edit with NoConverterFound
     # otherwise — column_exclude_list alone only hides it from list/detail).
+    #
+    # sub_niches/excluded_categories/audience_top_countries/content_tags are
+    # also excluded from the form: they're list-shaped JSONB (e.g.
+    # sub_niches = ["vegan cooking", ...]), populated by the creator's own
+    # profile flow or LLM extraction elsewhere — never meant to be typed by
+    # hand here. sqladmin's generic JSON widget defaults an untouched JSONB
+    # field to "{}" (an empty OBJECT) on create, not "[]" — CreatorProfile
+    # Response's schema requires a list for these, so any admin-created row
+    # that left them at that default 500'd on every /auth/login for that
+    # user (confirmed live: pydantic_core.ValidationError, "Input should be
+    # a valid list", input_value={}). Excluding them from the form removes
+    # the only way admin-create was producing that bad value.
     column_exclude_list = [CreatorProfile.embedding, CreatorProfile.password_hash]
     column_searchable_list = [CreatorProfile.email, CreatorProfile.full_name, CreatorProfile.creator_handle, CreatorProfile.content_niche]
     column_sortable_list    = [c.name for c in CreatorProfile.__table__.columns if c.name not in ("embedding", "password_hash")]
     column_default_sort    = [(CreatorProfile.id, True)]
-    form_excluded_columns = [CreatorProfile.embedding]
+    form_excluded_columns = [
+        CreatorProfile.embedding,
+        CreatorProfile.sub_niches,
+        CreatorProfile.excluded_categories,
+        CreatorProfile.audience_top_countries,
+        CreatorProfile.content_tags,
+    ]
     form_overrides   = {"password_hash": wtforms.PasswordField}
     form_labels      = {"password_hash": "Password"}
     form_widget_args = {"password_hash": {"placeholder": "Leave blank to keep the current password"}}
