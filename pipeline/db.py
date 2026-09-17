@@ -752,6 +752,14 @@ def get_db():
         db.close()
 
 
+def normalize_niche(niche: str | None) -> str | None:
+    if not niche:
+        return niche
+
+    niche = niche.strip()
+    return niche[0].upper() + niche[1:] if niche else niche
+
+
 def _brand_raw_fields(b: dict) -> dict:
     """Extract all optional BrandRaw fields from a seed row dict."""
     website = b.get("website") or None
@@ -780,7 +788,7 @@ def _row_values(b: dict) -> dict:
     return {
         "name":            b.get("name"),
         "name_normalized": b.get("normalized"),
-        "niche":           b.get("niche"),
+        "niche":           normalize_niche(b.get("niche")),
         "source":          b.get("source"),
         "source_url":      b.get("source_url"),
         **_brand_raw_fields(b),
@@ -789,7 +797,11 @@ def _row_values(b: dict) -> dict:
 
 def _insert_brand_niches(db: Session, id_niche_pairs: list[tuple[int, str]]) -> None:
     """Mirror each newly-inserted brand's niche into brands_niches."""
-    rows = [{"brand_raw_id": bid, "niche": niche} for bid, niche in id_niche_pairs if niche]
+    rows = [
+        {"brand_raw_id": bid, "niche": normalize_niche(niche)}
+        for bid, niche in id_niche_pairs
+        if niche
+    ]
     if not rows:
         return
     stmt = (

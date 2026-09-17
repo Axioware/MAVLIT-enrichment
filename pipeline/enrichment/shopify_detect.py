@@ -57,7 +57,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from config import OPENAI_KEY
-from pipeline.db import BrandNiche, BrandRaw, Prompt
+from pipeline.db import BrandNiche, BrandRaw, Prompt, normalize_niche
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.normalize import normalize
 from pipeline.helpers.prompts import BRAND_NICHE_TAGS_PROMPT_NAME, BRAND_NICHE_TAGS_DEFAULT_PROMPT
@@ -274,7 +274,7 @@ def _extract_brand_niche_and_tags(
     # processed", so a brand doesn't sit at niche=NULL forever just because
     # its description was too vague to classify.
     niche = result.get("niche")
-    niche = niche.strip() if isinstance(niche, str) and niche.strip() else None
+    niche = normalize_niche(niche.strip() if isinstance(niche, str) and niche.strip() else None)
 
     tags = result.get("tags")
     tags = [t for t in tags if isinstance(t, str) and t.strip()] if isinstance(tags, list) else []
@@ -285,7 +285,7 @@ def _upsert_brand_niche(db: Session, brand_id: int, niche: str, description: str
     """Insert a brands_niches row if this brand doesn't have one yet for this niche, else update it."""
     stmt = (
         pg_insert(BrandNiche)
-        .values(brand_raw_id=brand_id, niche=niche, description=description, tags=tags)
+        .values(brand_raw_id=brand_id, niche=normalize_niche(niche), description=description, tags=tags)
         .on_conflict_do_update(
             index_elements=["brand_raw_id", "niche"],
             set_={"description": description, "tags": tags},
@@ -342,7 +342,7 @@ def _update_brand_niche_description_and_tags(db: Session, brand: BrandRaw, descr
                 logger.info("Shopify/socials check: brand_id=%d name backfilled → '%s'", brand.id, name)
 
     if not had_niche and niche:
-        brand.niche = niche
+        brand.niche = normalize_niche(niche)
         logger.info("Shopify/socials check: %s niche backfilled → '%s'", brand.name or f"brand_id={brand.id}", niche)
 
     effective_niche = brand.niche
