@@ -159,7 +159,6 @@ def _run_migrations() -> None:
         """,
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS user_type TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS tier_fit TEXT",
-        "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS captions JSONB",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS niche TEXT",
         # Per-post row storage for creators (coauthor_producer/tagged_user/
         # mention/contentcreatorRE) — one row per post instead of one row

@@ -304,13 +304,6 @@ class InstagramUser(Base):
     # LLM-extracted content niche, from bio + top 5 posts' captions/hashtags — creators only, NULL for commenters
     niche               = Column(Text)
 
-    # Legacy: pre-per-post-row creator snapshots (top 5 posts + top 5
-    # comments each nested as JSONB). Still present on old rows; no longer
-    # written by enrich_instagram_users() going forward — see the per-post
-    # columns below instead.
-    top_posts           = Column(JSONB)
-    captions            = Column(JSONB)   # flat list of caption strings from top_posts — legacy, see above
-
     # Per-post columns — one row per post for creators (coauthor_producer/
     # tagged_user/mention/contentcreatorRE); commenters still get exactly 1
     # row (they only ever scrape 1 post). post_id is unique when present
