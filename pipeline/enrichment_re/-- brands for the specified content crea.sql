@@ -134,6 +134,12 @@ ORDER BY
   brand_name ASC;
 
 
+
+SELECT id
+FROM brands_raw
+where name IS NULL
+AND has_official_website = true;
+
 -- sudo -u postgres psql
 -- \c mavlit_enrichment_test
 

@@ -404,3 +404,5 @@ python3 -m pipeline.enrichment.geo_reach.geo_reach --limit 1 --creator-niche Fit
 ## TASKS
 ### after all have to run LLM(one time) for niche of creators for specific selected niche
 ### have to make another pipeline so that it scrape creator re and brands after month or two month for recency posts
+### brands creators insta follower min max +20% up down to users
+### subniches match on niche
