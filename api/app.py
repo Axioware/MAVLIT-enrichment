@@ -260,8 +260,9 @@ def _run_migrations() -> None:
         "CREATE INDEX IF NOT EXISTS ix_brand_contacts_brand_raw_id ON brand_contacts(brand_raw_id)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_brand_contact_person ON brand_contacts(brand_raw_id, apollo_person_id)",
         # brand_contacts: now stores up to 50 ranked candidates per brand,
-        # only the top 5 of which are enriched with real contact info
+        # with confidence-qualified candidates enriched with real contact info
         "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS is_enriched BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS sponsorship_contact_confidence INTEGER",
         # creator_profiles: Stage 2 creator-profile-setup fields (matching
         # algorithm design doc) — sub-niches, free-text description for LLM
         # tag extraction, a hard-filter exclusion list, an explicit follower

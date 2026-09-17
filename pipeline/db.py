@@ -467,7 +467,8 @@ class BrandContact(Base):
     brand_raw_id = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
 
     rank = Column(Integer)   # 1-50, the LLM's priority order among this brand's contacts (1 = best)
-    is_enriched = Column(Boolean, nullable=False, server_default="false", default=False)   # True only for the paid-enriched top 5
+    is_enriched = Column(Boolean, nullable=False, server_default="false", default=False)   # True only for paid-enriched contacts
+    sponsorship_contact_confidence = Column(Integer)   # LLM confidence that this person owns or influences creator sponsorship decisions
 
     full_name      = Column(Text)
     title          = Column(Text)

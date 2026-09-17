@@ -4,9 +4,10 @@ pipeline/enrichment/apollo_contacts.py
 Finds up to 50 marketing/sponsorship contacts for high-scoring brands,
 ranks ALL of them best-first via OpenAI, and stores the full ranked list
 in brand_contacts — gives a content creator a whole queue of people to try,
-not just one. Only the top 5 are enriched (the paid Apollo call that
-reveals a real email); the rest are stored from the free search preview
-only. Also updates brand_match_profile's contact routing fields
+not just one. Candidates with an LLM sponsorship confidence score of 90 or
+higher are enriched (the paid Apollo call that reveals a real email); the
+rest are stored from the free search preview only. Also updates
+brand_match_profile's contact routing fields
 (has_marketing_contact, contact_mode, best_contact_title_score) per the
 matching design doc, based on the top-ranked (rank=1) contact.
 
@@ -112,8 +113,8 @@ _TIMEOUT    = 20
 # worst case rather than just above the average.
 _RANK_TIMEOUT = 180.0
 _SEARCH_PER_PAGE = 50   # search is free — no credit reason to keep this small
-_ENRICH_TOP_N = 5       # only this many ranked candidates get the paid email enrich call
 _PHONE_TOP_N = 2        # of those, only this many (rank <= this) also get phone reveal — extra ~8 credits each
+_ENRICH_MIN_CONFIDENCE = 90
 
 # Phone reveal is async — see module docstring. Apollo's own guidance is
 # "retry after ~10 seconds"; this polls up to 7 times (~70s worst case per
@@ -170,6 +171,25 @@ _TITLE_PRIORITIES: list[tuple[list[str], int]] = [
     (["cmo", "chief marketing"], 5),
     (["marketing"], 6),
 ]
+
+_MAVLIT_RANKING_GUIDANCE = """
+MAVLIT ranking requirements:
+The goal is not to find the highest-ranking employee. The goal is to find the employee most likely to personally own, manage, approve, negotiate, coordinate, or respond to creator sponsorship opportunities.
+
+Rank candidates by likely ownership or influence over creator sponsorship outreach, influencer campaigns, brand partnerships, ambassador programs, affiliate partnerships, paid collaborations, talent partnerships, and creator marketing relationships.
+
+Title priority tiers, from highest to lowest:
+- Highest: Influencer Marketing, Creator Partnerships, Brand Partnerships, Partnerships Manager, Sponsorship Manager, Sponsorship Director, Influencer Relations, Creator Relations, Affiliate Marketing, Ambassador Programs, Talent Partnerships, Community Partnerships.
+- High: Social Media Marketing, Social Media Manager, Community Marketing, Brand Marketing, Growth Marketing, Consumer Marketing.
+- Medium: Marketing Director, Director of Marketing, VP Marketing, Head of Marketing, Chief Marketing Officer.
+- Low: Product Marketing, Demand Generation, Marketing Operations, Marketing Analytics, SEO, PPC, Communications, Public Relations, Customer Experience, Technical Marketing.
+- Very low: Finance, Accounting, Legal, Engineering, IT, HR, Procurement, Operations.
+
+If a dedicated influencer-marketing or partnerships employee exists, they should almost always rank above a VP, CMO, founder, or CEO. Only rank executives first when there is no clearly relevant creator-marketing, partnerships, sponsorship, influencer-marketing, social-media-marketing, community-marketing, or brand-marketing contact available. Consider responsibilities implied by the title, not seniority alone. All candidates must still be included.
+
+Return a confidence_score for every candidate from 0 to 100, representing how likely that person is to own or influence creator sponsorship decisions. Return ONLY this JSON shape:
+{"picks": [{"id": "...", "confidence_score": 96, "reason": "short one-line reason"}, ...]}
+"""
 
 
 class _ApolloAuthError(Exception):
@@ -251,7 +271,7 @@ def _score_title(title: str) -> int:
     return 99
 
 
-def _keyword_rank_all(people: list[dict], fallback_mode: bool) -> list[tuple[dict, str]]:
+def _keyword_rank_all(people: list[dict], fallback_mode: bool) -> list[tuple[dict, str, int]]:
     """
     Fallback ranking used only if OPENAI_KEY isn't set, or the LLM's
     response is unusable. Marketing-title keyword scoring doesn't apply to
@@ -261,9 +281,9 @@ def _keyword_rank_all(people: list[dict], fallback_mode: bool) -> list[tuple[dic
     if not people:
         return []
     if fallback_mode:
-        return [(p, "C-suite fallback — Apollo result order (no LLM ranking available)") for p in people]
+        return [(p, "C-suite fallback — Apollo result order (no LLM ranking available)", 0) for p in people]
     ranked = sorted(people, key=lambda p: _score_title(p.get("title", "")))
-    return [(p, f"keyword match on title '{p.get('title', '')}'") for p in ranked]
+    return [(p, f"keyword match on title '{p.get('title', '')}'", 0) for p in ranked]
 
 
 #  Prompt helpers
@@ -273,11 +293,12 @@ def _get_apollo_rank_prompt(db: Session) -> str:
     return row.content if row else APOLLO_RANK_DEFAULT_PROMPT
 
 
-def _rank_all_candidates(db: Session, people: list[dict], brand_name: str, fallback_mode: bool = False) -> list[tuple[dict, str]]:
+def _rank_all_candidates(db: Session, people: list[dict], brand_name: str, fallback_mode: bool = False) -> list[tuple[dict, str, int]]:
     """
     Ask OpenAI to rank ALL found candidates (up to 50) best-first by how
     likely each is to personally own or influence sponsorship/influencer-
-    marketing decisions. Returns a best-first list of (person_dict, reason)
+    marketing decisions. Returns a best-first list of (person_dict, reason,
+    confidence_score)
     covering every candidate in `people` — any candidate the response
     doesn't explicitly rank is appended at the end (original order) so
     nobody is ever silently dropped from storage. Falls back to keyword/
@@ -328,13 +349,13 @@ def _rank_all_candidates(db: Session, people: list[dict], brand_name: str, fallb
         intro=intro,
         title_hint=title_hint,
         candidates=json.dumps(candidates, indent=2),
-    )
+    ) + "\n\n" + _MAVLIT_RANKING_GUIDANCE
 
     result = call_gpt_json(prompt, context=f"apollo full ranking for {brand_name}", timeout=_RANK_TIMEOUT)
     picks = result.get("picks", []) if isinstance(result, dict) else []
 
     by_id = {p.get("id"): p for p in people}
-    ranked: list[tuple[dict, str]] = []
+    ranked: list[tuple[dict, str, int]] = []
     seen_ids: set = set()
     for pick in picks:
         pid = pick.get("id")
@@ -345,14 +366,20 @@ def _rank_all_candidates(db: Session, people: list[dict], brand_name: str, fallb
             logger.warning("LLM picked id=%s which isn't in the candidate list — skipping", pid)
             continue
         seen_ids.add(pid)
-        ranked.append((person, pick.get("reason", "")))
+        try:
+            confidence_score = max(0, min(100, int(pick.get("confidence_score", 0))))
+        except (TypeError, ValueError):
+            confidence_score = 0
+        ranked.append((person, pick.get("reason", ""), confidence_score))
+
+    ranked.sort(key=lambda item: item[2], reverse=True)
 
     # Safety net: never let a candidate found in search go unstored just
     # because the LLM's response omitted it.
     for p in people:
         pid = p.get("id")
         if pid not in seen_ids:
-            ranked.append((p, "not explicitly ranked by LLM"))
+            ranked.append((p, "not explicitly ranked by LLM", 0))
             seen_ids.add(pid)
 
     if not ranked:
@@ -520,12 +547,20 @@ def find_brand_contact(db: Session, brand_raw_id: int) -> list[dict]:
         return []
 
     rows: list[dict] = []
-    for rank, (candidate, reason) in enumerate(picks, start=1):
+    candidates_above_threshold = sum(
+        confidence_score >= _ENRICH_MIN_CONFIDENCE
+        for _candidate, _reason, confidence_score in picks
+    )
+    enriched_count = 0
+
+    for rank, (candidate, reason, confidence_score) in enumerate(picks, start=1):
         enriched = None
-        if rank <= _ENRICH_TOP_N:
+        if confidence_score >= _ENRICH_MIN_CONFIDENCE:
             enriched = _enrich_person(candidate["id"], reveal_phone=(rank <= _PHONE_TOP_N))
             if not enriched:
-                logger.warning("Apollo contact: '%s' — enrich failed for rank %d, saving search data only", brand.name, rank)
+                logger.warning("Apollo contact: '%s' — enrich failed for rank %d (confidence %d), saving search data only", brand.name, rank, confidence_score)
+            else:
+                enriched_count += 1
             time.sleep(0.3)
 
         source = enriched or candidate
@@ -536,6 +571,7 @@ def find_brand_contact(db: Session, brand_raw_id: int) -> list[dict]:
         rows.append({
             "brand_raw_id":     brand_raw_id,
             "rank":             rank,
+            "sponsorship_contact_confidence": confidence_score,
             "is_enriched":      bool(enriched),
             "full_name":        full_name,
             "title":            source.get("title") or candidate.get("title"),
@@ -563,8 +599,8 @@ def find_brand_contact(db: Session, brand_raw_id: int) -> list[dict]:
     })
 
     logger.info(
-        "Apollo contact: '%s' -> %d contact(s) stored (%d enriched), top pick: %s (%s)%s",
-        brand.name, len(rows), min(len(rows), _ENRICH_TOP_N), top["full_name"], top["title"],
+        "Apollo contact: '%s' -> %d contact(s) stored (%d above enrichment threshold, threshold=%d, %d enriched), top pick: %s (%s)%s",
+        brand.name, len(rows), candidates_above_threshold, _ENRICH_MIN_CONFIDENCE, enriched_count, top["full_name"], top["title"],
         " [C-suite fallback]" if fallback_used else "",
     )
     return rows
@@ -577,8 +613,8 @@ def run_apollo_contacts(db: Session, limit: int = 20, brand_id: int | None = Non
     brand_contacts row at all). Pass brand_id to target one specific brand
     directly (bypasses the already-attempted check, for testing).
 
-    limit defaults small (20) since each brand costs up to ENRICH_TOP_N
-    Apollo enrichment credits — raise it deliberately, don't crank it up by
+    limit defaults small (20) because each qualifying candidate costs an
+    Apollo enrichment credit — raise it deliberately, don't crank it up by
     default.
 
     Returns number of brands processed.
