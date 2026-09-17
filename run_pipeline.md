@@ -406,3 +406,11 @@ python3 -m pipeline.enrichment.geo_reach.geo_reach --limit 1 --creator-niche Fit
 ### have to make another pipeline so that it scrape creator re and brands after month or two month for recency posts
 ### brands creators insta follower min max +20% up down to users
 ### subniches match on niche
+
+
+### task for friday 18-9-2026 get all the distinct niches of brand, content creator re and content creator in table instagram_users
+#### make there descriptions using LLM (caption+bio)
+#### make the embedding in new vector database for all the niches name with there description 
+#### using cosine similerity make the csv file for all niches with all niches match to get the score between 0 and 1
+
+#### update frontend api so that if user select niche then in subniche it only can see subniches/tags for that niche
