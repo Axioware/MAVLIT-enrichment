@@ -135,13 +135,25 @@ ORDER BY
 
 
 
-SELECT id
-FROM brands_raw
-where name IS NULL
-AND has_official_website = true;
+SELECT DISTINCT niche
+FROM brands_niches;
 
 -- sudo -u postgres psql
 -- \c mavlit_enrichment_test
 
 -- sudo systemctl restart mavlit
 -- sudo systemctl status mavlit
+SELECT niche
+FROM (
+    SELECT niche
+    FROM brands_niches
+    WHERE niche IS NOT NULL
+
+    UNION
+
+    SELECT niche
+    FROM instagram_users
+    WHERE niche IS NOT NULL
+      AND niche <> 'unknown'
+) AS all_niches
+ORDER BY LOWER(niche);

@@ -45,7 +45,7 @@ import time
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, OPENAI_KEY
-from pipeline.db import BrandInstagramUser, InstagramCreatorCommenter, InstagramPost, InstagramUser, Prompt
+from pipeline.db import BrandInstagramUser, InstagramCreatorCommenter, InstagramPost, InstagramUser, Prompt, normalize_niche
 from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
@@ -389,7 +389,7 @@ def _build_post_row(
         "location":            demo["location"],
         "age_group":           demo["age_group"],
         # LLM-classified content niche — creators only, NULL for commenters.
-        "niche":               niche if user_type != "commenter" else None,
+        "niche":               normalize_niche(niche) if user_type != "commenter" else None,
         "post_id":             str(item.get("id") or ""),
         "post_url":            item.get("url") or item.get("displayUrl") or "",
         "caption":             item.get("caption"),
