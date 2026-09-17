@@ -132,3 +132,10 @@ FROM best_per_brand
 ORDER BY
   niche ASC,
   brand_name ASC;
+
+
+-- sudo -u postgres psql
+-- \c mavlit_enrichment_test
+
+-- sudo systemctl restart mavlit
+-- sudo systemctl status mavlit
