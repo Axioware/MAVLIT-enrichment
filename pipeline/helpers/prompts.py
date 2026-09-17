@@ -233,6 +233,11 @@ Recent post captions: {captions}
 Recent post hashtags: {hashtags}
 
 Based on the bio, captions, and hashtags, identify the single most likely content niche/category this creator posts about (e.g. "fashion", "gaming", "fitness", "food_cooking", "beauty", "travel", "tech", "music", "parenting", "finance"). If there isn't enough information to tell, answer "unknown".
+Formatting requirement:
+* The first letter of the niche must always be uppercase.
+* Preserve the rest of the niche exactly as written.
+* Examples: "fashion" → "Fashion", "gaming" → "Gaming", "food_cooking" → "Food_cooking", "beauty" → "Beauty".
+* If there isn't enough information to determine the niche, return "Unknown".
 
 Reply ONLY with this JSON object, no extra text:
 {"niche": "..."}\
