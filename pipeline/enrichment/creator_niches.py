@@ -13,10 +13,10 @@ if __package__ in (None, ""):
 from dotenv import load_dotenv
 load_dotenv()
 
-from sqlalchemy import or_, text
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from pipeline.db import Base, CreatorNiche, InstagramUser, Prompt, SessionLocal, engine
+from pipeline.db import CreatorNiche, InstagramUser, Prompt, SessionLocal
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import (
     CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT,
@@ -115,23 +115,6 @@ def _generate_niche(
     return None
 
 
-def _ensure_table() -> None:
-    with engine.begin() as conn:
-        conn.execute(text("""
-            DO $$
-            BEGIN
-                IF to_regclass('public.creator_profiles_test') IS NOT NULL
-                   AND to_regclass('public.creator_niches') IS NULL THEN
-                    ALTER TABLE creator_profiles_test RENAME TO creator_niches;
-                END IF;
-            END $$;
-        """))
-    Base.metadata.create_all(bind=engine, tables=[CreatorNiche.__table__])
-    with engine.connect() as conn:
-        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_niches_instagram_user_id ON creator_niches(instagram_user_id)"))
-        conn.commit()
-
-
 def run_creator_niches(
     db: Session,
     limit: int | None = None,
@@ -200,7 +183,6 @@ def main() -> None:
     args = parser.parse_args()
     if args.batch_size < 1 or args.retries < 1:
         parser.error("--batch-size and --retries must be positive")
-    _ensure_table()
     db = SessionLocal()
     try:
         created = run_creator_niches(

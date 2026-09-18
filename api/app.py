@@ -77,6 +77,21 @@ def _run_migrations() -> None:
                    AND to_regclass('public.creator_niches') IS NULL THEN
                     ALTER TABLE creator_profiles_test RENAME TO creator_niches;
                 END IF;
+
+                IF to_regclass('public.ix_creator_profiles_test_username') IS NOT NULL
+                   AND to_regclass('public.ix_creator_niches_username') IS NULL THEN
+                    ALTER INDEX ix_creator_profiles_test_username RENAME TO ix_creator_niches_username;
+                END IF;
+
+                IF to_regclass('public.ix_creator_profiles_test_niche') IS NOT NULL
+                   AND to_regclass('public.ix_creator_niches_niche') IS NULL THEN
+                    ALTER INDEX ix_creator_profiles_test_niche RENAME TO ix_creator_niches_niche;
+                END IF;
+
+                IF to_regclass('public.ix_creator_profiles_test_instagram_user_id') IS NOT NULL
+                   AND to_regclass('public.ix_creator_niches_instagram_user_id') IS NULL THEN
+                    ALTER INDEX ix_creator_profiles_test_instagram_user_id RENAME TO ix_creator_niches_instagram_user_id;
+                END IF;
             END $$;
         """))
 
@@ -364,6 +379,8 @@ def _run_migrations() -> None:
         "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS hunter_verified_at TIMESTAMPTZ",
         "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS hunter_status TEXT",
         "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS hunter_score INTEGER",
+        "CREATE INDEX IF NOT EXISTS ix_creator_niches_username ON creator_niches(username)",
+        "CREATE INDEX IF NOT EXISTS ix_creator_niches_niche ON creator_niches(niche)",
     ]
     with engine.connect() as conn:
         for sql in stmts:
