@@ -96,6 +96,28 @@ def _run_migrations() -> None:
         """))
 
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        duplicate_result = conn.execute(text("""
+            WITH ranked AS (
+                SELECT
+                    id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY LOWER(TRIM(username))
+                        ORDER BY created_at DESC NULLS LAST, id DESC
+                    ) AS row_number
+                FROM creator_niches
+            )
+            DELETE FROM creator_niches AS niches
+            USING ranked
+            WHERE niches.id = ranked.id
+              AND ranked.row_number > 1
+        """))
+        if duplicate_result.rowcount:
+            logger.warning(
+                "Creator niche migration: removed %d duplicate row(s), keeping the newest result per username",
+                duplicate_result.rowcount,
+            )
+
     stmts = [
         # Original columns (idempotent)
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS country TEXT",
@@ -381,6 +403,11 @@ def _run_migrations() -> None:
         "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS hunter_score INTEGER",
         "CREATE INDEX IF NOT EXISTS ix_creator_niches_username ON creator_niches(username)",
         "CREATE INDEX IF NOT EXISTS ix_creator_niches_niche ON creator_niches(niche)",
+        "DROP INDEX IF EXISTS ix_creator_niches_instagram_user_id",
+        "DROP INDEX IF EXISTS uq_creator_profiles_test_instagram_user_id",
+        "CREATE INDEX IF NOT EXISTS ix_creator_niches_instagram_user_id ON creator_niches(instagram_user_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_niches_username ON creator_niches(username)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_niches_username_normalized ON creator_niches(LOWER(TRIM(username)))",
     ]
     with engine.connect() as conn:
         for sql in stmts:

@@ -13,7 +13,7 @@ if __package__ in (None, ""):
 from dotenv import load_dotenv
 load_dotenv()
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from pipeline.db import CreatorNiche, InstagramUser, Prompt, SessionLocal
@@ -130,14 +130,31 @@ def run_creator_niches(
         or_(InstagramUser.bio.isnot(None), InstagramUser.caption.isnot(None)),
     )
     if instagram_user_id is not None:
-        eligible = eligible.filter(InstagramUser.id == instagram_user_id)
+        selected_row = db.query(InstagramUser.username).filter(
+            InstagramUser.id == instagram_user_id,
+        ).first()
+        if not selected_row:
+            logger.warning("Creator niche: instagram_user_id=%d not found", instagram_user_id)
+            return 0
+        username_key = selected_row.username.strip().casefold()
+        eligible = eligible.filter(
+            func.lower(func.trim(InstagramUser.username)) == username_key,
+        )
     eligible = eligible.order_by(InstagramUser.id.asc()).all()
     contexts = _build_context(eligible)
-    processed_ids = {
-        row.instagram_user_id
-        for row in db.query(CreatorNiche.instagram_user_id).all()
+    processed_usernames = {
+        username.strip().casefold()
+        for (username,) in db.query(CreatorNiche.username).all()
+        if username and username.strip()
     }
-    pending = [row for row in eligible if row.id not in processed_ids]
+    pending = []
+    seen_usernames: set[str] = set()
+    for row in eligible:
+        username_key = row.username.strip().casefold()
+        if username_key in processed_usernames or username_key in seen_usernames:
+            continue
+        seen_usernames.add(username_key)
+        pending.append(row)
     if limit is not None:
         pending = pending[:limit]
     logger.info("Creator niche: %d eligible, %d pending, %d username context(s)", len(eligible), len(pending), len(contexts))
@@ -159,9 +176,7 @@ def run_creator_niches(
             })
         if inserts:
             from sqlalchemy.dialects.postgresql import insert
-            stmt = insert(CreatorNiche).values(inserts).on_conflict_do_nothing(
-                index_elements=[CreatorNiche.instagram_user_id]
-            )
+            stmt = insert(CreatorNiche).values(inserts).on_conflict_do_nothing()
             try:
                 result = db.execute(stmt)
                 db.commit()

@@ -338,11 +338,10 @@ class CreatorNiche(Base):
         Integer,
         ForeignKey("instagram_users.id"),
         nullable=False,
-        unique=True,
         index=True,
     )
 
-    username = Column(Text, nullable=False, index=True)
+    username = Column(Text, nullable=False, unique=True, index=True)
     niche = Column(Text, nullable=False, index=True)
     description = Column(Text)
     tags = Column(JSONB)
