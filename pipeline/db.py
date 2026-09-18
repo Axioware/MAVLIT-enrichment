@@ -329,6 +329,36 @@ class InstagramUser(Base):
         return self.username or f"Instagram User #{self.id}"
 
 
+class CreatorNiche(Base):
+    __tablename__ = "creator_niches"
+
+    id = Column(Integer, primary_key=True)
+
+    instagram_user_id = Column(
+        Integer,
+        ForeignKey("instagram_users.id"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    username = Column(Text, nullable=False, index=True)
+    niche = Column(Text, nullable=False, index=True)
+    description = Column(Text)
+    tags = Column(JSONB)
+
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+    )
+
+    instagram_user = relationship(
+        "InstagramUser",
+        lazy="selectin",
+        foreign_keys=[instagram_user_id],
+    )
+
+
 class ContentCreatorRE(Base):
     """
     Reverse-engineering seed list — you supply username/niche/url directly

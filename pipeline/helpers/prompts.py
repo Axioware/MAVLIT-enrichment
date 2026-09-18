@@ -494,6 +494,62 @@ Use empty lists if there isn't enough information to extract either one — do n
 """
 
 
+#  creator_niches.py
+
+CREATOR_NICHE_DESCRIPTION_PROMPT_NAME = "creator_niche_description"
+CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT = """\
+You are analyzing an Instagram creator.
+
+Niche:
+{niche}
+
+Bio:
+{bio}
+
+Recent captions:
+{captions}
+
+Your task:
+
+Determine what this creator primarily creates content about.
+
+Return ONLY valid JSON.
+
+Rules:
+
+- Focus on actual content themes.
+- Use the niche as guidance but do not blindly repeat it.
+- Use evidence from bio and captions.
+- Ignore hashtags that do not represent content themes.
+- Ignore sponsorships and brand names unless central to the creator's content.
+- Tags should be highly useful for creator-brand matching.
+- Prefer concrete topics rather than generic words.
+- Generate 5–10 tags.
+- Description must be concise.
+- Maximum 35 words.
+- Third-person style.
+- Do not mention follower counts.
+- Do not mention engagement.
+- Do not mention demographics.
+- Do not mention location unless clearly central to the content.
+
+Return:
+
+{{
+"description": "short creator summary",
+"tags": ["tag1", "tag2", "tag3"]
+}}
+
+Examples:
+
+Fitness creator:
+{{"description": "Fitness creator focused on strength training, gym workouts, muscle building, and performance-focused health content.", "tags": ["strength training", "gym workouts", "muscle building", "sports nutrition", "fitness motivation"]}}
+
+Beauty creator:
+{{"description": "Beauty creator sharing skincare routines, makeup tutorials, cosmetic reviews, and self-care content.", "tags": ["skincare", "makeup", "beauty reviews", "cosmetics", "self care"]}}
+"""
+
+
 #  shopify_detect.py
 
 BRAND_NICHE_TAGS_PROMPT_NAME = "brand_niche_tags"

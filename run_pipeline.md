@@ -1,5 +1,17 @@
 # wikidata_socials → shopify → tranco → meta_ads → youtube
 
+## Creator profiles test
+
+Run the idempotent Instagram creator profile enrichment:
+
+```bash
+source .venv/bin/activate
+python -m pipeline.enrichment.creator_niches --batch-size 25
+python -m pipeline.enrichment.creator_niches --limit 1
+```
+
+Use `--limit 10` for a small run, or `--retries 3` to control LLM retry attempts.
+
 
 ## to run instagram_posts.py (apify)
 python3 -c "
