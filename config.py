@@ -50,6 +50,7 @@ ENABLE_LLM        = os.getenv("ENABLE_LLM", "false").strip().lower() == "true"
 
 # LLM classification/extraction + embeddings (OpenAI, gpt-5-mini + text-embedding-3-small)
 OPENAI_KEY = os.getenv("OPENAI_KEY", "")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 
 # Frontend analytics (PostHog). The project token is a public write-only key
 # (safe to ship to the browser — this is how PostHog's JS snippet is meant

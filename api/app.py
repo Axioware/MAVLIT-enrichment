@@ -14,7 +14,7 @@ from sqlalchemy import String, cast, or_, text
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql import Select
 from config import ADMIN_PASSKEY, FRONTEND_ORIGINS, IS_PRODUCTION, JWT_SECRET, POSTHOG_PROJECT_TOKEN, POSTHOG_HOST
-from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, ContractReview, CreatorProfile, CreatorNiche, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Pitch, Prompt, RateEstimate, SavedBrand, TestBrandsWithInstagramPosts, TestCreatorBrandPartnershipPost, YoutubeSponsorship, SessionLocal, engine
+from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, ContractReview, CreatorProfile, CreatorNiche, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Pitch, Prompt, RateEstimate, SavedBrand, TestBrandsWithInstagramPosts, TestCreatorBrandPartnershipPost, TestNiche, YoutubeSponsorship, SessionLocal, engine
 from api.auth import get_current_user, router as auth_router
 from api.schemas import CreatorProfileResponse, profile_to_response as _profile_to_response
 from api.advisory import router as advisory_router
@@ -595,6 +595,19 @@ class TestBrandsWithInstagramPostsAdmin(ModelView, model=TestBrandsWithInstagram
     page_size = 15
 
 
+class TestNicheAdmin(ModelView, model=TestNiche):
+    name         = "Niche (test)"
+    name_plural  = "Niches (test)"
+    category     = "Test"
+    icon         = "fa-solid fa-list"
+    column_list  = [TestNiche.niche, TestNiche.description]
+    column_searchable_list = [TestNiche.niche, TestNiche.description]
+    column_sortable_list   = [TestNiche.niche, TestNiche.description]
+    column_default_sort    = [(TestNiche.niche, False)]
+    form_excluded_columns  = [TestNiche.embedding]
+    page_size = 15
+
+
 class TestCreatorBrandPartnershipPostAdmin(ModelView, model=TestCreatorBrandPartnershipPost):
     name         = "Creator Brand Post (test)"
     name_plural  = "Creator Brand Posts (test)"
@@ -982,6 +995,7 @@ admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
 admin.add_view(InstagramPostAdmin)
 admin.add_view(TestBrandsWithInstagramPostsAdmin)
+admin.add_view(TestNicheAdmin)
 admin.add_view(TestCreatorBrandPartnershipPostAdmin)
 admin.add_view(CreatorNicheAdmin)
 admin.add_view(InstagramUserAdmin)

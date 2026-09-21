@@ -143,17 +143,21 @@ FROM brands_niches;
 
 -- sudo systemctl restart mavlit
 -- sudo systemctl status mavlit
+
+
 SELECT niche
-FROM (
-    SELECT niche
-    FROM brands_niches
-    WHERE niche IS NOT NULL
+FROM brands_niches
+WHERE niche IS NOT NULL
 
-    UNION
+UNION
 
-    SELECT niche
-    FROM instagram_users
-    WHERE niche IS NOT NULL
-      AND niche <> 'unknown'
-) AS all_niches
-ORDER BY LOWER(niche);
+SELECT niche
+FROM instagram_users
+WHERE niche IS NOT NULL
+
+ORDER BY niche;
+
+
+SELECT COUNT(DISTINCT username)
+FROM instagram_users
+WHERE niche IS NOT NULL;

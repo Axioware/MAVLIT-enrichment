@@ -4,7 +4,7 @@ import re
 
 import httpx
 
-from config import OPENAI_KEY
+from config import EMBEDDING_MODEL, OPENAI_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ _MODEL = "gpt-5-mini"
 # mistral-embed which is fixed at 1024. Requesting 1024 here matches the
 # existing brand_match_profile.embedding / creator_profiles.embedding
 # Vector(1024) columns exactly, so no schema migration is needed.
-_EMBED_MODEL = "text-embedding-3-small"
+_EMBED_MODEL = EMBEDDING_MODEL
 _EMBED_DIMENSIONS = 1024
 
 _TIMEOUT = 60.0
@@ -113,4 +113,29 @@ def embed_text(text: str, context: str = "") -> list[float]:
         return resp.json()["data"][0]["embedding"]
     except Exception as exc:
         logger.error("OpenAI embed call failed%s — %s", f" ({context})" if context else "", exc)
+        return []
+
+
+def embed_text_batch(texts: list[str], context: str = "") -> list[list[float]]:
+    """Embed multiple strings in one OpenAI request, returning [] on failure."""
+    if not texts:
+        return []
+    if not OPENAI_KEY:
+        logger.warning("OPENAI_KEY not set — skipping embed call%s", f" ({context})" if context else "")
+        return []
+    try:
+        resp = httpx.post(
+            f"{_BASE_URL}/embeddings",
+            headers=_headers(),
+            json={"model": _EMBED_MODEL, "input": texts, "dimensions": _EMBED_DIMENSIONS},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = sorted(resp.json()["data"], key=lambda item: item["index"])
+        vectors = [item["embedding"] for item in data]
+        if len(vectors) != len(texts) or any(len(vector) != _EMBED_DIMENSIONS for vector in vectors):
+            raise ValueError("OpenAI returned an unexpected number or dimension of embeddings")
+        return vectors
+    except Exception as exc:
+        logger.error("OpenAI batch embed call failed%s — %s", f" ({context})" if context else "", exc)
         return []

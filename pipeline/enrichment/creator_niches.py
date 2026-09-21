@@ -1,4 +1,6 @@
-"""Generate concise, evidence-based niche descriptions for Instagram creators."""
+"""Generate concise, evidence-based niche descriptions for Instagram creators.
+.venv/bin/python pipeline/enrichment/creator_niches.py --limit 1
+"""
 
 import argparse
 import logging

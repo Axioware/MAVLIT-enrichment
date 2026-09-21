@@ -713,6 +713,14 @@ class TestBrandsWithInstagramPosts(Base):
     generated_at            = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
+class TestNiche(Base):
+    __tablename__ = "test_niches"
+
+    niche       = Column(Text, primary_key=True)
+    description = Column(Text)
+    embedding   = Column(Vector(1024))
+
+
 class TestCreatorBrandPartnershipPost(Base):
     """
     Scratch/test table for content_creator_re evidence. One row per
