@@ -1,20 +1,19 @@
 """
 pipeline/matching/scoring.py
 
-Stage 3 Step C — weighted scoring across 7 dimensions, per the matching
+Stage 3 Step C — weighted scoring across 6 dimensions, per the matching
 design doc. Each dimension is normalized to 0.0-1.0; missing data yields
 None (not 0) so it can be excluded and its weight redistributed among the
 dimensions that ARE available, rather than unfairly penalizing a brand or
 creator just because a signal hasn't been computed yet.
 
 Weights (sum to 1.0):
-  niche_match           0.25  — brands_raw.niche vs creator_profiles.content_niche
-  sponsorship_activity  0.20  — live per creator-brand formula, see _score_sponsorship_activity()
-  audience_demographics 0.20  — gender/age/country overlap
-  creator_tier_fit      0.15  — typical_creator_tier vs creator_tier
-  semantic_similarity   0.10  — cosine similarity from the Stage 3B pgvector search
+  niche_match           0.26  — brands_raw.niche vs creator_profiles.content_niche
+  sponsorship_activity  0.21  — live per creator-brand formula, see _score_sponsorship_activity()
+  audience_demographics 0.21  — gender/age overlap
+  creator_tier_fit      0.16  — typical_creator_tier vs creator_tier
+  semantic_similarity   0.11  — cosine similarity from the Stage 3B pgvector search
   platform_match        0.05  — brand_match_profile.has_* vs creator's primary_platform
-  geo_match             0.05  — brand operating_area/country vs creator audience_top_countries
 
 Tranco rank, HQ country, and website traffic tier are deliberately excluded
 — per the design doc, they don't measure fit.
@@ -34,17 +33,15 @@ from sqlalchemy.orm import Session
 
 from pipeline.db import BrandProfile, BrandRaw, CreatorProfile, InstagramPost, YoutubeSponsorship
 from pipeline.enrichment.initial_brand_scoring import _days_since
-from pipeline.matching.country_normalize import countries_match, normalize_country
 from pipeline.matching.niche_compatibility import niche_compatibility
 
 WEIGHTS: dict[str, float] = {
-    "niche_match":           0.25,
-    "sponsorship_activity":  0.20,
-    "audience_demographics": 0.20,
-    "creator_tier_fit":      0.15,
-    "semantic_similarity":   0.10,
-    "platform_match":        0.05,
-    "geo_match":             0.05,
+    "niche_match":           0.2631578947368421,
+    "sponsorship_activity":  0.21052631578947367,
+    "audience_demographics": 0.21052631578947367,
+    "creator_tier_fit":      0.15789473684210525,
+    "semantic_similarity":   0.10526315789473684,
+    "platform_match":        0.05263157894736842,
 }
 
 # instagram_users.py's LLM demographics classifier buckets ages into these —
@@ -236,19 +233,6 @@ def _age_overlap_score(age_min: int | None, age_max: int | None, brand_age_group
     return (overlap / total) if total > 0 else None
 
 
-def _country_overlap_score(creator_countries: list | None, brand_countries: list | None) -> float | None:
-    if not creator_countries or not brand_countries:
-        return None
-    # Normalized so e.g. creator-side "US" and brand-side "America" are
-    # recognized as the same country (see country_normalize.py docstring).
-    c_map = {normalize_country(c["country"]): c.get("pct", 0) or 0 for c in creator_countries if c.get("country")}
-    b_map = {normalize_country(c["country"]): c.get("pct", 0) or 0 for c in brand_countries if c.get("country")}
-    if not c_map or not b_map:
-        return None
-    overlap = sum(min(c_map.get(k, 0), b_map.get(k, 0)) for k in set(c_map) | set(b_map))
-    return max(0.0, min(1.0, overlap))
-
-
 def _score_audience_demographics(creator: CreatorProfile, profile: BrandProfile | None) -> float | None:
     if profile is None:
         return None
@@ -259,10 +243,6 @@ def _score_audience_demographics(creator: CreatorProfile, profile: BrandProfile 
     age_score = _age_overlap_score(creator.audience_age_min, creator.audience_age_max, profile.audience_age_groups)
     if age_score is not None:
         components.append(age_score)
-
-    country_score = _country_overlap_score(creator.audience_top_countries, profile.audience_top_countries)
-    if country_score is not None:
-        components.append(country_score)
 
     return (sum(components) / len(components)) if components else None
 
@@ -294,23 +274,6 @@ def _score_platform_match(creator: CreatorProfile, profile: BrandProfile | None)
     return None if flag is None else (1.0 if flag else 0.0)
 
 
-def _score_geo_match(creator: CreatorProfile, brand: BrandRaw) -> float | None:
-    if not creator.audience_top_countries:
-        return None
-    brand_geo = brand.operating_area or brand.country
-    if not brand_geo:
-        return None
-    if brand_geo.strip().lower() == "worldwide":
-        # Operates everywhere — full credit for wherever the creator's audience is.
-        top = creator.audience_top_countries[0]
-        return top.get("pct", 0) or 0
-    best = 0.0
-    for c in creator.audience_top_countries:
-        if countries_match(c.get("country"), brand_geo):
-            best = max(best, c.get("pct", 0) or 0)
-    return best   # 0.0 is a real "no overlap found" answer here, not "unknown"
-
-
 def score_match(
     db: Session,
     creator: CreatorProfile,
@@ -331,7 +294,6 @@ def score_match(
         "creator_tier_fit":      _score_creator_tier_fit(creator, profile),
         "semantic_similarity":   _score_semantic_similarity(cosine_distance),
         "platform_match":        _score_platform_match(creator, profile),
-        "geo_match":             _score_geo_match(creator, brand),
     }
 
     available_weight = sum(WEIGHTS[k] for k, v in raw.items() if v is not None)

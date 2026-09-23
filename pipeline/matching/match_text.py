@@ -5,19 +5,18 @@ pipeline/matching/match_text.py
 per the matching design doc. Plain string formatting sourced from real
 signal fields, not an LLM call.
 
-Walks 7 priority tiers in order (audience demographics > niche/category >
-sponsorship activity > creator tier fit > geo match > semantic similarity
-[fallback] > platform presence [last resort]). Within each tier, its
-conditions are checked top to bottom and the first one that's true is
-rendered. Up to 2 rendered reasons are collected total — priorities 6 and 7
-are unconditional fallbacks so a real profile+brand pair (with at least a
-primary_platform set) is effectively always guaranteed at least 1-2 reasons.
+Walks 6 priority tiers in order (audience demographics > niche/category >
+sponsorship activity > creator tier fit > semantic similarity [fallback] >
+platform presence [last resort]). Within each tier, its conditions are
+checked top to bottom and the first one that's true is rendered. Up to 2
+rendered reasons are collected total — priorities 5 and 6 are unconditional
+fallbacks so a real profile+brand pair (with at least a primary_platform set)
+is effectively always guaranteed at least 1-2 reasons.
 """
 
 import random
 
 from pipeline.db import BrandProfile, BrandRaw, CreatorProfile
-from pipeline.matching.country_normalize import countries_match
 
 _MAX_REASONS = 2
 
@@ -100,30 +99,6 @@ def _priority_4_tier(creator: CreatorProfile, brand: BrandRaw, profile: BrandPro
     return None
 
 
-def _priority_5_geo(creator: CreatorProfile, brand: BrandRaw, profile: BrandProfile | None, dims: dict) -> str | None:
-    if not creator.audience_top_countries:
-        return None
-    brand_geo = (brand.operating_area or brand.country or "")
-    if not brand_geo:
-        return None
-
-    if brand_geo.strip().lower() == "worldwide":
-        top_country = creator.audience_top_countries[0].get("country")
-        return f"{brand.name} operates worldwide, including {top_country}, your largest audience market."
-
-    matched = [
-        c["country"] for c in creator.audience_top_countries
-        if c.get("country") and countries_match(c["country"], brand_geo)
-    ]
-    if len(matched) >= 2:
-        return f"Operates across {', '.join(matched)} — your audience's top markets."
-    if len(matched) >= 1:
-        top_country = creator.audience_top_countries[0].get("country")
-        return f"{brand.name} has an active presence in {top_country}, your largest audience market."
-
-    return None
-
-
 _SEMANTIC_FALLBACK_TEXTS = [
     "Your content style and their brand voice show strong overall alignment.",
     "A strong overall fit based on your content themes and their brand positioning.",
@@ -148,7 +123,6 @@ _PRIORITY_TIERS = [
     _priority_2_niche,
     _priority_3_activity,
     _priority_4_tier,
-    _priority_5_geo,
     _priority_6_semantic,
     _priority_7_platform,
 ]
