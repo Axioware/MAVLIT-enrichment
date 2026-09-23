@@ -249,7 +249,17 @@ processed = run_apollo_contacts(db, limit=1)
 print('processed:', processed)
 db.close()
 "
-
+## run brand_signals.py 
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.brand_signals import run_brand_signals
+db = SessionLocal()
+processed = run_brand_signals(db, limit=1)
+print('processed:', processed)
+db.close()
+"
 ## run linkedin_verify.py (checks Apollo-enriched contacts still work at the brand, via LinkedIn)
 python3 -c "
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
