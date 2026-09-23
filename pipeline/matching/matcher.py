@@ -218,7 +218,7 @@ def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) 
     results = []
     for brand, profile, distance in shortlist:
         scored = score_match(db, creator, brand, profile, distance)
-        reasons = generate_match_reasons(creator, brand, profile, scored["dimensions"])
+        reasons = generate_match_reasons(creator, brand, profile, scored["dimensions"], db=db)
         results.append({
             "brand_raw_id": brand.id,
             "brand_name":   brand.name,

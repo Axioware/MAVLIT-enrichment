@@ -5,126 +5,282 @@ pipeline/matching/match_text.py
 per the matching design doc. Plain string formatting sourced from real
 signal fields, not an LLM call.
 
-Walks 6 priority tiers in order (audience demographics > niche/category >
-sponsorship activity > creator tier fit > semantic similarity [fallback] >
-platform presence [last resort]). Within each tier, its conditions are
-checked top to bottom and the first one that's true is rendered. Up to 2
-rendered reasons are collected total — priorities 5 and 6 are unconditional
-fallbacks so a real profile+brand pair (with at least a primary_platform set)
-is effectively always guaranteed at least 1-2 reasons.
+Returns one recent-sponsorship reason selected from the three sponsorship
+conditions, with the highest-scoring applicable condition taking precedence.
 """
 
-import random
+from datetime import datetime, timedelta, timezone
 
-from pipeline.db import BrandProfile, BrandRaw, CreatorProfile
+from sqlalchemy import func
 
-_MAX_REASONS = 2
+from pipeline.db import (
+    BrandContact,
+    BrandNiche,
+    BrandProfile,
+    BrandRaw,
+    BrandInstagramUser,
+    CreatorNiche,
+    CreatorProfile,
+    InstagramPost,
+    InstagramUser,
+    YoutubeSponsorship,
+)
+
+_MAX_REASONS = 10
 
 
-def _dominant_age_group(age_groups: dict | None) -> str | None:
-    if not age_groups:
+def _recent_sponsorship_candidates(
+    creator: CreatorProfile,
+    brand: BrandRaw,
+    db=None,
+) -> list[tuple[int, str]]:
+    """Build the scored candidates for the nine sponsorship conditions."""
+    if db is None or creator.embedding is None or brand is None:
+        return []
+
+    now = datetime.now(timezone.utc)
+    recent_paid_rows = (
+        db.query(InstagramPost)
+        .filter(
+            InstagramPost.brand_raw_id == brand.id,
+            InstagramPost.paid_partnership.is_(True),
+        )
+        .all()
+    )
+
+    sponsorships: list[tuple[InstagramPost, int, set[str]]] = []
+
+    for post in recent_paid_rows:
+        age_days = _post_age_days(post.timestamp, now)
+        if age_days is None or age_days > 180:
+            continue
+
+        usernames = _post_usernames(post)
+        similar_usernames: set[str] = set()
+        for username in usernames:
+            match_row = (
+                db.query(
+                    CreatorNiche.username,
+                    (1.0 - CreatorNiche.embedding.cosine_distance(creator.embedding)).label("similarity"),
+                )
+                .filter(
+                    func.lower(CreatorNiche.username) == username,
+                    CreatorNiche.embedding.isnot(None),
+                )
+                .first()
+            )
+            if match_row is None:
+                continue
+            similarity = float(match_row.similarity)
+            if similarity >= 0.70:
+                similar_usernames.add(username)
+        sponsorships.append((post, age_days, similar_usernames))
+
+    if not sponsorships:
+        return []
+
+    candidates: list[tuple[int, str]] = []
+    for post, age_days, similar_usernames in sponsorships:
+        if age_days <= 30:
+            window = "last month"
+            scores = (100, 95, 82)
+        elif age_days <= 90:
+            window = "last 3 months"
+            scores = (92, 90, 75)
+        else:
+            window = "last 6 months"
+            scores = (85, 81, 71)
+
+        if len(similar_usernames) >= 2:
+            candidates.append((scores[0], f"{brand.name} ran a paid partnership with multiple creators whose content closely matches yours within the {window}."))
+        elif len(similar_usernames) == 1:
+            candidates.append((scores[1], f"{brand.name} ran a paid partnership within the {window} with the creator whose content closely matches yours."))
+        else:
+            candidates.append((scores[2], f"{brand.name} ran a paid partnership within the {window}."))
+
+    return candidates
+
+
+def _recent_sponsorship_priority_reason(
+    creator: CreatorProfile,
+    brand: BrandRaw,
+    db=None,
+) -> str | None:
+    candidates = _recent_sponsorship_candidates(creator, brand, db)
+    return max(candidates, key=lambda candidate: candidate[0])[1] if candidates else None
+
+
+def _post_age_days(timestamp: str | None, now: datetime) -> int | None:
+    if not timestamp:
         return None
-    return max(age_groups.items(), key=lambda kv: kv[1])[0]
-
-
-def _priority_1_audience(creator: CreatorProfile, brand: BrandRaw, profile: BrandProfile | None, dims: dict) -> str | None:
-    # audience_sample_size was removed from BrandProfile (derivable on demand
-    # from brand_instagram_users instead of storing a duplicate count) — the
-    # sample-size-gated "demographic overlap" condition that used to be the
-    # strongest Priority-1 signal is gone; gender-skew and age-data below are
-    # what's left.
-    if profile is None:
+    try:
+        normalized = timestamp[:-1] + "+00:00" if timestamp.endswith("Z") else timestamp
+        post_time = datetime.fromisoformat(normalized)
+        if post_time.tzinfo is None:
+            post_time = post_time.replace(tzinfo=timezone.utc)
+        return max(0, (now - post_time).days)
+    except (TypeError, ValueError):
         return None
 
-    if profile.audience_gender_male_pct is not None and creator.audience_gender_male_pct is not None:
-        b_female = profile.audience_gender_female_pct if profile.audience_gender_female_pct is not None else 1 - profile.audience_gender_male_pct
-        c_female = creator.audience_gender_female_pct if creator.audience_gender_female_pct is not None else 1 - creator.audience_gender_male_pct
-        b_dir = "male" if profile.audience_gender_male_pct > b_female else "female"
-        c_dir = "male" if creator.audience_gender_male_pct > c_female else "female"
-        b_pct = max(profile.audience_gender_male_pct, b_female)
-        if b_dir == c_dir and b_pct >= 0.6:
-            return f"{round(b_pct * 100)}% of their audience is {b_dir}, matching your {c_dir}-skewing following."
 
-    if profile.audience_age_groups and creator.audience_age_min is not None and creator.audience_age_max is not None:
-        dominant = _dominant_age_group(profile.audience_age_groups)
-        if dominant:
-            return f"Their core audience is {dominant} — right in line with your {creator.audience_age_min}–{creator.audience_age_max} audience."
-
-    return None
+def _post_usernames(post: InstagramPost) -> set[str]:
+    usernames: set[str] = set()
+    for field in ("sponsors", "tagged_users", "mentions", "coauthor_producers"):
+        value = getattr(post, field, None)
+        values = value if isinstance(value, list) else [value] if isinstance(value, str) else []
+        usernames.update(str(item).strip().lower() for item in values if str(item).strip())
+    return usernames
 
 
-def _priority_2_niche(creator: CreatorProfile, brand: BrandRaw, profile: BrandProfile | None, dims: dict) -> str | None:
-    niche_score = dims.get("niche_match", {}).get("score")
-    if niche_score is not None and niche_score >= 0.7:
-        return f"Strong category fit — your {creator.content_niche} content aligns directly with their {brand.niche} positioning."
-    return None
+def _creator_niche_names(creator: CreatorProfile) -> set[str]:
+    return {n.strip().lower() for n in (creator.content_niche or "").split(",") if n.strip()}
 
 
-def _priority_3_activity(creator: CreatorProfile, brand: BrandRaw, profile: BrandProfile | None, dims: dict) -> str | None:
-    # youtube_sponsorship_count / instagram_paid_posts_count were removed
-    # from BrandProfile (derived on demand from youtube_sponsorships /
-    # instagram_posts instead) — only the meta_ads-based condition remains
-    # wired up here.
-    if profile is None:
+def _additional_priority_reasons(creator: CreatorProfile, brand: BrandRaw, db) -> list[tuple[int, str]]:
+    reasons: list[tuple[int, str]] = []
+    avg_followers = None
+    profile = db.query(BrandProfile).filter(BrandProfile.brand_raw_id == brand.id).first()
+    if profile:
+        avg_followers = profile.avg_ig_collaborator_followers or profile.avg_yt_creator_subscribers
+
+    if avg_followers and creator.follower_count:
+        within_size = abs(creator.follower_count - avg_followers) <= avg_followers * 0.25
+        similar_partner = bool(_similar_partner_usernames(creator, brand, db))
+        if within_size and similar_partner:
+            reasons.append((80, f"{brand.name} has partnered with creators average ({avg_followers:,} followers), creators close to your size with content type same as yours."))
+        elif within_size:
+            reasons.append((50, f"{brand.name} has partnered with creators average ({avg_followers:,} followers), creators close to your size."))
+
+    contact = db.query(BrandContact).filter(
+        BrandContact.brand_raw_id == brand.id,
+        BrandContact.email_status.ilike("verified"),
+        BrandContact.sponsorship_contact_confidence >= 70,
+        BrandContact.still_at_brand.is_(True),
+    ).first()
+    if contact:
+        reasons.append((75, f"MAVLIT has a verified contact for {brand.name}'s partnerships team."))
+
+    similar = _similar_partner_usernames(creator, brand, db)
+    if len(similar) >= 3:
+        reasons.append((78, f"{len(similar)} creators with content similar to yours have partnered with {brand.name}."))
+    elif _same_niche_high_confidence_partner(creator, brand, db):
+        reasons.append((70, f"{brand.name} has partnered with a creator in the same niche as you."))
+    elif similar:
+        reasons.append((65, f"{brand.name} has partnered with a creator, whose content closely matches yours."))
+
+    youtube = db.query(YoutubeSponsorship).filter(
+        YoutubeSponsorship.brand_raw_id == brand.id,
+        YoutubeSponsorship.confidence >= 0.7,
+    ).first()
+    if youtube:
+        reasons.append((45, f"{brand.name} also sponsors YouTube creators."))
+
+    if profile and profile.insta_lowest is not None and profile.insta_highest is not None and creator.follower_count is not None:
+        reasons.append((69, f"It works with creators from {profile.insta_lowest:,} to {profile.insta_highest:,} followers — you're at {creator.follower_count:,}."))
+
+    if brand.brand_tier == "lower-range":
+        reasons.append((40, f"{brand.name} is a smaller brand, so creators can typically reach decision-makers directly."))
+    elif brand.brand_tier == "midlower-range":
+        reasons.append((35, f"{brand.name} is a growing brand where creator outreach is still realistic."))
+
+    brand_tags = _brand_tags(brand, db)
+    creator_tags = {str(tag).lower() for tag in (creator.sub_niches or [])}
+    for brand_tag in brand_tags:
+        for creator_tag in creator_tags:
+            if _shorter_tag_words_match(brand_tag, creator_tag):
+                reasons.append((33, f"{brand.name} focuses on {brand_tag}, which overlaps with your content ({creator_tag})."))
+                break
+        if reasons and reasons[-1][0] == 33:
+            break
+    if _creator_niche_names(creator) & {str(brand.niche or "").lower()}:
+        reasons.append((30, f"{brand.name} is a {brand.niche} brand, the same niche as you."))
+
+    return reasons
+
+
+
+def _similar_partner_usernames(creator: CreatorProfile, brand: BrandRaw, db) -> set[str]:
+    if creator.embedding is None:
+        return set()
+    usernames: set[str] = set()
+    posts = db.query(InstagramPost).filter(
+        InstagramPost.brand_raw_id == brand.id,
+        InstagramPost.paid_partnership.is_(True),
+    ).all()
+    for post in posts:
+        for username in _post_usernames(post):
+            match_row = (
+                db.query(
+                    CreatorNiche.username,
+                    (1.0 - CreatorNiche.embedding.cosine_distance(creator.embedding)).label("similarity"),
+                )
+                .filter(
+                    func.lower(CreatorNiche.username) == username,
+                    CreatorNiche.embedding.isnot(None),
+                )
+                .first()
+            )
+            if match_row is not None and float(match_row.similarity) >= 0.70:
+                usernames.add(username)
+    return usernames
+
+
+def _same_niche_high_confidence_partner(creator: CreatorProfile, brand: BrandRaw, db) -> bool:
+    niches = _creator_niche_names(creator)
+    if not niches:
+        return False
+    rows = (
+        db.query(InstagramUser.username)
+        .join(BrandInstagramUser, BrandInstagramUser.instagram_user_id == InstagramUser.id)
+        .join(InstagramPost, InstagramPost.brand_raw_id == BrandInstagramUser.brand_raw_id)
+        .filter(
+            BrandInstagramUser.brand_raw_id == brand.id,
+            InstagramPost.sponsorship_confidence >= 90,
+            InstagramUser.user_type != "commenter",
+            func.lower(InstagramUser.niche).in_(niches),
+        )
+        .distinct()
+        .all()
+    )
+    return len(rows) >= 5
+
+
+def _brand_tags(brand: BrandRaw, db) -> set[str]:
+    rows = db.query(BrandNiche.tags).filter(
+        BrandNiche.brand_raw_id == brand.id,
+        BrandNiche.tags.isnot(None),
+    ).all()
+    return {
+        str(tag).strip().lower()
+        for (tags,) in rows
+        if isinstance(tags, list)
+        for tag in tags
+        if isinstance(tag, str) and tag.strip()
+    }
+
+
+def _shorter_tag_words_match(first: str, second: str) -> bool:
+    first_words = set(first.lower().split())
+    second_words = set(second.lower().split())
+    shorter, longer = sorted((first_words, second_words), key=len)
+    return bool(shorter) and shorter.issubset(longer)
+
+
+def _priority_1_recent_sponsorship_similarity(
+    creator: CreatorProfile,
+    brand: BrandRaw,
+    profile: BrandProfile | None,
+    dims: dict,
+    db=None,
+) -> str | None:
+    if db is None or creator.embedding is None or brand is None:
         return None
 
-    if profile.meta_ads_recency_days is not None and profile.meta_ads_recency_days <= 30:
-        return f"Actively running paid campaigns — their last ad went live {profile.meta_ads_recency_days} days ago."
-
-    return None
-
-
-def _priority_4_tier(creator: CreatorProfile, brand: BrandRaw, profile: BrandProfile | None, dims: dict) -> str | None:
-    if profile is None:
-        return None
-
-    if creator.creator_tier and profile.typical_creator_tier and creator.creator_tier == profile.typical_creator_tier:
-        return f"Typically partners with {profile.typical_creator_tier} creators — exactly your tier."
-
-    # Prefer the average for the creator's own platform, but fall back to
-    # whichever platform DOES have data — a true "past collaborators
-    # averaged N followers" statement is still worth surfacing even if it's
-    # not from the creator's primary platform, rather than giving up here
-    # and falling through to a weaker/generic tier.
-    platform = (creator.primary_platform or "").strip().lower()
-    if platform == "youtube":
-        avg = profile.avg_yt_creator_subscribers or profile.avg_ig_collaborator_followers
-    elif platform == "instagram":
-        avg = profile.avg_ig_collaborator_followers or profile.avg_yt_creator_subscribers
-    else:
-        avg = profile.avg_yt_creator_subscribers or profile.avg_ig_collaborator_followers
-    if avg:
-        return f"Their past collaborators average {avg:,} followers — right in your range."
-
-    return None
-
-
-_SEMANTIC_FALLBACK_TEXTS = [
-    "Your content style and their brand voice show strong overall alignment.",
-    "A strong overall fit based on your content themes and their brand positioning.",
-]
-
-
-def _priority_6_semantic(creator: CreatorProfile, brand: BrandRaw, profile: BrandProfile | None, dims: dict) -> str | None:
-    # Always eligible (fallback tier) — randomized between equivalent
-    # phrasings so a results page showing many fallback-tier matches
-    # doesn't repeat the exact same sentence for every one of them.
-    return random.choice(_SEMANTIC_FALLBACK_TEXTS)
-
-
-def _priority_7_platform(creator: CreatorProfile, brand: BrandRaw, profile: BrandProfile | None, dims: dict) -> str | None:
-    if not creator.primary_platform:
-        return None
-    return f"{brand.name} is active on {creator.primary_platform}, where your audience is."
+    return _recent_sponsorship_priority_reason(creator, brand, db)
 
 
 _PRIORITY_TIERS = [
-    _priority_1_audience,
-    _priority_2_niche,
-    _priority_3_activity,
-    _priority_4_tier,
-    _priority_6_semantic,
-    _priority_7_platform,
+    _priority_1_recent_sponsorship_similarity,
 ]
 
 
@@ -134,17 +290,19 @@ def generate_match_reasons(
     profile: BrandProfile | None,
     dimensions: dict,
     max_reasons: int = _MAX_REASONS,
+    db=None,
 ) -> list[str]:
     """
-    Walks the 7 priority tiers in order, collecting up to max_reasons
-    rendered strings from the first tiers whose condition is satisfied.
+    Returns one winner for each exclusive group and each applicable separate
+    signal, ordered by descending requested score.
     `dimensions` is the score_match()["dimensions"] dict for this pair.
     """
-    reasons: list[str] = []
-    for tier_fn in _PRIORITY_TIERS:
-        text = tier_fn(creator, brand, profile, dimensions)
-        if text:
-            reasons.append(text)
-        if len(reasons) >= max_reasons:
-            break
-    return reasons
+    reasons: list[tuple[int, str]] = []
+    recent_reason = _priority_1_recent_sponsorship_similarity(creator, brand, profile, dimensions, db)
+    if recent_reason:
+        recent_candidates = _recent_sponsorship_candidates(creator, brand, db)
+        recent_score = max(score for score, text in recent_candidates if text == recent_reason)
+        reasons.append((recent_score, recent_reason))
+    reasons.extend(_additional_priority_reasons(creator, brand, db))
+    reasons.sort(key=lambda reason: reason[0], reverse=True)
+    return [text for _, text in reasons[:max_reasons]]
