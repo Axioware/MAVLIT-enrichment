@@ -1395,22 +1395,38 @@ def list_brand_niches():
 @app.get("/brand-niche-tags")
 def list_brand_niche_tags():
     """
-    Distinct sub-niche/category tags from brands_niches.tags — LLM-extracted
-    in shopify_detect.py from each brand's scraped about-page description
-    (e.g. ["sustainable clothing", "streetwear"]), for the creator-profile
-    form's Sub-niches multi-select. Used the same way content_niche is in
-    the Stage 3 hard filter (matcher.py): a brand matches if the creator's
-    sub_niches overlaps with that brand's brands_niches.tags.
+    Sub-niche/category tags from brands_niches.tags — LLM-extracted in
+    shopify_detect.py from each brand's scraped about-page description
+    (e.g. ["sustainable clothing", "streetwear"]), grouped by the brand's
+    primary niche. Returned both as a flat distinct list and as a
+    tags-by-niche map so the creator-profile form can filter the Sub-niches
+    multi-select based on the primary niche(s) the creator has chosen.
+
+    A brand matches in the Stage 3 hard filter (matcher.py) when the
+    creator's sub_niches overlap with that brand's brands_niches.tags.
     """
     db = SessionLocal()
     try:
         rows = db.execute(text("""
-            SELECT DISTINCT tag
-            FROM brands_niches, jsonb_array_elements_text(tags) AS tag
+            SELECT niche, jsonb_array_elements_text(tags) AS tag
+            FROM brands_niches
             WHERE jsonb_typeof(tags) = 'array'
         """)).fetchall()
-        tags = sorted({r[0] for r in rows if r[0]}, key=str.lower)
-        return {"tags": tags}
+
+        tags_by_niche: dict[str, set[str]] = {}
+        all_tags: set[str] = set()
+        for niche, tag in rows:
+            if not niche or not tag:
+                continue
+            all_tags.add(tag)
+            tags_by_niche.setdefault(niche, set()).add(tag)
+
+        tags = sorted(all_tags, key=str.lower)
+        tags_by_niche_sorted = {
+            niche: sorted(tags_by_niche[niche], key=str.lower)
+            for niche in sorted(tags_by_niche, key=str.lower)
+        }
+        return {"tags": tags, "tags_by_niche": tags_by_niche_sorted}
     finally:
         db.close()
 

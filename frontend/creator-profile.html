@@ -254,7 +254,7 @@
               </button>
               <div class="msel-panel" id="sub_niches_list"></div>
             </div>
-            <p class="niche-hint">Click to select one or more — finer-grained tags brands are tagged with.</p>
+            <p class="niche-hint">Click to select one or more — only tags for your chosen primary niche(s) are shown.</p>
           </div>
           <div class="field full">
             <label for="content_description">Describe your content</label>
@@ -379,6 +379,8 @@
 <script>
   var PENDING_KEY = 'mavlit_pending_creator_profile';
   var isLoggedIn  = false;
+  var allSubNicheTags = [];
+  var subNicheTagsByNiche = {};
 
   // Mirrors _AGE_BUCKET_RANGES in pipeline/matching/scoring.py — the min/max
   // range is derived from the selected bracket rather than typed separately,
@@ -418,9 +420,7 @@
     if (!profile) return;
     var form = document.getElementById('formSection');
     Object.keys(profile).forEach(function(key) {
-      if (key === 'content_niche') { setSelectedPills('content_niche_list', profile[key]); return; }
-      if (key === 'sub_niches') { setSelectedPills('sub_niches_list', profile[key]); return; }
-      if (key === 'audience_age_bracket') { setSelectedPills('audience_age_bracket_list', profile[key]); return; }
+      if (['content_niche', 'sub_niches', 'audience_age_bracket'].indexOf(key) !== -1) return;
       var input = form.elements[key];
       if (!input || profile[key] === null || profile[key] === undefined) return;
       if (key === 'audience_gender_male_pct' || key === 'audience_gender_female_pct') {
@@ -434,6 +434,12 @@
     if (profile.audience_top_countries && profile.audience_top_countries.length) {
       form.elements['audience_top_country'].value = profile.audience_top_countries[0].country || '';
     }
+
+    // Apply multi-select fields last so sub-niches can be filtered by the
+    // primary niche(s) already selected.
+    if (profile.content_niche) setSelectedPills('content_niche_list', profile.content_niche);
+    renderSubNiches(getSelectedPills('content_niche_list'), profile.sub_niches || []);
+    if (profile.audience_age_bracket) setSelectedPills('audience_age_bracket_list', profile.audience_age_bracket);
   }
 
   // Primary niche is a checkbox dropdown populated from GET /brand-niches
@@ -445,7 +451,7 @@
   // (no Ctrl/Cmd modifier needed, unlike a native <select multiple>).
   // content_niche is stored as one comma-joined string
   // (niche_compatibility() splits it), sub_niches is stored as a real array.
-  function populateMselOptions(panelId, values) {
+  function populateMselOptions(panelId, values, onChange) {
     var panel = document.getElementById(panelId);
     (values || []).forEach(function(value) {
       var label = document.createElement('label');
@@ -453,22 +459,77 @@
       var checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.value = value;
-      checkbox.onchange = function() { updateMselLabel(panelId); };
+      checkbox.onchange = function() {
+        updateMselLabel(panelId);
+        if (onChange) onChange(value, checkbox.checked);
+      };
       label.appendChild(checkbox);
       label.appendChild(document.createTextNode(value));
       panel.appendChild(label);
     });
   }
 
+  function getVisibleSubNiches(selectedNiches) {
+    var visible = new Set();
+    if (!selectedNiches || !selectedNiches.length) {
+      allSubNicheTags.forEach(function(tag) { visible.add(tag); });
+    } else {
+      selectedNiches.forEach(function(niche) {
+        (subNicheTagsByNiche[niche] || []).forEach(function(tag) { visible.add(tag); });
+      });
+    }
+    return Array.from(visible).sort(function(a, b) {
+      return a.localeCompare(b, 'en', { sensitivity: 'base' });
+    });
+  }
+
+  function renderSubNiches(selectedNiches, preserveSelected) {
+    var visible = getVisibleSubNiches(selectedNiches);
+    var panel = document.getElementById('sub_niches_list');
+
+    var toPreserve = [];
+    if (preserveSelected === undefined) {
+      toPreserve = getSelectedPills('sub_niches_list');
+    } else if (preserveSelected) {
+      toPreserve = Array.isArray(preserveSelected)
+        ? preserveSelected
+        : String(preserveSelected).split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+    }
+    var preserveSet = new Set(toPreserve);
+
+    panel.innerHTML = '';
+    visible.forEach(function(tag) {
+      var label = document.createElement('label');
+      label.className = 'msel-option';
+      var checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = tag;
+      checkbox.onchange = function() { updateMselLabel('sub_niches_list'); };
+      if (preserveSet.has(tag)) checkbox.checked = true;
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(tag));
+      panel.appendChild(label);
+    });
+    updateMselLabel('sub_niches_list');
+  }
+
   function loadNiches() {
     var niches = fetch('/brand-niches')
       .then(function(r) { return r.ok ? r.json() : { niches: [] }; })
-      .then(function(data) { populateMselOptions('content_niche_list', data.niches); })
+      .then(function(data) {
+        populateMselOptions('content_niche_list', data.niches, function() {
+          renderSubNiches(getSelectedPills('content_niche_list'));
+        });
+      })
       .catch(function() { /* leave list empty — form still usable */ });
 
     var tags = fetch('/brand-niche-tags')
-      .then(function(r) { return r.ok ? r.json() : { tags: [] }; })
-      .then(function(data) { populateMselOptions('sub_niches_list', data.tags); })
+      .then(function(r) { return r.ok ? r.json() : { tags: [], tags_by_niche: {} }; })
+      .then(function(data) {
+        allSubNicheTags = data.tags || [];
+        subNicheTagsByNiche = data.tags_by_niche || {};
+        renderSubNiches([]);
+      })
       .catch(function() { /* leave list empty — form still usable */ });
 
     return Promise.all([niches, tags]);
