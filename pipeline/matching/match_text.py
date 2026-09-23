@@ -26,7 +26,7 @@ from pipeline.db import (
     YoutubeSponsorship,
 )
 
-_MAX_REASONS = 10
+_MAX_REASONS = 5
 
 
 def _recent_sponsorship_candidates(
