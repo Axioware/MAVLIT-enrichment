@@ -29,6 +29,12 @@ from pipeline.db import (
 _MAX_REASONS = 5
 
 
+def _similarity_match_label(similarity: float) -> str:
+    if similarity < 0.86:
+        return "80-90%"
+    return "90-100%"
+
+
 def _recent_sponsorship_candidates(
     creator: CreatorProfile,
     brand: BrandRaw,
@@ -48,7 +54,7 @@ def _recent_sponsorship_candidates(
         .all()
     )
 
-    sponsorships: list[tuple[InstagramPost, int, set[str]]] = []
+    sponsorships: list[tuple[InstagramPost, int, dict[str, float]]] = []
 
     for post in recent_paid_rows:
         age_days = _post_age_days(post.timestamp, now)
@@ -56,7 +62,7 @@ def _recent_sponsorship_candidates(
             continue
 
         usernames = _post_usernames(post)
-        similar_usernames: set[str] = set()
+        similar_usernames: dict[str, float] = {}
         for username in usernames:
             match_row = (
                 db.query(
@@ -73,7 +79,7 @@ def _recent_sponsorship_candidates(
                 continue
             similarity = float(match_row.similarity)
             if similarity >= 0.70:
-                similar_usernames.add(username)
+                similar_usernames[username] = max(similar_usernames.get(username, 0.0), similarity)
         sponsorships.append((post, age_days, similar_usernames))
 
     if not sponsorships:
@@ -86,6 +92,11 @@ def _recent_sponsorship_candidates(
         if age_days == latest_age
         for username in usernames
     }
+    best_similarity = max(
+        (similarity for _, age_days, usernames in sponsorships if age_days == latest_age for similarity in usernames.values()),
+        default=0.70,
+    )
+    similarity_label = _similarity_match_label(best_similarity)
     if latest_age <= 30:
         window = "last month"
         scores = (100, 95, 82)
@@ -98,9 +109,9 @@ def _recent_sponsorship_candidates(
 
     candidates: list[tuple[int, str]] = []
     if len(latest_similar_usernames) >= 2:
-        candidates.append((scores[0], f"{brand.name} ran a paid partnership with multiple creators whose content closely matches yours within the {window}."))
+        candidates.append((scores[0], f"{brand.name} ran a paid partnership with multiple creators whose content {similarity_label} matches yours within the {window}."))
     elif len(latest_similar_usernames) == 1:
-        candidates.append((scores[1], f"{brand.name} ran a paid partnership within the {window} with the creator whose content closely matches yours."))
+        candidates.append((scores[1], f"{brand.name} ran a paid partnership within the {window} with the creator whose content {similarity_label} matches yours."))
     else:
         candidates.append((scores[2], f"{brand.name} ran a paid partnership within the {window}."))
 
@@ -151,9 +162,14 @@ def _additional_priority_reasons(creator: CreatorProfile, brand: BrandRaw, db) -
 
     if avg_followers and creator.follower_count:
         within_size = abs(creator.follower_count - avg_followers) <= avg_followers * 0.25
-        similar_partner = bool(_similar_partner_usernames(creator, brand, db)) or _same_niche_partner(creator, brand, db)
+        similar_partners = _similar_partner_usernames(creator, brand, db)
+        similar_partner = bool(similar_partners) or _same_niche_partner(creator, brand, db)
         if within_size and similar_partner:
-            reasons.append((80, f"{brand.name} has partnered with creators average ({avg_followers:,} followers), creators close to your size with content type same as yours."))
+            if similar_partners:
+                similarity_label = _similarity_match_label(max(similar_partners.values()))
+                reasons.append((80, f"{brand.name} has partnered with creators average ({avg_followers:,} followers), creators close to your size with content {similarity_label} similar to yours."))
+            else:
+                reasons.append((80, f"{brand.name} has partnered with creators average ({avg_followers:,} followers), creators close to your size with content type same as yours."))
         elif within_size:
             reasons.append((50, f"{brand.name} has partnered with creators average ({avg_followers:,} followers), creators close to your size."))
 
@@ -168,11 +184,13 @@ def _additional_priority_reasons(creator: CreatorProfile, brand: BrandRaw, db) -
 
     similar = _similar_partner_usernames(creator, brand, db)
     if len(similar) >= 3:
-        reasons.append((78, f"{len(similar)} creators with content similar to yours have partnered with {brand.name}."))
+        similarity_label = _similarity_match_label(max(similar.values()))
+        reasons.append((78, f"{len(similar)} creators with content {similarity_label} similar to yours have partnered with {brand.name}."))
     elif _same_niche_high_confidence_partner(creator, brand, db):
-        reasons.append((70, f"{brand.name} has partnered with a creator in the same niche as you."))
+        reasons.append((70, f"{brand.name} has partnered with a creator in the {creator.content_niche} niche, the same as yours."))
     elif similar:
-        reasons.append((65, f"{brand.name} has partnered with a creator, whose content closely matches yours."))
+        similarity_label = _similarity_match_label(max(similar.values()))
+        reasons.append((65, f"{brand.name} has partnered with a creator whose content {similarity_label} matches yours."))
 
     youtube = db.query(YoutubeSponsorship).filter(
         YoutubeSponsorship.brand_raw_id == brand.id,
@@ -219,10 +237,10 @@ def _additional_priority_reasons(creator: CreatorProfile, brand: BrandRaw, db) -
 
 
 
-def _similar_partner_usernames(creator: CreatorProfile, brand: BrandRaw, db) -> set[str]:
+def _similar_partner_usernames(creator: CreatorProfile, brand: BrandRaw, db) -> dict[str, float]:
     if creator.embedding is None:
-        return set()
-    usernames: set[str] = set()
+        return {}
+    usernames: dict[str, float] = {}
     posts = db.query(InstagramPost).filter(
         InstagramPost.brand_raw_id == brand.id,
         InstagramPost.paid_partnership.is_(True),
@@ -241,7 +259,8 @@ def _similar_partner_usernames(creator: CreatorProfile, brand: BrandRaw, db) -> 
                 .first()
             )
             if match_row is not None and float(match_row.similarity) >= 0.70:
-                usernames.add(username)
+                similarity = float(match_row.similarity)
+                usernames[username] = max(usernames.get(username, 0.0), similarity)
     return usernames
 
 
