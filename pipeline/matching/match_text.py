@@ -79,24 +79,30 @@ def _recent_sponsorship_candidates(
     if not sponsorships:
         return []
 
-    candidates: list[tuple[int, str]] = []
-    for post, age_days, similar_usernames in sponsorships:
-        if age_days <= 30:
-            window = "last month"
-            scores = (100, 95, 82)
-        elif age_days <= 90:
-            window = "last 3 months"
-            scores = (92, 90, 75)
-        else:
-            window = "last 6 months"
-            scores = (85, 81, 71)
+    latest_age = min(age_days for _, age_days, _ in sponsorships)
+    latest_similar_usernames = {
+        username
+        for _, age_days, usernames in sponsorships
+        if age_days == latest_age
+        for username in usernames
+    }
+    if latest_age <= 30:
+        window = "last month"
+        scores = (100, 95, 82)
+    elif latest_age <= 90:
+        window = "last 3 months"
+        scores = (92, 90, 75)
+    else:
+        window = "last 6 months"
+        scores = (85, 81, 71)
 
-        if len(similar_usernames) >= 2:
-            candidates.append((scores[0], f"{brand.name} ran a paid partnership with multiple creators whose content closely matches yours within the {window}."))
-        elif len(similar_usernames) == 1:
-            candidates.append((scores[1], f"{brand.name} ran a paid partnership within the {window} with the creator whose content closely matches yours."))
-        else:
-            candidates.append((scores[2], f"{brand.name} ran a paid partnership within the {window}."))
+    candidates: list[tuple[int, str]] = []
+    if len(latest_similar_usernames) >= 2:
+        candidates.append((scores[0], f"{brand.name} ran a paid partnership with multiple creators whose content closely matches yours within the {window}."))
+    elif len(latest_similar_usernames) == 1:
+        candidates.append((scores[1], f"{brand.name} ran a paid partnership within the {window} with the creator whose content closely matches yours."))
+    else:
+        candidates.append((scores[2], f"{brand.name} ran a paid partnership within the {window}."))
 
     return candidates
 
@@ -145,7 +151,7 @@ def _additional_priority_reasons(creator: CreatorProfile, brand: BrandRaw, db) -
 
     if avg_followers and creator.follower_count:
         within_size = abs(creator.follower_count - avg_followers) <= avg_followers * 0.25
-        similar_partner = bool(_similar_partner_usernames(creator, brand, db))
+        similar_partner = bool(_similar_partner_usernames(creator, brand, db)) or _same_niche_partner(creator, brand, db)
         if within_size and similar_partner:
             reasons.append((80, f"{brand.name} has partnered with creators average ({avg_followers:,} followers), creators close to your size with content type same as yours."))
         elif within_size:
@@ -175,8 +181,22 @@ def _additional_priority_reasons(creator: CreatorProfile, brand: BrandRaw, db) -
     if youtube:
         reasons.append((45, f"{brand.name} also sponsors YouTube creators."))
 
-    if profile and profile.insta_lowest is not None and profile.insta_highest is not None and creator.follower_count is not None:
-        reasons.append((69, f"It works with creators from {profile.insta_lowest:,} to {profile.insta_highest:,} followers — you're at {creator.follower_count:,}."))
+    platform = (creator.primary_platform or "").strip().lower()
+    if platform == "youtube":
+        follower_min = profile.youtube_lowest if profile else None
+        follower_max = profile.youtube_highest if profile else None
+        creator_followers = creator.youtube_followers
+    else:
+        follower_min = profile.insta_lowest if profile else None
+        follower_max = profile.insta_highest if profile else None
+        creator_followers = creator.follower_count
+    if (
+        follower_min is not None
+        and follower_max is not None
+        and creator_followers is not None
+        and follower_min <= creator_followers <= follower_max
+    ):
+        reasons.append((69, f"{brand.name} works with creators that has followers range same as yours."))
 
     if brand.brand_tier == "lower-range":
         reasons.append((40, f"{brand.name} is a smaller brand, so creators can typically reach decision-makers directly."))
@@ -232,7 +252,7 @@ def _same_niche_high_confidence_partner(creator: CreatorProfile, brand: BrandRaw
     rows = (
         db.query(InstagramUser.username)
         .join(BrandInstagramUser, BrandInstagramUser.instagram_user_id == InstagramUser.id)
-        .join(InstagramPost, InstagramPost.brand_raw_id == BrandInstagramUser.brand_raw_id)
+        .join(InstagramPost, InstagramPost.post_id == InstagramUser.post_id)
         .filter(
             BrandInstagramUser.brand_raw_id == brand.id,
             InstagramPost.sponsorship_confidence >= 90,
@@ -243,6 +263,19 @@ def _same_niche_high_confidence_partner(creator: CreatorProfile, brand: BrandRaw
         .all()
     )
     return len(rows) >= 5
+
+
+def _same_niche_partner(creator: CreatorProfile, brand: BrandRaw, db) -> bool:
+    niches = _creator_niche_names(creator)
+    if not niches:
+        return False
+    return db.query(InstagramUser.id).join(
+        BrandInstagramUser, BrandInstagramUser.instagram_user_id == InstagramUser.id
+    ).filter(
+        BrandInstagramUser.brand_raw_id == brand.id,
+        InstagramUser.user_type != "commenter",
+        func.lower(InstagramUser.niche).in_(niches),
+    ).first() is not None
 
 
 def _brand_tags(brand: BrandRaw, db) -> set[str]:
