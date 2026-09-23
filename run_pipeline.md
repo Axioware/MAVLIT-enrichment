@@ -428,4 +428,4 @@ python3 -m pipeline.enrichment.geo_reach.geo_reach --limit 1 --creator-niche Fit
 ### have to make another pipeline so that it scrape creator re and brands after month or two month for recency posts
 ### brands creators insta follower min max +20% up down to users
 
-### task for 23-9-26 (update the hard filters, matching and taglines)
+### task for 23-9-26 (update the hard filters brandraw.geo_reach_score null or 0-40 and brands_raw.refferls = false)
