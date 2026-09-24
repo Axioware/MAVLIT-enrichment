@@ -161,3 +161,17 @@ ORDER BY niche;
 SELECT COUNT(DISTINCT username)
 FROM instagram_users
 WHERE niche IS NOT NULL;
+
+
+
+
+-- To see why the other brands were excluded:from initial brand scoring 
+
+SELECT
+    COUNT(*) FILTER (WHERE NOT has_official_website) AS no_official_website,
+    COUNT(*) FILTER (WHERE NOT shopify_checked) AS shopify_not_checked,
+    COUNT(*) FILTER (WHERE NOT tranco_checked) AS tranco_not_checked,
+    COUNT(*) FILTER (WHERE NOT youtube_checked) AS youtube_not_checked,
+    COUNT(*) FILTER (WHERE NOT instagram_checked) AS instagram_not_checked,
+    COUNT(*) FILTER (WHERE initial_brand_scored) AS already_scored
+FROM brands_raw;
