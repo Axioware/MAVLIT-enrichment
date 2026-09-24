@@ -150,7 +150,26 @@ def _post_usernames(post: InstagramPost) -> set[str]:
 
 
 def _creator_niche_names(creator: CreatorProfile) -> set[str]:
-    return {n.strip().lower() for n in (creator.content_niche or "").split(",") if n.strip()}
+    values = (
+        creator.instagram_primary_niche,
+        creator.youtube_primary_niche,
+        creator.content_niche,
+    )
+    return {
+        niche.strip().lower()
+        for value in values
+        for niche in (value or "").split(",")
+        if niche.strip()
+    }
+
+
+def _creator_sub_niche_names(creator: CreatorProfile) -> set[str]:
+    return {
+        str(niche).strip().lower()
+        for values in (creator.instagram_sub_niches, creator.youtube_sub_niches)
+        for niche in (values or [])
+        if str(niche).strip()
+    }
 
 
 def _additional_priority_reasons(creator: CreatorProfile, brand: BrandRaw, db) -> list[tuple[int, str]]:
@@ -222,7 +241,7 @@ def _additional_priority_reasons(creator: CreatorProfile, brand: BrandRaw, db) -
         reasons.append((35, f"{brand.name} is a growing brand where creator outreach is still realistic."))
 
     brand_tags = _brand_tags(brand, db)
-    creator_tags = {str(tag).lower() for tag in (creator.sub_niches or [])}
+    creator_tags = _creator_sub_niche_names(creator)
     for brand_tag in brand_tags:
         for creator_tag in creator_tags:
             if _shorter_tag_words_match(brand_tag, creator_tag):

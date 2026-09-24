@@ -270,6 +270,18 @@
     showResults();
   }
 
+  function errorFromResponse(response, fallback) {
+    return response.text().then(function(text) {
+      try {
+        var data = JSON.parse(text);
+        throw new Error(data.detail || fallback);
+      } catch (error) {
+        if (error instanceof SyntaxError) throw new Error(text || fallback);
+        throw error;
+      }
+    });
+  }
+
   function loadMatches() {
     fetch('/matches/me?limit=20', { credentials: 'include' })
       .then(function(r) {
@@ -277,7 +289,7 @@
           window.location.href = '/signin?return_to=' + encodeURIComponent('/matches');
           return null;
         }
-        if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Failed to load matches'); });
+        if (!r.ok) return errorFromResponse(r, 'Failed to load matches');
         return r.json();
       })
       .then(function(data) {
@@ -297,7 +309,7 @@
 
     fetch('/matches/me/refresh?limit=20', { method: 'POST', credentials: 'include' })
       .then(function(r) {
-        if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Refresh failed'); });
+        if (!r.ok) return errorFromResponse(r, 'Refresh failed');
         return r.json();
       })
       .then(renderMatches)
