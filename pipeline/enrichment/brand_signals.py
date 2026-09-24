@@ -238,12 +238,12 @@ def compute_platform_presence(db: Session, brand_raw_id: int) -> dict | None:
     return values
 
 
-# YouTube (0-25) + Instagram (0-25) + Meta Ads (0-15) mirror initial_brand_
+# YouTube (0-25) + Instagram (0-35) + Meta Ads (0-15) mirror initial_brand_
 # scoring.py's "Influencer Buying Activity" + "Advertising Budget" sections
 # exactly (its Section 3/4 — legitimacy/reachability — are deliberately
 # excluded, same as the matching design doc excludes tranco rank/HQ country/
 # traffic tier from Stage 3).
-_ACTIVITY_MAX_POINTS = 25 + 25 + 15
+_ACTIVITY_MAX_POINTS = 25 + 35 + 15
 
 
 def compute_sponsorship_activity(db: Session, brand_raw_id: int) -> dict | None:
@@ -296,7 +296,7 @@ def compute_sponsorship_activity(db: Session, brand_raw_id: int) -> dict | None:
     _upsert_brand_profile(db, brand_raw_id, values)
 
     logger.info(
-        "Sponsorship activity: brand_raw_id=%d score=%.1f (yt=%d/25 ig=%d/25 meta=%d/15)",
+        "Sponsorship activity: brand_raw_id=%d score=%.1f (yt=%s/25 ig=%s/35 meta=%s/15)",
         brand_raw_id, score, yt_pts, ig_pts, meta_pts,
     )
     return values
