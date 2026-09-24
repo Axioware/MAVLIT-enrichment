@@ -92,6 +92,7 @@ from pipeline.db import (
     InitialBrandScore,
     InstagramPost,
     MetaAd,
+    TestCreatorBrandPartnershipPost,
     YoutubeSponsorship,
 )
 
@@ -469,6 +470,34 @@ def _band(score: int) -> str:
     return "COLD"
 
 
+def _sponsorship_year_bounds() -> tuple[str, str]:
+    """Return the current calendar year's ISO text bounds."""
+    year = datetime.now(timezone.utc).year
+    return f"{year}-01-01", f"{year + 1}-01-01"
+
+
+def _has_qualifying_sponsorship(db: Session, brand_raw_id: int) -> bool:
+    """True when a recent high-confidence Instagram partnership exists."""
+    year_start, next_year_start = _sponsorship_year_bounds()
+
+    instagram_match = db.query(InstagramPost.id).filter(
+        InstagramPost.brand_raw_id == brand_raw_id,
+        InstagramPost.sponsorship_confidence >= 90,
+        InstagramPost.timestamp >= year_start,
+        InstagramPost.timestamp < next_year_start,
+    ).first()
+    if instagram_match:
+        return True
+
+    creator_brand_match = db.query(TestCreatorBrandPartnershipPost.id).filter(
+        TestCreatorBrandPartnershipPost.brand_raw_id == brand_raw_id,
+        TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
+        TestCreatorBrandPartnershipPost.post_timestamp >= year_start,
+        TestCreatorBrandPartnershipPost.post_timestamp < next_year_start,
+    ).first()
+    return creator_brand_match is not None
+
+
 # 
 # Public API
 # 
@@ -482,6 +511,12 @@ def score_brand(db: Session, brand_raw_id: int) -> dict[str, Any] | None:
     brand = db.query(BrandRaw).filter(BrandRaw.id == brand_raw_id).first()
     if not brand:
         logger.warning("score_brand: brand_raw_id=%d not found", brand_raw_id)
+        return None
+    if brand.refferls or not _has_qualifying_sponsorship(db, brand_raw_id):
+        logger.info(
+            "Skipping score for '%s' (id=%d): no qualifying current-year sponsorship or refferls=true",
+            brand.name, brand_raw_id,
+        )
         return None
 
     # Enrichment completeness (0-3)
@@ -551,15 +586,17 @@ def score_brand(db: Session, brand_raw_id: int) -> dict[str, Any] | None:
 
 def run_brand_scoring(db: Session, limit: int = 500, brand_id: int | None = None) -> int:
     """
-    Score all brands that have at least one enrichment step complete.
+    Score only non-referral brands with a current-year Instagram partnership
+    confidence of at least 90 in InstagramPost or the creator-brand test table.
     Brands are scored regardless of enrichment_completeness; the completeness
     value in the output row lets callers filter before sending to Apollo.
     Returns number of brands scored.
 
     Pass brand_id to target one specific brand directly — this bypasses the
-    enrichment-completeness and initial_brand_scored filters (so you can
-    re-run/test a brand regardless of its current state).
+    initial_brand_scored filters. The sponsorship and referral gate always
+    applies, including when brand_id is supplied.
     """
+    year_start, next_year_start = _sponsorship_year_bounds()
     if brand_id is not None:
         brands = db.query(BrandRaw).filter(BrandRaw.id == brand_id).all()
     else:
@@ -573,6 +610,22 @@ def run_brand_scoring(db: Session, limit: int = 500, brand_id: int | None = None
                 BrandRaw.youtube_checked    == True,
                 BrandRaw.instagram_checked  == True,
                 BrandRaw.initial_brand_scored == False,
+                BrandRaw.refferls.is_(False),
+            )
+            .filter(
+                db.query(InstagramPost.id).filter(
+                    InstagramPost.brand_raw_id == BrandRaw.id,
+                    InstagramPost.sponsorship_confidence >= 90,
+                    InstagramPost.timestamp >= year_start,
+                    InstagramPost.timestamp < next_year_start,
+                ).exists()
+                |
+                db.query(TestCreatorBrandPartnershipPost.id).filter(
+                    TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
+                    TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
+                    TestCreatorBrandPartnershipPost.post_timestamp >= year_start,
+                    TestCreatorBrandPartnershipPost.post_timestamp < next_year_start,
+                ).exists()
             )
             .limit(limit)
             .all()
@@ -586,8 +639,8 @@ def run_brand_scoring(db: Session, limit: int = 500, brand_id: int | None = None
     scored = 0
     for brand in brands:
         try:
-            score_brand(db, brand.id)
-            scored += 1
+            if score_brand(db, brand.id) is not None:
+                scored += 1
         except Exception:
             logger.exception("Brand scoring failed for brand_raw_id=%d", brand.id)
 
