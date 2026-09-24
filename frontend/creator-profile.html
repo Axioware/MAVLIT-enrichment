@@ -102,6 +102,32 @@
     }
     input::placeholder, textarea::placeholder { color: #475569; }
     textarea { resize: vertical; min-height: 70px; }
+    .niche-picker { position: relative; }
+    .niche-suggestions {
+      display: none;
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: calc(100% + .25rem);
+      z-index: 5;
+      max-height: 13rem;
+      overflow-y: auto;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      background: #0f172a;
+    }
+    .niche-suggestions.open { display: block; }
+    .niche-suggestion {
+      display: block;
+      width: 100%;
+      padding: .6rem .75rem;
+      border: 0;
+      background: transparent;
+      color: #e2e8f0;
+      text-align: left;
+      cursor: pointer;
+    }
+    .niche-suggestion:hover { background: #334155; }
     .platform-card { display: none; }
     .platform-choices { display: flex; gap: 1rem; flex-wrap: wrap; }
     .check-choice { display: flex; align-items: center; gap: .5rem; cursor: pointer; color: #cbd5e1; }
@@ -129,6 +155,20 @@
     }
     .status-msg.ok { color: #4ade80; }
     .status-msg.err { color: #f87171; }
+    .generation-toast {
+      position: fixed;
+      right: 1.25rem;
+      bottom: 1.25rem;
+      z-index: 10;
+      max-width: 22rem;
+      padding: .9rem 1rem;
+      border: 1px solid #38bdf8;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #e0f2fe;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .3);
+      text-decoration: none;
+    }
 
     .msel { position: relative; }
     .msel-toggle {
@@ -219,10 +259,6 @@
             <input id="full_name" name="full_name" type="text" required placeholder="Jane Doe" />
           </div>
           <div class="field">
-            <label for="creator_handle">Creator handle *</label>
-            <input id="creator_handle" name="creator_handle" type="text" required placeholder="@janedoe" />
-          </div>
-          <div class="field">
             <label for="age">Age</label>
             <input id="age" name="age" type="number" min="13" max="120" placeholder="28" />
           </div>
@@ -264,11 +300,17 @@
           </div>
           <div class="field">
             <label for="instagram_primary_niche">Primary niche</label>
-            <input id="instagram_primary_niche" name="instagram_primary_niche" type="text" placeholder="Fitness" />
+            <div class="niche-picker">
+              <input id="instagram_primary_niche" name="instagram_primary_niche" type="text" autocomplete="off" placeholder="Search and select niche(s)" oninput="showNicheSuggestions('instagram_primary_niche', 'primary')" />
+              <div class="niche-suggestions" id="instagram_primary_niche_suggestions"></div>
+            </div>
           </div>
           <div class="field">
             <label for="instagram_sub_niches">Sub-niches</label>
-            <input id="instagram_sub_niches" name="instagram_sub_niches" type="text" placeholder="Yoga, wellness" />
+            <div class="niche-picker">
+              <input id="instagram_sub_niches" name="instagram_sub_niches" type="text" autocomplete="off" placeholder="Search and select sub-niche(s)" oninput="showNicheSuggestions('instagram_sub_niches', 'sub')" />
+              <div class="niche-suggestions" id="instagram_sub_niches_suggestions"></div>
+            </div>
           </div>
           <div class="field full">
             <label for="instagram_excluded_categories">Brand categories to avoid</label>
@@ -307,11 +349,17 @@
           </div>
           <div class="field">
             <label for="youtube_primary_niche">Primary niche</label>
-            <input id="youtube_primary_niche" name="youtube_primary_niche" type="text" placeholder="Fitness" />
+            <div class="niche-picker">
+              <input id="youtube_primary_niche" name="youtube_primary_niche" type="text" autocomplete="off" placeholder="Search and select niche(s)" oninput="showNicheSuggestions('youtube_primary_niche', 'primary')" />
+              <div class="niche-suggestions" id="youtube_primary_niche_suggestions"></div>
+            </div>
           </div>
           <div class="field">
             <label for="youtube_sub_niches">Sub-niches</label>
-            <input id="youtube_sub_niches" name="youtube_sub_niches" type="text" placeholder="Yoga, wellness" />
+            <div class="niche-picker">
+              <input id="youtube_sub_niches" name="youtube_sub_niches" type="text" autocomplete="off" placeholder="Search and select sub-niche(s)" oninput="showNicheSuggestions('youtube_sub_niches', 'sub')" />
+              <div class="niche-suggestions" id="youtube_sub_niches_suggestions"></div>
+            </div>
           </div>
           <div class="field full">
             <label>How would you like to create your description?</label>
@@ -341,12 +389,18 @@
       <p class="status-msg" id="statusMsg"></p>
     </form>
   </div>
+  <a class="generation-toast" id="generationToast" href="/creator-profile" hidden>
+    Your description has generated. Click to view your creator profile.
+  </a>
 
 <script>
   var PENDING_KEY = 'mavlit_pending_creator_profile';
   var isLoggedIn  = false;
   var allSubNicheTags = [];
   var subNicheTagsByNiche = {};
+  var generatedDescriptions = {};
+  var PRIMARY_NICHES = ['Health', 'Music', 'Fitness', 'Beauty'];
+  var creatorSubNiches = [];
 
   // Mirrors _AGE_BUCKET_RANGES in pipeline/matching/scoring.py — the min/max
   // range is derived from the selected bracket rather than typed separately,
@@ -378,8 +432,10 @@
       isLoggedIn ? 'Save profile' : 'Continue with Google to save';
   }
 
-  var GENERATED_DESCRIPTION = 'MAVLIT will analyze your Instagram posts/captions and generate a creator description optimized for brand matching.\n\nEstimated time: 8–10 minutes.\n\nYou can continue onboarding without waiting.\n\nFrontend preview only — no content is analyzed yet.';
-  var YOUTUBE_GENERATED_DESCRIPTION = GENERATED_DESCRIPTION.replace('Instagram posts/captions', 'YouTube videos/descriptions');
+  var GENERATED_DESCRIPTIONS = {
+    instagram: 'MAVLIT will analyze your Instagram posts/captions and generate a creator description optimized for brand matching.\n\nEstimated time: 8–10 minutes.\n\nYou can continue onboarding without waiting.\n\nFrontend preview only — no content is analyzed yet.',
+    youtube: 'MAVLIT will analyze your YouTube videos/descriptions and generate a creator description optimized for brand matching.\n\nEstimated time: 8–10 minutes.\n\nYou can continue onboarding without waiting.\n\nFrontend preview only — no content is analyzed yet.'
+  };
 
   function selectedPlatforms() {
     return Array.prototype.slice.call(document.querySelectorAll('input[name="platform_choice"]:checked')).map(function(input) { return input.value; });
@@ -391,17 +447,73 @@
     document.getElementById('youtube_profile').style.display = selected.indexOf('youtube') !== -1 ? 'block' : 'none';
   }
 
-  function toggleDescription(platform) {
+  function toggleDescription(platform, shouldGenerate) {
     var form = document.getElementById('formSection');
     var mode = form.elements[platform + '_description_mode'].value;
     var description = form.elements[platform + '_description'];
     if (mode === 'generate') {
-      description.value = platform === 'instagram' ? GENERATED_DESCRIPTION : YOUTUBE_GENERATED_DESCRIPTION;
-      description.readOnly = true;
+      if (generatedDescriptions[platform]) {
+        description.value = generatedDescriptions[platform];
+      } else if (shouldGenerate !== false || !description.value) {
+        description.value = GENERATED_DESCRIPTIONS[platform];
+      }
+      description.readOnly = description.value === GENERATED_DESCRIPTIONS[platform];
     } else {
       description.readOnly = false;
-      if (description.value === GENERATED_DESCRIPTION || description.value === YOUTUBE_GENERATED_DESCRIPTION) description.value = '';
+      if (description.value === GENERATED_DESCRIPTIONS[platform]) description.value = '';
     }
+  }
+
+  function generateDescription(platform, body) {
+    var username = (platform === 'instagram' ? body.instagram_handle : body.youtube_channel_name) || '';
+    var niche = body[platform + '_primary_niche'] || '';
+    var description = document.getElementById(platform + '_description');
+    if (!username || !niche) {
+      return Promise.reject(new Error('Add the ' + platform + ' username and primary niche to generate a description.'));
+    }
+    return fetch('/creator-profile/me/generate-description', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platform: platform, username: username, niche: niche }),
+    })
+      .then(function(r) {
+        return r.json().then(function(data) {
+          if (!r.ok) throw new Error(data.detail || 'Description generation failed');
+          return data;
+        });
+      })
+      .then(function(data) {
+        body[platform + '_description'] = data.description;
+        body.content_description = selectedPlatforms()[0] === platform ? data.description : body.content_description;
+        generatedDescriptions[platform] = data.description;
+        description.value = data.description;
+        description.readOnly = false;
+        return data;
+      })
+  }
+
+  function showGenerationToast() {
+    var toast = document.getElementById('generationToast');
+    toast.hidden = false;
+    window.setTimeout(function() { toast.hidden = true; }, 3000);
+  }
+
+  function generateSelectedDescriptions(body) {
+    var platforms = selectedPlatforms().filter(function(platform) {
+      return body[platform + '_description_mode'] === 'generate' &&
+        body[platform + '_description'] === GENERATED_DESCRIPTIONS[platform];
+    });
+    if (!platforms.length) return Promise.resolve(false);
+    setStatus('MAVLIT is analyzing your selected content…', false);
+    return platforms.reduce(function(chain, platform) {
+      return chain.then(function(generated) {
+        return generateDescription(platform, body).then(function() { return true; });
+      });
+    }, Promise.resolve(false)).then(function(generated) {
+      if (generated) showGenerationToast();
+      return generated;
+    });
   }
 
   function setInput(id, value) {
@@ -421,7 +533,7 @@
   // form's display format (0–100 number, plain text country, comma list).
   function applyProfileToForm(profile) {
     if (!profile) return;
-    setInput('full_name', profile.full_name); setInput('creator_handle', profile.creator_handle);
+    setInput('full_name', profile.full_name);
     setInput('age', profile.age); setInput('gender', profile.gender);
     setInput('instagram_handle', profile.instagram_handle); setInput('instagram_followers', profile.instagram_followers);
     setInput('instagram_primary_niche', profile.instagram_primary_niche); setListInput('instagram_sub_niches', profile.instagram_sub_niches);
@@ -437,8 +549,13 @@
     });
     ['instagram', 'youtube'].forEach(function(platform) {
       if (profile[platform + '_description_mode']) setRadio(platform + '_description_mode', profile[platform + '_description_mode']);
+      if (profile[platform + '_description_mode'] === 'generate' &&
+          profile[platform + '_description'] &&
+          profile[platform + '_description'] !== GENERATED_DESCRIPTIONS[platform]) {
+        generatedDescriptions[platform] = profile[platform + '_description'];
+      }
       var mode = document.querySelector('input[name="' + platform + '_description_mode"]:checked');
-      if (mode) toggleDescription(platform);
+      if (mode) toggleDescription(platform, false);
     });
     updatePlatformSections();
   }
@@ -515,26 +632,51 @@
   }
 
   function loadNiches() {
-    var niches = fetch('/brand-niches')
+    return fetch('/creator-sub-niches')
       .then(function(r) { return r.ok ? r.json() : { niches: [] }; })
-      .then(function(data) {
-        populateMselOptions('content_niche_list', data.niches, function() {
-          renderSubNiches(getSelectedPills('content_niche_list'));
-        });
-      })
-      .catch(function() { /* leave list empty — form still usable */ });
-
-    var tags = fetch('/brand-niche-tags')
-      .then(function(r) { return r.ok ? r.json() : { tags: [], tags_by_niche: {} }; })
-      .then(function(data) {
-        allSubNicheTags = data.tags || [];
-        subNicheTagsByNiche = data.tags_by_niche || {};
-        renderSubNiches([]);
-      })
-      .catch(function() { /* leave list empty — form still usable */ });
-
-    return Promise.all([niches, tags]);
+      .then(function(data) { creatorSubNiches = data.niches || []; })
+      .catch(function() { creatorSubNiches = []; });
   }
+
+  function currentNicheSearch(value) {
+    var parts = value.split(',');
+    return parts[parts.length - 1].trim();
+  }
+
+  function showNicheSuggestions(inputId, kind) {
+    var input = document.getElementById(inputId);
+    var menu = document.getElementById(inputId + '_suggestions');
+    var query = currentNicheSearch(input.value).toLowerCase();
+    var source = kind === 'primary' ? PRIMARY_NICHES : creatorSubNiches;
+    var selected = input.value.split(',').map(function(value) { return value.trim().toLowerCase(); });
+    var matches = source.filter(function(value) {
+      return value.toLowerCase().indexOf(query) === 0 && selected.indexOf(value.toLowerCase()) === -1;
+    }).slice(0, 5);
+
+    menu.innerHTML = '';
+    matches.forEach(function(value) {
+      var option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'niche-suggestion';
+      option.textContent = value;
+      option.onclick = function() {
+        var parts = input.value.split(',').map(function(item) { return item.trim(); }).filter(Boolean);
+        if (parts.length) parts[parts.length - 1] = value;
+        else parts.push(value);
+        input.value = parts.join(', ') + ', ';
+        menu.classList.remove('open');
+        input.focus();
+      };
+      menu.appendChild(option);
+    });
+    menu.classList.toggle('open', matches.length > 0);
+  }
+
+  document.addEventListener('click', function(event) {
+    if (!event.target.closest('.niche-picker')) {
+      document.querySelectorAll('.niche-suggestions.open').forEach(function(menu) { menu.classList.remove('open'); });
+    }
+  });
 
   function toggleMsel(panelId) {
     var panel = document.getElementById(panelId);
@@ -600,7 +742,7 @@
     var mode = function(name) { var radio = document.querySelector('input[name="' + name + '"]:checked'); return radio ? radio.value : null; };
 
     return {
-      full_name: value('full_name'), creator_handle: value('creator_handle'), age: number('age'), gender: value('gender'),
+      full_name: value('full_name'), creator_handle: value('instagram_handle') || value('youtube_channel_name') || value('full_name'), age: number('age'), gender: value('gender'),
       primary_platform: platforms.length ? platforms.join(',') : null,
       follower_count: primary === 'instagram' ? number('instagram_followers') : number('youtube_subscribers'),
       content_niche: primary ? value(primary + '_primary_niche') : null,
@@ -628,12 +770,12 @@
     btn.textContent = 'Saving…';
     setStatus('', false);
 
-    return fetch('/creator-profile/me', {
+    return generateSelectedDescriptions(body).then(function() { return fetch('/creator-profile/me', {
       method: 'PUT',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    })
+    }); })
       .then(function(r) {
         if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
         return r.json();
@@ -723,6 +865,7 @@
   }
 
   updatePlatformSections();
+  loadNiches();
   checkAuth();
 </script>
 </body>

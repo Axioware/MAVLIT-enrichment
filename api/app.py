@@ -49,6 +49,8 @@ from pipeline.enrichment.orchestrator import run_signal_enrichment
 from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 from pipeline.seed import run_seed
 from pipeline.enrichment_re.content_creator_re import add_content_creator_re
+from pipeline.creator_content.instagram_description import generate_instagram_description
+from pipeline.creator_content.youtube_description import generate_youtube_description
 
 logger = logging.getLogger(__name__)
 
@@ -1407,6 +1409,20 @@ class CreatorProfileRequest(BaseModel):
     youtube_audience_gender_female_pct: float | None = None
 
 
+class CreatorDescriptionRequest(BaseModel):
+    platform: str
+    username: str
+    niche: str
+
+
+class CreatorDescriptionResponse(BaseModel):
+    platform: str
+    description: str
+    posts_analyzed: int | None = None
+    videos_analyzed: int | None = None
+    bio_found: bool
+
+
 
 @app.get("/brand-niches")
 def list_brand_niches():
@@ -1424,6 +1440,24 @@ def list_brand_niches():
         creator_rows = db.query(InstagramUser.niche).distinct().all()
         all_values = {r[0] for r in brand_rows if r[0]} | {r[0] for r in creator_rows if r[0] and r[0] != "unknown"}
         niches = sorted(all_values, key=str.lower)
+        return {"niches": niches}
+    finally:
+        db.close()
+
+
+@app.get("/creator-sub-niches")
+def list_creator_sub_niches():
+    """Distinct brand tag values used as searchable creator sub-niches."""
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT DISTINCT tag
+            FROM brands_niches,
+                 jsonb_array_elements_text(tags) AS tag
+            WHERE jsonb_typeof(tags) = 'array'
+              AND tag <> ''
+        """)).fetchall()
+        niches = sorted({row[0].strip() for row in rows if row[0] and row[0].strip()}, key=str.casefold)
         return {"niches": niches}
     finally:
         db.close()
@@ -1472,6 +1506,32 @@ def list_brand_niche_tags():
 def get_my_creator_profile(current_user: CreatorProfile = Depends(get_current_user)):
     """Return the logged-in user's creator profile."""
     return _profile_to_response(current_user)
+
+
+@app.post("/creator-profile/me/generate-description", response_model=CreatorDescriptionResponse)
+def generate_my_creator_description(
+    body: CreatorDescriptionRequest,
+    current_user: CreatorProfile = Depends(get_current_user),
+):
+    """Generate one platform description from the creator's public content."""
+    del current_user  # Authentication also scopes this expensive operation to a user.
+    platform = body.platform.strip().lower()
+    db = SessionLocal()
+    try:
+        try:
+            if platform == "instagram":
+                result = generate_instagram_description(db, body.username, body.niche)
+            elif platform == "youtube":
+                result = generate_youtube_description(db, body.username, body.niche)
+            else:
+                raise HTTPException(status_code=400, detail="Platform must be instagram or youtube")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return CreatorDescriptionResponse(platform=platform, **result)
+    finally:
+        db.close()
 
 
 def _run_creator_signals_job(creator_id: int) -> None:
