@@ -163,7 +163,7 @@ def _score_youtube(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any]]
         count_pts = 0
     elif count <= 2:
         count_pts = 4
-    elif count <= 9:
+    elif count <= 7:
         count_pts = 6
     else:
         count_pts = 8
@@ -173,7 +173,7 @@ def _score_youtube(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any]]
     subs = [r.subscriber_count for r in rows if r.subscriber_count is not None]
     max_subs = max(subs) if subs else 0
     details["max_subscriber_count"] = max_subs
-    if max_subs >= 1_000_000:
+    if max_subs >= 700_000:
         subscriber_pts = 7
     elif max_subs >= 100_000:
         subscriber_pts = 5
@@ -209,14 +209,14 @@ def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any
     if days_list:
         min_days = min(days_list)
         details["recency_days"] = min_days
-        if min_days <= 30:
+        if min_days <= 60:
             recency_pts = 9
-        elif min_days <= 90:
+        elif min_days <= 120:
             recency_pts = 7
         elif min_days <= 180:
-            recency_pts = 4
+            recency_pts = 5
         elif min_days <= 365:
-            recency_pts = 2
+            recency_pts = 3
         else:
             recency_pts = 0
     else:
@@ -231,7 +231,7 @@ def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any
         paid_pts = 0
     elif paid_count <= 2:
         paid_pts = 4
-    elif paid_count <= 5:
+    elif paid_count <= 3:
         paid_pts = 6
     else:
         paid_pts = 8
@@ -250,7 +250,7 @@ def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any
     details["creator_network_count"] = creator_count
     if creator_count == 0:
         creator_pts = 0
-    elif creator_count < 10:
+    elif creator_count < 4:
         creator_pts = 2
     else:
         creator_pts = 4
