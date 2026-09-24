@@ -22,10 +22,12 @@ matching. embed_text() lives in pipeline/helpers/gpt_llm.py so it can be reused
 for the creator-side embedding once that's built.
 
 Scope notes:
-  Creator tier fit counts Instagram user_type IN ('coauthor_producer',
-  'tagged_user', 'mention') as the brand's content creators — everyone
-  except 'commenter', which is excluded since commenters are audience, not
-  creators the brand worked with.
+    Creator tier fit uses reverse-engineering creators from
+    test_creator_brand_partnership_posts and their matching creator profiles
+    in instagram_users. Matching profiles may have user_type
+    test_creator_brand_partnership_posts, coauthor_producer, mention, or
+    tagged_user. Each creator is counted once per brand; commenters and
+    brand_instagram_users are not used for this calculation.
 
   Audience demographics counts EVERY Instagram user linked to the brand
   regardless of user_type (mention, coauthor_producer, tagged_user,
@@ -37,6 +39,7 @@ import logging
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -46,6 +49,7 @@ from pipeline.db import (
     BrandRaw,
     InitialBrandScore,
     InstagramUser,
+    TestCreatorBrandPartnershipPost,
     YoutubeSponsorship,
 )
 from pipeline.enrichment.initial_brand_scoring import _score_instagram, _score_meta_ads, _score_youtube
@@ -53,9 +57,6 @@ from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.gpt_llm import embed_text
 
 logger = logging.getLogger(__name__)
-
-_COLLABORATOR_TYPES = ("coauthor_producer", "tagged_user", "mention")
-
 
 def _is_known(value: str | None) -> bool:
     return value is not None and value != "unknown"
@@ -78,8 +79,8 @@ def _upsert_brand_profile(db: Session, brand_raw_id: int, values: dict) -> None:
 def compute_creator_tier_profile(db: Session, brand_raw_id: int) -> dict | None:
     """
     Average the follower/subscriber size of creators this brand has actually
-    worked with (YouTube sponsorships + Instagram coauthor/tagged/mentioned
-    users, excluding commenters), bucketed into nano/micro/macro/mega. Also
+    worked with (YouTube sponsorships + reverse-engineering Instagram
+    creators), bucketed into nano/micro/macro/mega. Also
     records the highest and lowest follower/subscriber count seen on each
     platform. Writes to brand_match_profile. Returns None if there's no
     creator data at all for this brand.
@@ -93,16 +94,39 @@ def compute_creator_tier_profile(db: Session, brand_raw_id: int) -> dict | None:
         .all()
     ]
 
-    ig_counts = [
-        c for (c,) in db.query(InstagramUser.followers_count)
-        .join(BrandInstagramUser, BrandInstagramUser.instagram_user_id == InstagramUser.id)
+    reverse_usernames = {
+        username.strip().casefold()
+        for (username,) in db.query(TestCreatorBrandPartnershipPost.creator_username)
         .filter(
-            BrandInstagramUser.brand_raw_id == brand_raw_id,
-            InstagramUser.user_type.in_(_COLLABORATOR_TYPES),
+            TestCreatorBrandPartnershipPost.brand_raw_id == brand_raw_id,
+            TestCreatorBrandPartnershipPost.creator_username.isnot(None),
+        )
+        .distinct()
+        .all()
+        if username and username.strip()
+    }
+    reverse_users = (
+        db.query(InstagramUser.username, InstagramUser.followers_count)
+        .filter(
+            InstagramUser.user_type.in_(
+                (
+                    "test_creator_brand_partnership_posts",
+                    "coauthor_producer",
+                    "mention",
+                    "tagged_user",
+                )
+            ),
             InstagramUser.followers_count.isnot(None),
+            func.lower(InstagramUser.username).in_(reverse_usernames),
         )
         .all()
-    ]
+        if reverse_usernames else []
+    )
+    follower_by_creator: dict[str, int] = {}
+    for username, followers_count in reverse_users:
+        key = username.casefold()
+        follower_by_creator[key] = max(follower_by_creator.get(key, 0), followers_count)
+    ig_counts = list(follower_by_creator.values())
 
     pooled = yt_counts + ig_counts
     if not pooled:
@@ -429,7 +453,7 @@ def run_brand_signals(db: Session, limit: int = 500, brand_id: int | None = None
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:
-        query = query.filter(InitialBrandScore.total_score >= 50)
+        query = query.filter(InitialBrandScore.total_score >= 30)
 
     brand_ids = [row.id for row in query.limit(limit).all()]
 
