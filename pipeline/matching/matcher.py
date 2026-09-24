@@ -73,7 +73,17 @@ import logging
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from pipeline.db import BrandInstagramUser, BrandProfile, BrandRaw, ContentCreatorRE, CreatorProfile, InstagramUser
+from pipeline.db import (
+    BrandInstagramUser,
+    BrandProfile,
+    BrandRaw,
+    ContentCreatorRE,
+    CreatorNiche,
+    CreatorProfile,
+    InstagramPost,
+    InstagramUser,
+    TestCreatorBrandPartnershipPost,
+)
 from pipeline.matching.match_text import generate_match_reasons
 from pipeline.matching.scoring import score_match
 
@@ -82,6 +92,7 @@ logger = logging.getLogger(__name__)
 _SHORTLIST_SIZE = 100
 _ACTIVITY_FLOOR = 0   # brands with a CONFIRMED score at or below this are dropped; unscored (NULL) brands are kept
 _FOLLOWER_TOLERANCE = 0.30   # +/-30% buffer beyond the brand's confirmed collaborator follower range
+_CREATOR_SIMILARITY_FLOOR = 0.60
 
 
 def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) -> list[dict]:
@@ -142,6 +153,37 @@ def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) 
                 creator.youtube_followers >= BrandProfile.youtube_lowest * (1 - _FOLLOWER_TOLERANCE),
                 creator.youtube_followers <= BrandProfile.youtube_highest * (1 + _FOLLOWER_TOLERANCE),
             )
+
+    # Exclude brands with a known qualifying Instagram partnership creator
+    # whose embedding is below the similarity floor. Missing creator
+    # embeddings remain eligible until that creator has been embedded.
+    low_similarity_direct = db.query(InstagramUser.id).join(
+        BrandInstagramUser,
+        BrandInstagramUser.instagram_user_id == InstagramUser.id,
+    ).join(
+        InstagramPost,
+        InstagramPost.post_id == InstagramUser.post_id,
+    ).join(
+        CreatorNiche,
+        func.lower(CreatorNiche.username) == func.lower(InstagramUser.username),
+    ).filter(
+        BrandInstagramUser.brand_raw_id == BrandRaw.id,
+        InstagramUser.user_type != "commenter",
+        InstagramPost.brand_raw_id == BrandRaw.id,
+        InstagramPost.sponsorship_confidence >= 90,
+        CreatorNiche.embedding.isnot(None),
+        (1.0 - CreatorNiche.embedding.cosine_distance(creator.embedding)) < _CREATOR_SIMILARITY_FLOOR,
+    ).exists()
+    low_similarity_reverse = db.query(TestCreatorBrandPartnershipPost.id).join(
+        CreatorNiche,
+        func.lower(CreatorNiche.username) == func.lower(TestCreatorBrandPartnershipPost.creator_username),
+    ).filter(
+        TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
+        TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
+        CreatorNiche.embedding.isnot(None),
+        (1.0 - CreatorNiche.embedding.cosine_distance(creator.embedding)) < _CREATOR_SIMILARITY_FLOOR,
+    ).exists()
+    query = query.filter(~low_similarity_direct, ~low_similarity_reverse)
 
     # Creator must share at least one EXACT niche with EITHER the brand
     # itself OR one of the brand's confirmed Instagram collaborators — a

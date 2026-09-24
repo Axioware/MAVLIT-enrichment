@@ -345,6 +345,7 @@ class CreatorNiche(Base):
     niche = Column(Text, nullable=False, index=True)
     description = Column(Text)
     tags = Column(JSONB)
+    embedding = Column(Vector(1024))
 
     created_at = Column(
         TIMESTAMP(timezone=True),
