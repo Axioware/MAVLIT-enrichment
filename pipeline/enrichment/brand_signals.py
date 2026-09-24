@@ -22,12 +22,13 @@ matching. embed_text() lives in pipeline/helpers/gpt_llm.py so it can be reused
 for the creator-side embedding once that's built.
 
 Scope notes:
-    Creator tier fit uses reverse-engineering creators from
-    test_creator_brand_partnership_posts and their matching creator profiles
-    in instagram_users. Matching profiles may have user_type
-    test_creator_brand_partnership_posts, coauthor_producer, mention, or
-    tagged_user. Each creator is counted once per brand; commenters and
-    brand_instagram_users are not used for this calculation.
+    Creator tier fit uses only creators from >=90-confidence sponsorship
+    evidence: direct creators linked to qualifying instagram_posts and
+    reverse-engineering creators from qualifying
+    test_creator_brand_partnership_posts. Matching profiles may have user_type
+    test_creator_brand_partnership_posts, contentcreatorRE, coauthor_producer,
+    mention, or tagged_user. Each creator is counted once per brand; commenters and
+    unrelated brand_instagram_users are not used for this calculation.
 
   Audience demographics counts EVERY Instagram user linked to the brand
   regardless of user_type (mention, coauthor_producer, tagged_user,
@@ -48,6 +49,7 @@ from pipeline.db import (
     BrandProfile,
     BrandRaw,
     InitialBrandScore,
+    InstagramPost,
     InstagramUser,
     TestCreatorBrandPartnershipPost,
     YoutubeSponsorship,
@@ -79,8 +81,8 @@ def _upsert_brand_profile(db: Session, brand_raw_id: int, values: dict) -> None:
 def compute_creator_tier_profile(db: Session, brand_raw_id: int) -> dict | None:
     """
     Average the follower/subscriber size of creators this brand has actually
-    worked with (YouTube sponsorships + reverse-engineering Instagram
-    creators), bucketed into nano/micro/macro/mega. Also
+    worked with (YouTube sponsorships + high-confidence direct and
+    reverse-engineering Instagram creators), bucketed into nano/micro/macro/mega. Also
     records the highest and lowest follower/subscriber count seen on each
     platform. Writes to brand_match_profile. Returns None if there's no
     creator data at all for this brand.
@@ -94,12 +96,29 @@ def compute_creator_tier_profile(db: Session, brand_raw_id: int) -> dict | None:
         .all()
     ]
 
+    # Direct enrichment creators count only when their linked source post is
+    # a high-confidence sponsorship for this brand.
+    direct_users = db.query(InstagramUser.username, InstagramUser.followers_count).join(
+        BrandInstagramUser,
+        BrandInstagramUser.instagram_user_id == InstagramUser.id,
+    ).join(
+        InstagramPost,
+        InstagramPost.post_id == InstagramUser.post_id,
+    ).filter(
+        BrandInstagramUser.brand_raw_id == brand_raw_id,
+        InstagramUser.user_type != "commenter",
+        InstagramUser.followers_count.isnot(None),
+        InstagramPost.brand_raw_id == brand_raw_id,
+        InstagramPost.sponsorship_confidence >= 90,
+    ).all()
+
     reverse_usernames = {
         username.strip().casefold()
         for (username,) in db.query(TestCreatorBrandPartnershipPost.creator_username)
         .filter(
             TestCreatorBrandPartnershipPost.brand_raw_id == brand_raw_id,
             TestCreatorBrandPartnershipPost.creator_username.isnot(None),
+            TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
         )
         .distinct()
         .all()
@@ -111,6 +130,7 @@ def compute_creator_tier_profile(db: Session, brand_raw_id: int) -> dict | None:
             InstagramUser.user_type.in_(
                 (
                     "test_creator_brand_partnership_posts",
+                    "contentcreatorRE",
                     "coauthor_producer",
                     "mention",
                     "tagged_user",
@@ -123,6 +143,9 @@ def compute_creator_tier_profile(db: Session, brand_raw_id: int) -> dict | None:
         if reverse_usernames else []
     )
     follower_by_creator: dict[str, int] = {}
+    for username, followers_count in direct_users:
+        key = username.casefold()
+        follower_by_creator[key] = max(follower_by_creator.get(key, 0), followers_count)
     for username, followers_count in reverse_users:
         key = username.casefold()
         follower_by_creator[key] = max(follower_by_creator.get(key, 0), followers_count)
