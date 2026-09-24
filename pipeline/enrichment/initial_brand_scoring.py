@@ -9,9 +9,9 @@ youtube/instagram); brand_signals.py's Stage 1 in turn only processes
 brands with total_score >= 50. Scores are written to initial_brand_score
 (one row per brand, UPSERTed on re-run — safe to call repeatedly).
 
-Formula — 4 independently-capped sections summed into total_score (0-100):
+Formula — 3 independently-capped sections summed into total_score (0-100):
 
-Section 1 — Influencer Buying Activity (50 pts: YouTube 25 + Instagram 25)
+Section 1 — Influencer Buying Activity (60 pts: YouTube 25 + Instagram 35)
   YouTube (_score_youtube, from youtube_sponsorships rows for the brand):
     Recency (0-10 pts) — days since most recent published_at:
         <=30d: 10   <=90d: 8   <=180d: 5   <=365d: 3   else/none: 0
@@ -21,62 +21,44 @@ Section 1 — Influencer Buying Activity (50 pts: YouTube 25 + Instagram 25)
         >=1,000,000: 7   >=100,000: 5   >=10,000: 3   else: 0
     total = min(recency_pts + count_pts + subscriber_pts, 25)
 
-  Instagram (_score_instagram, from straight and reverse-engineering evidence):
-    Recency (0-10 pts) — days since the most recent >=90-confidence sponsorship
+    Instagram (_score_instagram, from straight and reverse-engineering evidence):
+        Recency (0-12.5 pts) — days since the most recent >=90-confidence sponsorship
         timestamp in instagram_posts or test_creator_brand_partnership_posts:
-        <=60d: 10   <=120d: 8   <=180d: 5   <=365d: 3   else/none: 0
-    Paid partnership posts (0-9 pts) — count of >=90-confidence rows across
+        <=60d: 12.5   <=120d: 10.5   <=180d: 7.5   <=365d: 5.5   else/none: 2.5
+    Paid partnership posts (0-11.5 pts) — count of >=90-confidence rows across
         instagram_posts and test_creator_brand_partnership_posts:
-        0: 0   1-2: 4   3: 6   4+: 9
-    Creator network (0-4 pts) — distinct creator usernames from
+        0: 2.5   1-2: 6.5   3: 8.5   4+: 11.5
+    Creator network (0-6.5 pts) — distinct creator usernames from
         brand_instagram_users/instagram_users and the test partnership table:
-        0: 0   1-3: 2   4+: 4
-    Creator follower reach (0-2 pts) — any linked non-commenter creator with
-        90,000 < followers_count < 900,000: 2 or 0
-    total = min(sum of the above, 25)
+        0: 2.5   1-3: 4.5   4+: 6.5
+    Creator follower reach (0-4.5 pts) — any linked non-commenter creator with
+        90,000 < followers_count < 900,000: 4.5 or 0
+    total = min(sum of the above, 35)
 
 Section 2 — Advertising Budget / Meta Ads (15 pts max)
-  (_score_meta_ads, from meta_ads rows for the brand)
-    Volume (0-5 pts) — ad count: 0: 0   1-4: 2   5-9: 3   10+: 5
-    Active / no end_date (0-3 pts) — count of ads with end_date IS NULL:
-        0: 0   1-5: 2   6+: 3
-    Recency (0-3 pts) — days since most recent start_date:
-        <=30d: 3   <=90d: 2   <=180d: 1   else/none: 0
-    Spend (0-2 pts) — sum of spend.lower_bound across all ads:
-        0: 0   <1000: 1   >=1000: 2
-    Impressions (0-1 pt) — sum of impressions.lower_bound >= 100,000: 1 or 0
-    Platform coverage (0-1 pt) — at least one ad runs on BOTH facebook AND
-        instagram (publisher_platforms): 1 or 0
-    total = min(sum of the above, 15)
+    (_score_meta_ads, currently fixed at 15 while Meta Ads is disabled)
+    total = 15
 
 Section 3 — Brand Scale & Legitimacy (25 pts max)
   (_score_legitimacy)
     Tranco rank (0-10 pts): <=10,000: 10   <=50,000: 7   <=100,000: 5
         <=500,000: 3   else: 1   none: 0
-    E-commerce platform (0-8 pts, NOT additive — higher of the two wins):
-        is_shopify: 8   is_woocommerce: 5   neither: 0
-    Social presence (0-7 pts, additive): instagram_handle +3, youtube_channel_id
+    E-commerce platform (0-7 pts, NOT additive — higher of the two wins):
+        is_shopify: 7   is_woocommerce: 5   neither: 4
+    Social presence (0-8 pts, additive): instagram_handle +4, youtube_channel_id
         +2, facebook_page +2
     total = min(tranco_pts + ecommerce_pts + social_pts, 25)
 
-Section 4 — Contact Reachability (10 pts max)
-  (_score_reachability)
-    Has linkedin_id: 5 pts
-    Has facebook_page_id (resolved numeric ID): 3 pts
-    is_shopify: 2 pts
-    total = min(sum of the above, 10)
-
 total_score = influencer_score (Section 1) + ad_spend_score (Section 2)
-            + legitimacy_score (Section 3) + reachability_score (Section 4)
+                        + legitimacy_score (Section 3)
 
 Band (_band): >=70 HOT   >=50 WARM   >=30 COOL   else COLD
 
-enrichment_completeness (0-3): count of youtube_checked/instagram_checked/
-meta_ads_fetched that are True — lets callers filter before sending a
-brand to Apollo, independent of the score itself.
+    enrichment_completeness (0-2): count of youtube_checked/instagram_checked
+    that are True — lets callers filter before sending a brand to Apollo.
 
-NOTE: Sections 3 & 4 (legitimacy/reachability) measure brand quality and
-outreach-ability, not fit with any specific creator — they are NOT part of
+NOTE: Section 3 (legitimacy) measures brand quality, not fit with any specific
+creator — it is NOT part of
 Stage 3 matching scoring (pipeline/matching/scoring.py), same reasoning as
 that module excluding Tranco rank/HQ country/traffic tier from match scores.
 """
@@ -193,7 +175,7 @@ def _score_youtube(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any]]
 
 
 def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any]]:
-    """Instagram sponsorship evidence — 25 pts max."""
+    """Instagram sponsorship evidence — 35 pts max."""
     window_start, window_end = _sponsorship_date_bounds()
     posts = db.query(InstagramPost).filter(
         InstagramPost.brand_raw_id == brand_raw_id,
@@ -210,20 +192,20 @@ def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any
 
     details: dict[str, Any] = {}
 
-    # 2a. Recency (0-10 pts) — use both straight and reverse-engineering rows.
+    # 2a. Recency (0-12.5 pts) — use both straight and reverse-engineering rows.
     timestamps = [p.timestamp for p in posts] + [p.post_timestamp for p in reverse_posts]
     days_list = [d for d in (_days_since(value) for value in timestamps) if d is not None]
     if days_list:
         min_days = min(days_list)
         details["recency_days"] = min_days
         if min_days <= 60:
-            recency_pts = 10
+            recency_pts = 12.5
         elif min_days <= 120:
-            recency_pts = 8
+            recency_pts = 10.5
         elif min_days <= 180:
-            recency_pts = 5
+            recency_pts = 7.5
         elif min_days <= 365:
-            recency_pts = 3
+            recency_pts = 5.5
         else:
             recency_pts = 0
     else:
@@ -231,21 +213,21 @@ def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any
         recency_pts = 0
     details["recency_pts"] = recency_pts
 
-    # 2b. Paid partnership posts (0-9 pts) — both evidence tables are already
+    # 2b. Paid partnership posts (0-11.5 pts) — both evidence tables are already
     # sponsorship-only inputs, but retain the confidence filter in this query.
     paid_count = len(posts) + len(reverse_posts)
     details["paid_partnership_posts"] = paid_count
     if paid_count == 0:
         paid_pts = 0
     elif paid_count <= 2:
-        paid_pts = 4
+        paid_pts = 6.5
     elif paid_count <= 3:
-        paid_pts = 6
+        paid_pts = 8.5
     else:
-        paid_pts = 9
+        paid_pts = 11.5
     details["paid_pts"] = paid_pts
 
-    # 2c. Creator network (0-4 pts) — union direct links and reverse rows.
+    # 2c. Creator network (0-6.5 pts) — union direct links and reverse rows.
     linked_users = db.query(InstagramUser).join(
         BrandInstagramUser,
         BrandInstagramUser.instagram_user_id == InstagramUser.id,
@@ -264,12 +246,12 @@ def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any
     if creator_count == 0:
         creator_pts = 0
     elif creator_count <= 3:
-        creator_pts = 2
+        creator_pts = 4.5
     else:
-        creator_pts = 4
+        creator_pts = 6.5
     details["creator_pts"] = creator_pts
 
-    # 2d. Creator follower reach (0-2 pts). Reverse rows identify creators by
+    # 2d. Creator follower reach (0-4.5 pts). Reverse rows identify creators by
     # username; join them back to InstagramUser for the follower snapshot.
     reverse_usernames = {row.creator_username.casefold() for row in reverse_posts if row.creator_username}
     reverse_users = []
@@ -286,10 +268,10 @@ def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any
         for user in follower_users
     )
     details["mid_reach_creator"] = has_mid_reach_creator
-    follower_pts = 2 if has_mid_reach_creator else 0
+    follower_pts = 4.5 if has_mid_reach_creator else 0
     details["follower_pts"] = follower_pts
 
-    total = min(recency_pts + paid_pts + creator_pts + follower_pts, 25)
+    total = min(recency_pts + paid_pts + creator_pts + follower_pts, 35)
     details["total"] = total
     return total, details
 
@@ -299,102 +281,8 @@ def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any
 # 
 
 def _score_meta_ads(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any]]:
-    """Meta Ads — 15 pts max."""
-    ads = db.query(MetaAd).filter(MetaAd.brand_raw_id == brand_raw_id).all()
-    details: dict[str, Any] = {}
-
-    ad_count = len(ads)
-    details["ad_count"] = ad_count
-
-    # Volume (0-5 pts)
-    if ad_count == 0:
-        volume_pts = 0
-    elif ad_count <= 4:
-        volume_pts = 2
-    elif ad_count <= 9:
-        volume_pts = 3
-    else:
-        volume_pts = 5
-    details["volume_pts"] = volume_pts
-
-    # Active ads — end_date IS NULL (0-3 pts)
-    active_count = sum(1 for a in ads if a.end_date is None)
-    details["active_no_end_date"] = active_count
-    if active_count == 0:
-        active_pts = 0
-    elif active_count <= 5:
-        active_pts = 2
-    else:
-        active_pts = 3
-    details["active_pts"] = active_pts
-
-    # Recency — most recent start_date (0-3 pts)
-    days_list = [d for d in (_days_since(a.start_date) for a in ads) if d is not None]
-    if days_list:
-        min_days = min(days_list)
-        details["recency_days"] = min_days
-        if min_days <= 30:
-            recency_pts = 3
-        elif min_days <= 90:
-            recency_pts = 2
-        elif min_days <= 180:
-            recency_pts = 1
-        else:
-            recency_pts = 0
-    else:
-        details["recency_days"] = None
-        recency_pts = 0
-    details["recency_pts"] = recency_pts
-
-    # Spend — sum of spend.lower_bound across all ads (0-2 pts)
-    spend_sum = 0
-    for a in ads:
-        if a.spend and isinstance(a.spend, dict):
-            try:
-                spend_sum += int(a.spend.get("lower_bound") or 0)
-            except (ValueError, TypeError):
-                pass
-    details["spend_sum_lower"] = spend_sum
-    if spend_sum == 0:
-        spend_pts = 0
-    elif spend_sum < 1000:
-        spend_pts = 1
-    else:
-        spend_pts = 2
-    details["spend_pts"] = spend_pts
-
-    # Impressions — sum of impressions.lower_bound (0-1 pt)
-    impressions_sum = 0
-    for a in ads:
-        if a.impressions and isinstance(a.impressions, dict):
-            try:
-                impressions_sum += int(a.impressions.get("lower_bound") or 0)
-            except (ValueError, TypeError):
-                pass
-    details["impressions_sum_lower"] = impressions_sum
-    impressions_pts = 1 if impressions_sum >= 100_000 else 0
-    details["impressions_pts"] = impressions_pts
-
-    # Platform coverage — both facebook AND instagram (0-1 pt)
-    has_facebook = has_instagram_platform = False
-    for a in ads:
-        if a.publisher_platforms and isinstance(a.publisher_platforms, list):
-            platforms = [str(p).lower() for p in a.publisher_platforms]
-            if "facebook" in platforms:
-                has_facebook = True
-            if "instagram" in platforms:
-                has_instagram_platform = True
-    both_platforms = has_facebook and has_instagram_platform
-    details["both_platforms"] = both_platforms
-    platform_pts = 1 if both_platforms else 0
-    details["platform_pts"] = platform_pts
-
-    total = min(
-        volume_pts + active_pts + recency_pts + spend_pts + impressions_pts + platform_pts,
-        15,
-    )
-    details["total"] = total
-    return total, details
+    """Meta Ads placeholder — fixed at 15 points while Meta Ads is disabled."""
+    return 15, {"disabled": True, "total": 15}
 
 
 # 
@@ -409,28 +297,28 @@ def _score_legitimacy(brand: BrandRaw) -> tuple[int, dict[str, Any]]:
     rank = brand.tranco_rank
     details["tranco_rank"] = rank
     if rank is None:
-        tranco_pts = 0
-    elif rank <= 10_000:
-        tranco_pts = 10
-    elif rank <= 50_000:
-        tranco_pts = 7
-    elif rank <= 100_000:
         tranco_pts = 5
+    elif rank <= 50_000:
+        tranco_pts = 10
+    elif rank <= 70_000:
+        tranco_pts = 9
+    elif rank <= 100_000:
+        tranco_pts = 8
     elif rank <= 500_000:
-        tranco_pts = 3
+        tranco_pts = 7
     else:
-        tranco_pts = 1
+        tranco_pts = 6
     details["tranco_pts"] = tranco_pts
 
     # E-commerce platform (0-8 pts, not additive — take the higher)
     details["is_shopify"]    = bool(brand.is_shopify)
     details["is_woocommerce"] = bool(brand.is_woocommerce)
     if brand.is_shopify:
-        ecommerce_pts = 8
+        ecommerce_pts = 7
     elif brand.is_woocommerce:
         ecommerce_pts = 5
     else:
-        ecommerce_pts = 0
+        ecommerce_pts = 4
     details["ecommerce_pts"] = ecommerce_pts
 
     # Social presence (0-7 pts) — Instagram/YouTube/Facebook only
@@ -438,7 +326,7 @@ def _score_legitimacy(brand: BrandRaw) -> tuple[int, dict[str, Any]]:
     social_pts = 0
     if brand.instagram_handle:
         social_handles.append("instagram_handle")
-        social_pts += 3
+        social_pts += 4
     if brand.youtube_channel_id:
         social_handles.append("youtube_channel_id")
         social_pts += 2
@@ -449,34 +337,6 @@ def _score_legitimacy(brand: BrandRaw) -> tuple[int, dict[str, Any]]:
     details["social_pts"]     = social_pts
 
     total = min(tranco_pts + ecommerce_pts + social_pts, 25)
-    details["total"] = total
-    return total, details
-
-
-# 
-# Section 4 — Contact Reachability (10 pts max)
-# 
-
-def _score_reachability(brand: BrandRaw) -> tuple[int, dict[str, Any]]:
-    """Contact Reachability — 10 pts max."""
-    details: dict[str, Any] = {}
-
-    has_linkedin = bool(brand.linkedin_id)
-    details["has_linkedin"] = has_linkedin
-    linkedin_pts = 5 if has_linkedin else 0
-    details["linkedin_pts"] = linkedin_pts
-
-    has_fb_page_id = bool(brand.facebook_page_id)
-    details["has_facebook_page_id"] = has_fb_page_id
-    fb_pts = 3 if has_fb_page_id else 0
-    details["fb_pts"] = fb_pts
-
-    is_shopify = bool(brand.is_shopify)
-    details["is_shopify"] = is_shopify
-    shopify_pts = 2 if is_shopify else 0
-    details["shopify_pts"] = shopify_pts
-
-    total = min(linkedin_pts + fb_pts + shopify_pts, 10)
     details["total"] = total
     return total, details
 
@@ -538,9 +398,16 @@ def score_brand(db: Session, brand_raw_id: int) -> dict[str, Any] | None:
     if not brand:
         logger.warning("score_brand: brand_raw_id=%d not found", brand_raw_id)
         return None
-    if brand.refferls or not _has_qualifying_sponsorship(db, brand_raw_id):
+    if (
+        brand.refferls
+        or (
+            brand.geo_reach_score is not None
+            and not 0 <= brand.geo_reach_score <= 40
+        )
+        or not _has_qualifying_sponsorship(db, brand_raw_id)
+    ):
         logger.info(
-            "Skipping score for '%s' (id=%d): no qualifying current-year sponsorship or refferls=true",
+            "Skipping score for '%s' (id=%d): referral, geo reach over 40, or no qualifying sponsorship",
             brand.name, brand_raw_id,
         )
         return None
@@ -549,27 +416,23 @@ def score_brand(db: Session, brand_raw_id: int) -> dict[str, Any] | None:
     completeness = sum([
         bool(brand.youtube_checked),
         bool(brand.instagram_checked),
-        bool(brand.meta_ads_fetched),
     ])
 
     yt_score,    yt_details    = _score_youtube(db, brand_raw_id)
     ig_score,    ig_details    = _score_instagram(db, brand_raw_id)
     meta_score,  meta_details  = _score_meta_ads(db, brand_raw_id)
     leg_score,   leg_details   = _score_legitimacy(brand)
-    reach_score, reach_details = _score_reachability(brand)
 
     influencer_score   = yt_score + ig_score   # max 50
     ad_spend_score     = meta_score            # max 15
     legitimacy_score   = leg_score              # max 25
-    reachability_score = reach_score            # max 10
-    total_score        = influencer_score + ad_spend_score + legitimacy_score + reachability_score
+    total_score        = influencer_score + ad_spend_score + legitimacy_score
 
     score_details = {
         "youtube":      yt_details,
         "instagram":    ig_details,
         "meta_ads":     meta_details,
         "legitimacy":   leg_details,
-        "reachability": reach_details,
     }
 
     row = {
@@ -577,7 +440,7 @@ def score_brand(db: Session, brand_raw_id: int) -> dict[str, Any] | None:
         "influencer_score":        influencer_score,
         "ad_spend_score":          ad_spend_score,
         "legitimacy_score":        legitimacy_score,
-        "reachability_score":      reachability_score,
+        "reachability_score":      0,
         "total_score":             total_score,
         "score_band":              _band(total_score),
         "enrichment_completeness": completeness,
@@ -604,7 +467,7 @@ def score_brand(db: Session, brand_raw_id: int) -> dict[str, Any] | None:
         "Scored '%s' (id=%d) → total=%d band=%s [infl=%d ads=%d leg=%d reach=%d] completeness=%d/3",
         brand.name, brand_raw_id,
         total_score, _band(total_score),
-        influencer_score, ad_spend_score, legitimacy_score, reachability_score,
+        influencer_score, ad_spend_score, legitimacy_score, 0,
         completeness,
     )
     return row
@@ -612,7 +475,7 @@ def score_brand(db: Session, brand_raw_id: int) -> dict[str, Any] | None:
 
 def run_brand_scoring(db: Session, limit: int = 500, brand_id: int | None = None) -> int:
     """
-    Score only non-referral brands with a rolling-365-day Instagram partnership
+    Score only non-referral brands with geo reach null or 0-40 and a rolling-365-day Instagram partnership
     confidence of at least 90 in InstagramPost or the creator-brand test table.
     Brands are scored regardless of enrichment_completeness; the completeness
     value in the output row lets callers filter before sending to Apollo.
@@ -632,11 +495,14 @@ def run_brand_scoring(db: Session, limit: int = 500, brand_id: int | None = None
                 BrandRaw.has_official_website == True,
                 BrandRaw.shopify_checked    == True,
                 BrandRaw.tranco_checked     == True,
-                BrandRaw.meta_ads_fetched   == True,
                 BrandRaw.youtube_checked    == True,
                 BrandRaw.instagram_checked  == True,
                 BrandRaw.initial_brand_scored == False,
                 BrandRaw.refferls.is_(False),
+                (
+                    BrandRaw.geo_reach_score.is_(None)
+                    | BrandRaw.geo_reach_score.between(0, 40)
+                ),
             )
             .filter(
                 db.query(InstagramPost.id).filter(
