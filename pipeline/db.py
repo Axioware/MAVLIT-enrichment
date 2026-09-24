@@ -549,44 +549,38 @@ class CreatorProfile(Base):
     #  Identity
     full_name        = Column(Text)
     creator_handle   = Column(Text)
-    location_city    = Column(Text)
-    location_country = Column(Text)
-    bio_tagline      = Column(Text)
+    age              = Column(Integer)
+    gender           = Column(Text)
 
-    #  Content niche
+    #  Matching projections populated from the selected primary platform
     content_niche = Column(Text)
-    # 'music', 'podcast_audio', 'photography', 'gaming', 'education',
-    # 'fitness', 'food_cooking', 'finance', 'substack_newsletter', 'tech'
-    sub_niches           = Column(JSONB)   # e.g. ["vegan cooking", "meal prep"] — creator-provided
     content_description  = Column(Text)    # free-text creator-written description, source text for LLM tag extraction
     excluded_categories   = Column(JSONB)   # brand niches/categories this creator refuses to work with — Stage 3 hard filter
 
-    #  Platform links
+    #  Platform profile fields used by creator-profile.html
     instagram_handle = Column(Text)
-    youtube_channel   = Column(Text)
-    facebook_page     = Column(Text)
-    substack_url      = Column(Text)
-
-    #  Platform stats
     instagram_followers = Column(Integer)
-    instagram_following = Column(Integer)
-    youtube_followers    = Column(Integer)
-    facebook_followers   = Column(Integer)
-    facebook_following    = Column(Integer)
-    substack_subscribers = Column(Integer)
 
     primary_platform = Column(Text)
     follower_count   = Column(Integer)   # creator-provided; drives creator_tier bucketing
 
-    #  Audience demographics
-    # Same shape as BrandMatchProfile's audience fields, so the two sides
-    # compare directly in score_audience_demographics().
-    audience_gender_male_pct    = Column(Float)      # 0.0 – 1.0
-    audience_gender_female_pct  = Column(Float)      # 0.0 – 1.0
-    audience_age_bracket        = Column(Text)       # e.g. "17_22", "23_28", "29_35" — legacy single-bracket field, kept for compatibility
-    audience_age_min            = Column(Integer)    # e.g. 18 — used for range-based age overlap in Stage 3
-    audience_age_max            = Column(Integer)    # e.g. 34
-    audience_top_countries      = Column(JSONB)      # [{"country": "US", "pct": 0.45}, ...]
+    #  Platform-specific profile details
+    instagram_primary_niche = Column(Text)
+    instagram_sub_niches = Column(JSONB)
+    instagram_excluded_categories = Column(JSONB)
+    instagram_description = Column(Text)
+    instagram_description_mode = Column(Text)
+    instagram_audience_gender_male_pct = Column(Float)
+    instagram_audience_gender_female_pct = Column(Float)
+    youtube_channel_name = Column(Text)
+    youtube_subscribers = Column(Integer)
+    youtube_primary_niche = Column(Text)
+    youtube_sub_niches = Column(JSONB)
+    youtube_excluded_categories = Column(JSONB)
+    youtube_description = Column(Text)
+    youtube_description_mode = Column(Text)
+    youtube_audience_gender_male_pct = Column(Float)
+    youtube_audience_gender_female_pct = Column(Float)
 
     #  Derived / computed fields
     creator_tier  = Column(Text)

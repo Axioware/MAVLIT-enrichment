@@ -53,7 +53,7 @@ def _extract_content_tags(db: Session, profile: CreatorProfile) -> list[str]:
     prompt = fill_template(
         _get_tags_prompt(db),
         niche=profile.content_niche or "unknown",
-        sub_niches=", ".join(profile.sub_niches) if profile.sub_niches else "none provided",
+        sub_niches=", ".join(_platform_sub_niches(profile)) or "none provided",
         content_description=profile.content_description or "none provided",
     )
     result = call_gpt_json(prompt, context=f"creator tags for creator_id={profile.id}")
@@ -94,8 +94,9 @@ def build_creator_embedding_text(profile: CreatorProfile) -> str:
 
     if profile.content_niche:
         parts.append(f"creates {profile.content_niche} content")
-    if profile.sub_niches:
-        parts.append(f"covering {', '.join(profile.sub_niches)}")
+    sub_niches = _platform_sub_niches(profile)
+    if sub_niches:
+        parts.append(f"covering {', '.join(sub_niches)}")
     if profile.content_description:
         parts.append(profile.content_description.strip())
     if profile.content_tags:
@@ -105,20 +106,24 @@ def build_creator_embedding_text(profile: CreatorProfile) -> str:
     if profile.creator_tier:
         parts.append(f"{profile.creator_tier}-tier creator")
 
-    gender_phrase = _gender_skew_phrase(profile.audience_gender_male_pct, profile.audience_gender_female_pct)
+    male_pct = profile.instagram_audience_gender_male_pct
+    female_pct = profile.instagram_audience_gender_female_pct
+    if male_pct is None and female_pct is None:
+        male_pct = profile.youtube_audience_gender_male_pct
+        female_pct = profile.youtube_audience_gender_female_pct
+    gender_phrase = _gender_skew_phrase(male_pct, female_pct)
     if gender_phrase:
         parts.append(gender_phrase)
 
-    if profile.audience_age_min is not None and profile.audience_age_max is not None:
-        parts.append(f"audience aged {profile.audience_age_min}-{profile.audience_age_max}")
-    elif profile.audience_age_bracket:
-        parts.append(f"audience aged {profile.audience_age_bracket}")
-
-    countries = _top_countries_phrase(profile.audience_top_countries)
-    if countries:
-        parts.append(f"top audience countries: {countries}")
-
     return ". ".join(parts) + "."
+
+
+def _platform_sub_niches(profile: CreatorProfile) -> list[str]:
+    values = []
+    for sub_niches in (profile.instagram_sub_niches, profile.youtube_sub_niches):
+        if isinstance(sub_niches, list):
+            values.extend(item for item in sub_niches if isinstance(item, str) and item.strip())
+    return list(dict.fromkeys(values))
 
 
 def compute_creator_signals(db: Session, creator_id: int) -> dict | None:

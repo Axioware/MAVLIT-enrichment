@@ -321,6 +321,42 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS content_description TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS excluded_categories JSONB",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS follower_count INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS age INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS gender TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_primary_niche TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_sub_niches JSONB",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_excluded_categories JSONB",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_description TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_description_mode TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_gender_male_pct FLOAT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_gender_female_pct FLOAT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_channel_name TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_subscribers INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_primary_niche TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_sub_niches JSONB",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_excluded_categories JSONB",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_description TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_description_mode TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_gender_male_pct FLOAT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_gender_female_pct FLOAT",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS location_city",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS location_country",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS bio_tagline",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS sub_niches",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS youtube_channel",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS youtube_followers",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS instagram_following",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS facebook_page",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS facebook_followers",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS facebook_following",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS substack_url",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS substack_subscribers",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS audience_gender_male_pct",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS audience_gender_female_pct",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS audience_age_bracket",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS audience_age_min",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS audience_age_max",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS audience_top_countries",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS audience_age_min INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS audience_age_max INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS embedding_text TEXT",
@@ -911,10 +947,9 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
     # pgvector's type and hard-crashes create/edit with NoConverterFound
     # otherwise — column_exclude_list alone only hides it from list/detail).
     #
-    # sub_niches/excluded_categories/audience_top_countries/content_tags are
-    # also excluded from the form: they're list-shaped JSONB (e.g.
-    # sub_niches = ["vegan cooking", ...]), populated by the creator's own
-    # profile flow or LLM extraction elsewhere — never meant to be typed by
+    # Platform sub-niches, excluded_categories, and content_tags are also
+    # excluded from the form: they're list-shaped JSONB, populated by the
+    # creator's own profile flow or LLM extraction elsewhere — never meant to
     # hand here. sqladmin's generic JSON widget defaults an untouched JSONB
     # field to "{}" (an empty OBJECT) on create, not "[]" — CreatorProfile
     # Response's schema requires a list for these, so any admin-created row
@@ -928,10 +963,12 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
     column_default_sort    = [(CreatorProfile.id, True)]
     form_excluded_columns = [
         CreatorProfile.embedding,
-        CreatorProfile.sub_niches,
         CreatorProfile.excluded_categories,
-        CreatorProfile.audience_top_countries,
         CreatorProfile.content_tags,
+        CreatorProfile.instagram_sub_niches,
+        CreatorProfile.instagram_excluded_categories,
+        CreatorProfile.youtube_sub_niches,
+        CreatorProfile.youtube_excluded_categories,
     ]
     form_overrides   = {"password_hash": wtforms.PasswordField}
     form_labels      = {"password_hash": "Password"}
@@ -1339,36 +1376,36 @@ def score_brands_status(job_id: str):
 class CreatorProfileRequest(BaseModel):
     full_name:        str
     creator_handle:   str
-    location_city:    str | None = None
-    location_country: str | None = None
-    bio_tagline:      str | None = None
+    age:              int | None = None
+    gender:           str | None = None
 
-    content_niche:       str
-    sub_niches:          list[str] | None = None
+    content_niche:       str | None = None
     content_description: str | None = None
     excluded_categories:  list[str] | None = None
 
     instagram_handle: str | None = None
-    youtube_channel:   str | None = None
-    facebook_page:     str | None = None
-    substack_url:      str | None = None
-    substack_subscribers: int | None = None
-
     instagram_followers: int | None = None
-    instagram_following: int | None = None
-    youtube_followers:   int | None = None
-    facebook_followers:  int | None = None
-    facebook_following:  int | None = None
 
     primary_platform: str | None = None
     follower_count:   int | None = None
 
-    audience_gender_male_pct:   float | None = None
-    audience_gender_female_pct: float | None = None
-    audience_age_bracket:       str | None = None
-    audience_age_min:           int | None = None
-    audience_age_max:           int | None = None
-    audience_top_countries:     list[dict] | None = None
+    instagram_primary_niche: str | None = None
+    instagram_sub_niches: list[str] | None = None
+    instagram_excluded_categories: list[str] | None = None
+    instagram_description: str | None = None
+    instagram_description_mode: str | None = None
+    instagram_audience_gender_male_pct: float | None = None
+    instagram_audience_gender_female_pct: float | None = None
+    youtube_channel_name: str | None = None
+    youtube_subscribers: int | None = None
+    youtube_primary_niche: str | None = None
+    youtube_sub_niches: list[str] | None = None
+    youtube_excluded_categories: list[str] | None = None
+    youtube_description: str | None = None
+    youtube_description_mode: str | None = None
+    youtube_audience_gender_male_pct: float | None = None
+    youtube_audience_gender_female_pct: float | None = None
+
 
 
 @app.get("/brand-niches")

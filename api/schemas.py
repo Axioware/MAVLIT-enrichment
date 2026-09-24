@@ -10,36 +10,35 @@ class CreatorProfileResponse(BaseModel):
 
     full_name:        str | None = None
     creator_handle:   str | None = None
-    location_city:    str | None = None
-    location_country: str | None = None
-    bio_tagline:      str | None = None
+    age:              int | None = None
+    gender:           str | None = None
 
     content_niche:       str | None = None
-    sub_niches:          list[str] | None = None
     content_description: str | None = None
     excluded_categories:  list[str] | None = None
 
     instagram_handle: str | None = None
-    youtube_channel:   str | None = None
-    facebook_page:     str | None = None
-    substack_url:      str | None = None
-    substack_subscribers: int | None = None
-
     instagram_followers: int | None = None
-    instagram_following: int | None = None
-    youtube_followers:   int | None = None
-    facebook_followers:  int | None = None
-    facebook_following:  int | None = None
 
     primary_platform: str | None = None
     follower_count:   int | None = None
 
-    audience_gender_male_pct:   float | None = None
-    audience_gender_female_pct: float | None = None
-    audience_age_bracket:       str | None = None
-    audience_age_min:           int | None = None
-    audience_age_max:           int | None = None
-    audience_top_countries:     list[dict] | None = None
+    instagram_primary_niche: str | None = None
+    instagram_sub_niches: list[str] | None = None
+    instagram_excluded_categories: list[str] | None = None
+    instagram_description: str | None = None
+    instagram_description_mode: str | None = None
+    instagram_audience_gender_male_pct: float | None = None
+    instagram_audience_gender_female_pct: float | None = None
+    youtube_channel_name: str | None = None
+    youtube_subscribers: int | None = None
+    youtube_primary_niche: str | None = None
+    youtube_sub_niches: list[str] | None = None
+    youtube_excluded_categories: list[str] | None = None
+    youtube_description: str | None = None
+    youtube_description_mode: str | None = None
+    youtube_audience_gender_male_pct: float | None = None
+    youtube_audience_gender_female_pct: float | None = None
 
     creator_tier: str | None = None
     content_tags: list[str] | None = None
@@ -49,8 +48,8 @@ class CreatorProfileResponse(BaseModel):
 
 def _as_list(value):
     """
-    CreatorProfile's list-shaped JSONB columns (sub_niches/
-    excluded_categories/audience_top_countries/content_tags) are meant to
+    CreatorProfile's list-shaped JSONB columns (excluded_categories,
+    platform sub-niches, and content_tags) are meant to
     hold a JSON array, but sqladmin's generic JSON form widget defaults an
     untouched JSONB field to "{}" (an empty OBJECT) rather than "[]" on
     create — confirmed live, this crashed /auth/login with a pydantic
@@ -71,31 +70,31 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         is_active=row.is_active,
         full_name=row.full_name,
         creator_handle=row.creator_handle,
-        location_city=row.location_city,
-        location_country=row.location_country,
-        bio_tagline=row.bio_tagline,
+        age=row.age,
+        gender=row.gender,
         content_niche=row.content_niche,
-        sub_niches=_as_list(row.sub_niches),
         content_description=row.content_description,
         excluded_categories=_as_list(row.excluded_categories),
         instagram_handle=row.instagram_handle,
-        youtube_channel=row.youtube_channel,
-        facebook_page=row.facebook_page,
-        substack_url=row.substack_url,
-        substack_subscribers=row.substack_subscribers,
         instagram_followers=row.instagram_followers,
-        instagram_following=row.instagram_following,
-        youtube_followers=row.youtube_followers,
-        facebook_followers=row.facebook_followers,
-        facebook_following=row.facebook_following,
         primary_platform=row.primary_platform,
         follower_count=row.follower_count,
-        audience_gender_male_pct=row.audience_gender_male_pct,
-        audience_gender_female_pct=row.audience_gender_female_pct,
-        audience_age_bracket=row.audience_age_bracket,
-        audience_age_min=row.audience_age_min,
-        audience_age_max=row.audience_age_max,
-        audience_top_countries=_as_list(row.audience_top_countries),
+        instagram_primary_niche=row.instagram_primary_niche,
+        instagram_sub_niches=_as_list(row.instagram_sub_niches),
+        instagram_excluded_categories=_as_list(row.instagram_excluded_categories),
+        instagram_description=row.instagram_description,
+        instagram_description_mode=row.instagram_description_mode,
+        instagram_audience_gender_male_pct=row.instagram_audience_gender_male_pct,
+        instagram_audience_gender_female_pct=row.instagram_audience_gender_female_pct,
+        youtube_channel_name=row.youtube_channel_name,
+        youtube_subscribers=row.youtube_subscribers,
+        youtube_primary_niche=row.youtube_primary_niche,
+        youtube_sub_niches=_as_list(row.youtube_sub_niches),
+        youtube_excluded_categories=_as_list(row.youtube_excluded_categories),
+        youtube_description=row.youtube_description,
+        youtube_description_mode=row.youtube_description_mode,
+        youtube_audience_gender_male_pct=row.youtube_audience_gender_male_pct,
+        youtube_audience_gender_female_pct=row.youtube_audience_gender_female_pct,
         creator_tier=row.creator_tier,
         content_tags=_as_list(row.content_tags),
         created_at=str(row.created_at) if row.created_at else "",

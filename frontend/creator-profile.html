@@ -102,6 +102,10 @@
     }
     input::placeholder, textarea::placeholder { color: #475569; }
     textarea { resize: vertical; min-height: 70px; }
+    .platform-card { display: none; }
+    .platform-choices { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .check-choice { display: flex; align-items: center; gap: .5rem; cursor: pointer; color: #cbd5e1; }
+    .check-choice input { width: auto; }
 
     .btn-save {
       width: 100%;
@@ -219,154 +223,116 @@
             <input id="creator_handle" name="creator_handle" type="text" required placeholder="@janedoe" />
           </div>
           <div class="field">
-            <label for="location_city">City</label>
-            <input id="location_city" name="location_city" type="text" placeholder="Austin" />
+            <label for="age">Age</label>
+            <input id="age" name="age" type="number" min="13" max="120" placeholder="28" />
           </div>
           <div class="field">
-            <label for="location_country">Country</label>
-            <input id="location_country" name="location_country" type="text" placeholder="United States" />
-          </div>
-          <div class="field full">
-            <label for="bio_tagline">Bio / tagline</label>
-            <textarea id="bio_tagline" name="bio_tagline" placeholder="Short line about who you are and what you create"></textarea>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>Content & Niche</h2>
-        <div class="grid">
-          <div class="field full">
-            <label>Primary niche *</label>
-            <div class="msel">
-              <button type="button" class="msel-toggle" data-panel="content_niche_list" onclick="toggleMsel('content_niche_list')">
-                <span class="placeholder">Select niche(s)…</span>
-              </button>
-              <div class="msel-panel" id="content_niche_list"></div>
-            </div>
-            <p class="niche-hint">Click to select one or more — these are the same niches brands are matched on.</p>
-          </div>
-          <div class="field full">
-            <label>Sub-niches</label>
-            <div class="msel">
-              <button type="button" class="msel-toggle" data-panel="sub_niches_list" onclick="toggleMsel('sub_niches_list')">
-                <span class="placeholder">Select tag(s)…</span>
-              </button>
-              <div class="msel-panel" id="sub_niches_list"></div>
-            </div>
-            <p class="niche-hint">Click to select one or more — only tags for your chosen primary niche(s) are shown.</p>
-          </div>
-          <div class="field full">
-            <label for="content_description">Describe your content</label>
-            <textarea id="content_description" name="content_description" placeholder="What do you actually post about? A few sentences helps us tag your content accurately."></textarea>
-          </div>
-          <div class="field full">
-            <label for="excluded_categories">Brand categories to avoid (comma-separated)</label>
-            <input id="excluded_categories" name="excluded_categories" type="text" placeholder="alcohol, gambling" />
-          </div>
-          <div class="field">
-            <label for="follower_count">Follower count (primary platform)</label>
-            <input id="follower_count" name="follower_count" type="number" min="0" placeholder="50000" />
-          </div>
-          <div class="field">
-            <label for="primary_platform">Primary platform</label>
-            <select id="primary_platform" name="primary_platform">
-              <option value="">Select a platform…</option>
-              <option value="instagram">Instagram</option>
-              <option value="youtube">YouTube</option>
-              <option value="facebook">Facebook</option>
-              <option value="substack">Substack</option>
+            <label for="gender">Gender</label>
+            <select id="gender" name="gender">
+              <option value="">Select gender…</option>
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+              <option value="non_binary">Non-binary</option>
+              <option value="prefer_not_to_say">Prefer not to say</option>
             </select>
           </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>Platform Links</h2>
-        <div class="grid">
-          <div class="field">
-            <label for="instagram_handle">Instagram</label>
-            <input id="instagram_handle" name="instagram_handle" type="text" placeholder="https://instagram.com/janedoe" />
-          </div>
-          <div class="field">
-            <label for="youtube_channel">YouTube</label>
-            <input id="youtube_channel" name="youtube_channel" type="text" placeholder="https://youtube.com/@janedoe" />
-          </div>
-          <div class="field">
-            <label for="facebook_page">Facebook</label>
-            <input id="facebook_page" name="facebook_page" type="text" placeholder="https://facebook.com/janedoe" />
-          </div>
-          <div class="field">
-            <label for="substack_url">Substack</label>
-            <input id="substack_url" name="substack_url" type="text" placeholder="https://janedoe.substack.com" />
-          </div>
-          <div class="field">
-            <label for="substack_subscribers">Substack subscribers</label>
-            <input id="substack_subscribers" name="substack_subscribers" type="number" min="0" placeholder="0" />
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>Platform Stats</h2>
-        <p class="subtitle" style="margin-bottom:.75rem;">Followers/following per platform, if you're active on more than one.</p>
-        <div class="grid">
-          <div class="field">
-            <label for="instagram_followers">Instagram followers</label>
-            <input id="instagram_followers" name="instagram_followers" type="number" min="0" placeholder="0" />
-          </div>
-          <div class="field">
-            <label for="instagram_following">Instagram following</label>
-            <input id="instagram_following" name="instagram_following" type="number" min="0" placeholder="0" />
-          </div>
-          <div class="field">
-            <label for="youtube_followers">YouTube subscribers</label>
-            <input id="youtube_followers" name="youtube_followers" type="number" min="0" placeholder="0" />
-          </div>
-          <div class="field">
-            <label for="facebook_followers">Facebook followers</label>
-            <input id="facebook_followers" name="facebook_followers" type="number" min="0" placeholder="0" />
-          </div>
-          <div class="field">
-            <label for="facebook_following">Facebook following</label>
-            <input id="facebook_following" name="facebook_following" type="number" min="0" placeholder="0" />
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>Audience Demographics</h2>
-        <p class="subtitle" style="margin-bottom:.75rem;">Pull these numbers from your platform's own analytics/insights dashboard.</p>
-        <div class="grid">
-          <div class="field">
-            <label for="audience_gender_male_pct">Audience — male (%)</label>
-            <input id="audience_gender_male_pct" name="audience_gender_male_pct" type="number" min="0" max="100" step="0.1" placeholder="45" />
-          </div>
-          <div class="field">
-            <label for="audience_gender_female_pct">Audience — female (%)</label>
-            <input id="audience_gender_female_pct" name="audience_gender_female_pct" type="number" min="0" max="100" step="0.1" placeholder="55" />
-          </div>
           <div class="field full">
-            <label>Largest audience age bracket(s)</label>
-            <div class="msel">
-              <button type="button" class="msel-toggle" data-panel="audience_age_bracket_list" onclick="toggleMsel('audience_age_bracket_list')">
-                <span class="placeholder">Select bracket(s)…</span>
-              </button>
-              <div class="msel-panel" id="audience_age_bracket_list">
-                <label class="msel-option"><input type="checkbox" value="12_16" onchange="updateMselLabel('audience_age_bracket_list')">12_16</label>
-                <label class="msel-option"><input type="checkbox" value="17_22" onchange="updateMselLabel('audience_age_bracket_list')">17_22</label>
-                <label class="msel-option"><input type="checkbox" value="23_28" onchange="updateMselLabel('audience_age_bracket_list')">23_28</label>
-                <label class="msel-option"><input type="checkbox" value="29_35" onchange="updateMselLabel('audience_age_bracket_list')">29_35</label>
-                <label class="msel-option"><input type="checkbox" value="36_45" onchange="updateMselLabel('audience_age_bracket_list')">36_45</label>
-                <label class="msel-option"><input type="checkbox" value="46_60" onchange="updateMselLabel('audience_age_bracket_list')">46_60</label>
-                <label class="msel-option"><input type="checkbox" value="60_plus" onchange="updateMselLabel('audience_age_bracket_list')">60_plus</label>
-              </div>
+            <label>Primary platforms *</label>
+            <div class="platform-choices">
+              <label class="check-choice"><input type="checkbox" name="platform_choice" value="instagram" onchange="updatePlatformSections()"> Instagram</label>
+              <label class="check-choice"><input type="checkbox" name="platform_choice" value="youtube" onchange="updatePlatformSections()"> YouTube</label>
             </div>
-            <p class="niche-hint">Click to select one or more — min/max are derived from your widest selection.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Platform profile</h2>
+        <p class="subtitle" style="margin-bottom:0">Choose Instagram, YouTube, or both to add the profile details brands will use for matching.</p>
+      </div>
+
+      <div class="card platform-card" id="instagram_profile">
+        <h2>Instagram</h2>
+        <div class="grid">
+          <div class="field">
+            <label for="instagram_handle">Instagram username</label>
+            <input id="instagram_handle" name="instagram_handle" type="text" placeholder="@janedoe" />
+          </div>
+          <div class="field">
+            <label for="instagram_followers">Follower count</label>
+            <input id="instagram_followers" name="instagram_followers" type="number" min="0" placeholder="50000" />
+          </div>
+          <div class="field">
+            <label for="instagram_primary_niche">Primary niche</label>
+            <input id="instagram_primary_niche" name="instagram_primary_niche" type="text" placeholder="Fitness" />
+          </div>
+          <div class="field">
+            <label for="instagram_sub_niches">Sub-niches</label>
+            <input id="instagram_sub_niches" name="instagram_sub_niches" type="text" placeholder="Yoga, wellness" />
           </div>
           <div class="field full">
-            <label for="audience_top_country">Top audience country</label>
-            <input id="audience_top_country" name="audience_top_country" type="text" placeholder="United States" />
+            <label for="instagram_excluded_categories">Brand categories to avoid</label>
+            <input id="instagram_excluded_categories" name="instagram_excluded_categories" type="text" placeholder="Alcohol, gambling" />
+          </div>
+          <div class="field full">
+            <label>How would you like to create your description?</label>
+            <label class="check-choice"><input type="radio" name="instagram_description_mode" value="write" onchange="toggleDescription('instagram')"> Write it myself</label>
+            <label class="check-choice"><input type="radio" name="instagram_description_mode" value="generate" onchange="toggleDescription('instagram')"> Let MAVLIT generate it from my content</label>
+            <textarea id="instagram_description" name="instagram_description" placeholder="Describe your Instagram content"></textarea>
+          </div>
+          <div class="field">
+            <label for="instagram_audience_gender_male_pct">Audience male (%)</label>
+            <input id="instagram_audience_gender_male_pct" name="instagram_audience_gender_male_pct" type="number" min="0" max="100" step="0.1" placeholder="45" />
+          </div>
+          <div class="field">
+            <label for="instagram_audience_gender_female_pct">Audience female (%)</label>
+            <input id="instagram_audience_gender_female_pct" name="instagram_audience_gender_female_pct" type="number" min="0" max="100" step="0.1" placeholder="55" />
+          </div>
+          <div class="field full">
+            <p class="niche-hint">Audience demographics<br>Use your latest platform analytics.<br>1% total</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card platform-card" id="youtube_profile">
+        <h2>YouTube</h2>
+        <div class="grid">
+          <div class="field">
+            <label for="youtube_channel_name">Channel name</label>
+            <input id="youtube_channel_name" name="youtube_channel_name" type="text" placeholder="Jane Doe" />
+          </div>
+          <div class="field">
+            <label for="youtube_subscribers">Subscriber count</label>
+            <input id="youtube_subscribers" name="youtube_subscribers" type="number" min="0" placeholder="50000" />
+          </div>
+          <div class="field">
+            <label for="youtube_primary_niche">Primary niche</label>
+            <input id="youtube_primary_niche" name="youtube_primary_niche" type="text" placeholder="Fitness" />
+          </div>
+          <div class="field">
+            <label for="youtube_sub_niches">Sub-niches</label>
+            <input id="youtube_sub_niches" name="youtube_sub_niches" type="text" placeholder="Yoga, wellness" />
+          </div>
+          <div class="field full">
+            <label>How would you like to create your description?</label>
+            <label class="check-choice"><input type="radio" name="youtube_description_mode" value="write" onchange="toggleDescription('youtube')"> Write it myself</label>
+            <label class="check-choice"><input type="radio" name="youtube_description_mode" value="generate" onchange="toggleDescription('youtube')"> Let MAVLIT generate it from my content</label>
+            <textarea id="youtube_description" name="youtube_description" placeholder="Describe your YouTube content"></textarea>
+          </div>
+          <div class="field full">
+            <label for="youtube_excluded_categories">Brand categories to avoid</label>
+            <input id="youtube_excluded_categories" name="youtube_excluded_categories" type="text" placeholder="Alcohol, gambling" />
+          </div>
+          <div class="field">
+            <label for="youtube_audience_gender_male_pct">Audience male (%)</label>
+            <input id="youtube_audience_gender_male_pct" name="youtube_audience_gender_male_pct" type="number" min="0" max="100" step="0.1" placeholder="45" />
+          </div>
+          <div class="field">
+            <label for="youtube_audience_gender_female_pct">Audience female (%)</label>
+            <input id="youtube_audience_gender_female_pct" name="youtube_audience_gender_female_pct" type="number" min="0" max="100" step="0.1" placeholder="55" />
+          </div>
+          <div class="field full">
+            <p class="niche-hint">Audience demographics<br>Use your latest platform analytics.<br>1% total</p>
           </div>
         </div>
       </div>
@@ -412,34 +378,69 @@
       isLoggedIn ? 'Save profile' : 'Continue with Google to save';
   }
 
+  var GENERATED_DESCRIPTION = 'MAVLIT will analyze your Instagram posts/captions and generate a creator description optimized for brand matching.\n\nEstimated time: 8–10 minutes.\n\nYou can continue onboarding without waiting.\n\nFrontend preview only — no content is analyzed yet.';
+  var YOUTUBE_GENERATED_DESCRIPTION = GENERATED_DESCRIPTION.replace('Instagram posts/captions', 'YouTube videos/descriptions');
+
+  function selectedPlatforms() {
+    return Array.prototype.slice.call(document.querySelectorAll('input[name="platform_choice"]:checked')).map(function(input) { return input.value; });
+  }
+
+  function updatePlatformSections() {
+    var selected = selectedPlatforms();
+    document.getElementById('instagram_profile').style.display = selected.indexOf('instagram') !== -1 ? 'block' : 'none';
+    document.getElementById('youtube_profile').style.display = selected.indexOf('youtube') !== -1 ? 'block' : 'none';
+  }
+
+  function toggleDescription(platform) {
+    var form = document.getElementById('formSection');
+    var mode = form.elements[platform + '_description_mode'].value;
+    var description = form.elements[platform + '_description'];
+    if (mode === 'generate') {
+      description.value = platform === 'instagram' ? GENERATED_DESCRIPTION : YOUTUBE_GENERATED_DESCRIPTION;
+      description.readOnly = true;
+    } else {
+      description.readOnly = false;
+      if (description.value === GENERATED_DESCRIPTION || description.value === YOUTUBE_GENERATED_DESCRIPTION) description.value = '';
+    }
+  }
+
+  function setInput(id, value) {
+    var input = document.getElementById(id);
+    if (input && value !== null && value !== undefined) input.value = value;
+  }
+
+  function setListInput(id, value) { setInput(id, Array.isArray(value) ? value.join(', ') : value); }
+
+  function setRadio(name, value) {
+    Array.prototype.forEach.call(document.querySelectorAll('input[name="' + name + '"]'), function(input) { input.checked = input.value === value; });
+  }
+
   // profile/body objects always store percentages as 0–1 decimals,
   // audience_top_countries as [{country, pct}, ...], and sub_niches/
   // excluded_categories as string arrays — convert all three back to the
   // form's display format (0–100 number, plain text country, comma list).
   function applyProfileToForm(profile) {
     if (!profile) return;
-    var form = document.getElementById('formSection');
-    Object.keys(profile).forEach(function(key) {
-      if (['content_niche', 'sub_niches', 'audience_age_bracket'].indexOf(key) !== -1) return;
-      var input = form.elements[key];
-      if (!input || profile[key] === null || profile[key] === undefined) return;
-      if (key === 'audience_gender_male_pct' || key === 'audience_gender_female_pct') {
-        input.value = profile[key] * 100;
-      } else if (key === 'excluded_categories') {
-        input.value = profile[key].join(', ');
-      } else {
-        input.value = profile[key];
-      }
+    setInput('full_name', profile.full_name); setInput('creator_handle', profile.creator_handle);
+    setInput('age', profile.age); setInput('gender', profile.gender);
+    setInput('instagram_handle', profile.instagram_handle); setInput('instagram_followers', profile.instagram_followers);
+    setInput('instagram_primary_niche', profile.instagram_primary_niche); setListInput('instagram_sub_niches', profile.instagram_sub_niches);
+    setListInput('instagram_excluded_categories', profile.instagram_excluded_categories); setInput('instagram_description', profile.instagram_description);
+    setInput('instagram_audience_gender_male_pct', profile.instagram_audience_gender_male_pct * 100); setInput('instagram_audience_gender_female_pct', profile.instagram_audience_gender_female_pct * 100);
+    setInput('youtube_channel_name', profile.youtube_channel_name); setInput('youtube_subscribers', profile.youtube_subscribers);
+    setInput('youtube_primary_niche', profile.youtube_primary_niche); setListInput('youtube_sub_niches', profile.youtube_sub_niches);
+    setListInput('youtube_excluded_categories', profile.youtube_excluded_categories); setInput('youtube_description', profile.youtube_description);
+    setInput('youtube_audience_gender_male_pct', profile.youtube_audience_gender_male_pct * 100); setInput('youtube_audience_gender_female_pct', profile.youtube_audience_gender_female_pct * 100);
+    (profile.primary_platform || '').split(',').forEach(function(platform) {
+      var checkbox = document.querySelector('input[name="platform_choice"][value="' + platform.trim() + '"]');
+      if (checkbox) checkbox.checked = true;
     });
-    if (profile.audience_top_countries && profile.audience_top_countries.length) {
-      form.elements['audience_top_country'].value = profile.audience_top_countries[0].country || '';
-    }
-
-    // Apply multi-select fields last so sub-niches can be filtered by the
-    // primary niche(s) already selected.
-    if (profile.content_niche) setSelectedPills('content_niche_list', profile.content_niche);
-    renderSubNiches(getSelectedPills('content_niche_list'), profile.sub_niches || []);
-    if (profile.audience_age_bracket) setSelectedPills('audience_age_bracket_list', profile.audience_age_bracket);
+    ['instagram', 'youtube'].forEach(function(platform) {
+      if (profile[platform + '_description_mode']) setRadio(platform + '_description_mode', profile[platform + '_description_mode']);
+      var mode = document.querySelector('input[name="' + platform + '_description_mode"]:checked');
+      if (mode) toggleDescription(platform);
+    });
+    updatePlatformSections();
   }
 
   // Primary niche is a checkbox dropdown populated from GET /brand-niches
@@ -590,46 +591,34 @@
       var items = v.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
       return items.length ? items : null;
     };
-
-    var genderMale   = numOrNull(form.elements['audience_gender_male_pct'].value);
-    var genderFemale = numOrNull(form.elements['audience_gender_female_pct'].value);
-    var topCountry   = form.elements['audience_top_country'].value.trim();
-
-    // Multiple brackets can be selected — min is the lowest bound across all
-    // of them, max is the highest bound, e.g. 12_16 + 17_22 -> min=12, max=22.
-    var ageBrackets = getSelectedPills('audience_age_bracket_list');
-    var ageRanges   = ageBrackets.map(function(b) { return AGE_BUCKET_RANGES[b]; }).filter(Boolean);
-    var ageMin = ageRanges.length ? Math.min.apply(null, ageRanges.map(function(r) { return r[0]; })) : null;
-    var ageMax = ageRanges.length ? Math.max.apply(null, ageRanges.map(function(r) { return r[1]; })) : null;
+    var platforms = selectedPlatforms();
+    var value = function(name) { return form.elements[name] ? (form.elements[name].value || null) : null; };
+    var number = function(name) { return form.elements[name] ? numOrNull(form.elements[name].value) : null; };
+    var percent = function(name) { var result = number(name); return result === null ? null : result / 100; };
+    var list = function(name) { return listOrNull(form.elements[name].value); };
+    var primary = platforms[0];
+    var mode = function(name) { var radio = document.querySelector('input[name="' + name + '"]:checked'); return radio ? radio.value : null; };
 
     return {
-      full_name:        form.elements['full_name'].value,
-      creator_handle:   form.elements['creator_handle'].value,
-      location_city:    form.elements['location_city'].value || null,
-      location_country: form.elements['location_country'].value || null,
-      bio_tagline:      form.elements['bio_tagline'].value || null,
-      content_niche:    getSelectedPills('content_niche_list').join(', '),
-      sub_niches:          getSelectedPills('sub_niches_list').length ? getSelectedPills('sub_niches_list') : null,
-      content_description: form.elements['content_description'].value || null,
-      excluded_categories: listOrNull(form.elements['excluded_categories'].value),
-      instagram_handle: form.elements['instagram_handle'].value || null,
-      youtube_channel:  form.elements['youtube_channel'].value || null,
-      facebook_page:    form.elements['facebook_page'].value || null,
-      substack_url:     form.elements['substack_url'].value || null,
-      substack_subscribers: numOrNull(form.elements['substack_subscribers'].value),
-      instagram_followers: numOrNull(form.elements['instagram_followers'].value),
-      instagram_following: numOrNull(form.elements['instagram_following'].value),
-      youtube_followers:   numOrNull(form.elements['youtube_followers'].value),
-      facebook_followers:  numOrNull(form.elements['facebook_followers'].value),
-      facebook_following:  numOrNull(form.elements['facebook_following'].value),
-      primary_platform: form.elements['primary_platform'].value || null,
-      follower_count:   numOrNull(form.elements['follower_count'].value),
-      audience_gender_male_pct:   genderMale === null ? null : genderMale / 100,
-      audience_gender_female_pct: genderFemale === null ? null : genderFemale / 100,
-      audience_age_bracket:       ageBrackets.length ? ageBrackets.join(', ') : null,
-      audience_age_min:           ageMin,
-      audience_age_max:           ageMax,
-      audience_top_countries:     topCountry ? [{ country: topCountry, pct: 1.0 }] : null,
+      full_name: value('full_name'), creator_handle: value('creator_handle'), age: number('age'), gender: value('gender'),
+      primary_platform: platforms.length ? platforms.join(',') : null,
+      follower_count: primary === 'instagram' ? number('instagram_followers') : number('youtube_subscribers'),
+      content_niche: primary ? value(primary + '_primary_niche') : null,
+      content_description: primary ? value(primary + '_description') : null,
+      excluded_categories: primary ? list(primary + '_excluded_categories') : null,
+      instagram_handle: value('instagram_handle'), instagram_followers: number('instagram_followers'),
+      instagram_primary_niche: value('instagram_primary_niche'), instagram_sub_niches: list('instagram_sub_niches'),
+      instagram_excluded_categories: list('instagram_excluded_categories'), instagram_description: value('instagram_description'),
+      instagram_description_mode: mode('instagram_description_mode'),
+      instagram_audience_gender_male_pct: percent('instagram_audience_gender_male_pct'),
+      instagram_audience_gender_female_pct: percent('instagram_audience_gender_female_pct'),
+      youtube_channel_name: value('youtube_channel_name'),
+      youtube_subscribers: number('youtube_subscribers'),
+      youtube_primary_niche: value('youtube_primary_niche'), youtube_sub_niches: list('youtube_sub_niches'),
+      youtube_excluded_categories: list('youtube_excluded_categories'), youtube_description: value('youtube_description'),
+      youtube_description_mode: mode('youtube_description_mode'),
+      youtube_audience_gender_male_pct: percent('youtube_audience_gender_male_pct'),
+      youtube_audience_gender_female_pct: percent('youtube_audience_gender_female_pct'),
     };
   }
 
@@ -678,8 +667,8 @@
       form.reportValidity();
       return false;
     }
-    if (!getSelectedPills('content_niche_list').length) {
-      setStatus('Select at least one primary niche.', true);
+    if (!selectedPlatforms().length) {
+      setStatus('Select at least one primary platform.', true);
       return false;
     }
 
@@ -733,7 +722,8 @@
       });
   }
 
-  loadNiches().then(checkAuth);
+  updatePlatformSections();
+  checkAuth();
 </script>
 </body>
 </html>
