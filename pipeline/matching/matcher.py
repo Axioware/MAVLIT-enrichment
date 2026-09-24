@@ -55,7 +55,7 @@ Runs on every page load; designed to be cheap:
            hard-filtered) pool to the top _SHORTLIST_SIZE candidates —
            fast because embeddings are precomputed.
   Step C — Weighted scoring (pipeline.matching.scoring.score_match) across
-           all 7 dimensions for each shortlisted candidate, plus the Tier-1
+           all 5 dimensions for each shortlisted candidate, plus the Tier-1
            template match-text (pipeline.matching.match_text).
 
 Only brands with a brand_match_profile row are ever considered — that's
@@ -189,37 +189,46 @@ def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) 
     # itself OR one of the brand's confirmed Instagram collaborators — a
     # hard yes/no check, separate from niche_compatibility()'s fuzzy score
     # used for ranking in Step C.
-    if creator.content_niche:
-        creator_niches = [n.strip().lower() for n in creator.content_niche.split(",") if n.strip()]
-        if creator_niches:
-            brand_niche_match = or_(*[func.lower(BrandRaw.niche) == n for n in creator_niches])
-            collaborator_niche_match = BrandRaw.id.in_(
-                db.query(BrandInstagramUser.brand_raw_id)
-                .join(InstagramUser, InstagramUser.id == BrandInstagramUser.instagram_user_id)
-                .filter(
-                    InstagramUser.user_type != "commenter",
-                    func.lower(InstagramUser.niche).in_(creator_niches),
-                )
+    creator_niche_values = (
+        creator.instagram_primary_niche,
+        creator.youtube_primary_niche,
+        creator.content_niche,
+    )
+    creator_niches = {
+        niche.strip().lower()
+        for value in creator_niche_values
+        for niche in (value or "").split(",")
+        if niche.strip()
+    }
+    if creator_niches:
+        brand_niche_match = or_(*[func.lower(BrandRaw.niche) == n for n in creator_niches])
+        collaborator_niche_match = BrandRaw.id.in_(
+            db.query(BrandInstagramUser.brand_raw_id)
+            .join(InstagramUser, InstagramUser.id == BrandInstagramUser.instagram_user_id)
+            .filter(
+                InstagramUser.user_type != "commenter",
+                func.lower(InstagramUser.niche).in_(creator_niches),
             )
-            # Reverse-engineering path: a brand also passes if it's linked
-            # (brand_instagram_users) to a content_creator_re creator whose
-            # SOURCE content_creator_re.niche matches — looked up live via
-            # this join rather than trusting instagram_users.niche, which is
-            # only a snapshot copied at scrape time and goes stale if
-            # content_creator_re.niche is edited afterward.
-            re_creator_niche_match = BrandRaw.id.in_(
-                db.query(BrandInstagramUser.brand_raw_id)
-                .join(InstagramUser, InstagramUser.id == BrandInstagramUser.instagram_user_id)
-                .join(ContentCreatorRE, ContentCreatorRE.username == InstagramUser.username)
-                .filter(
-                    InstagramUser.user_type != "commenter",
-                    InstagramUser.is_content_creator_re.is_(True),
-                    func.lower(ContentCreatorRE.niche).in_(creator_niches),
-                )
+        )
+        # Reverse-engineering path: a brand also passes if it's linked
+        # (brand_instagram_users) to a content_creator_re creator whose
+        # SOURCE content_creator_re.niche matches — looked up live via
+        # this join rather than trusting instagram_users.niche, which is
+        # only a snapshot copied at scrape time and goes stale if
+        # content_creator_re.niche is edited afterward.
+        re_creator_niche_match = BrandRaw.id.in_(
+            db.query(BrandInstagramUser.brand_raw_id)
+            .join(InstagramUser, InstagramUser.id == BrandInstagramUser.instagram_user_id)
+            .join(ContentCreatorRE, ContentCreatorRE.username == InstagramUser.username)
+            .filter(
+                InstagramUser.user_type != "commenter",
+                InstagramUser.is_content_creator_re.is_(True),
+                func.lower(ContentCreatorRE.niche).in_(creator_niches),
             )
-            match_clauses = [brand_niche_match, collaborator_niche_match, re_creator_niche_match]
+        )
+        match_clauses = [brand_niche_match, collaborator_niche_match, re_creator_niche_match]
 
-            query = query.filter(or_(*match_clauses))
+        query = query.filter(or_(*match_clauses))
 
     # Step B — semantic shortlist (single indexed pgvector query)
     query = query.order_by(distance_expr).limit(_SHORTLIST_SIZE)

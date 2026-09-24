@@ -402,10 +402,9 @@
   var PRIMARY_NICHES = ['Health', 'Music', 'Fitness', 'Beauty'];
   var creatorSubNiches = [];
 
-  // Mirrors _AGE_BUCKET_RANGES in pipeline/matching/scoring.py — the min/max
-  // range is derived from the selected bracket rather than typed separately,
-  // so audience_age_min/audience_age_max still get populated for the
-  // audience_demographics scoring dimension without a second form field.
+  // The min/max range is derived from the selected bracket rather than typed
+  // separately, so the saved profile retains the audience age selection for
+  // future use without requiring a second form field.
   var AGE_BUCKET_RANGES = {
     '12_16':   [12, 16],
     '17_22':   [17, 22],
