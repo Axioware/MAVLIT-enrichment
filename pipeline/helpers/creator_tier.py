@@ -9,6 +9,6 @@ def bucket_creator_tier(follower_count: int | None) -> str | None:
         return "nano"
     if follower_count < 100_000:
         return "micro"
-    if follower_count < 1_000_000:
+    if follower_count < 500_000:
         return "macro"
     return "mega"
