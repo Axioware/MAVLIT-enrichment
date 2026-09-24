@@ -4,10 +4,10 @@ pipeline/matching/niche_compatibility.py
 Niche match dimension (25% weight in Stage 3 scoring) — "category
 compatibility via a niche-to-niche lookup table" per the matching design
 doc. Creators now pick their primary niche(s) directly from the same
-distinct-niche vocabulary brands are seeded with (see GET /brand-niches and
-creator-profile.html), so both sides of the comparison are drawn from the
-same free-form string space — no curated keyword table is needed to bridge
-a fixed creator-niche enum against arbitrary brand niches anymore.
+content_creator_re niche vocabulary exposed by GET /brand-niches and
+creator-profile.html, so both sides of the comparison are drawn from the same
+free-form string space — no curated keyword table is needed to bridge a
+fixed creator-niche enum against arbitrary brand niches anymore.
 
 creator_niche may be a single niche or a comma-separated list (a creator can
 select more than one primary niche). Each selected niche is compared against

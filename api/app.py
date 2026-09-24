@@ -1427,19 +1427,18 @@ class CreatorDescriptionResponse(BaseModel):
 @app.get("/brand-niches")
 def list_brand_niches():
     """
-    Distinct niche values from brands_niches AND instagram_users.niche
-    (LLM-classified creator niches — see instagram_users.py), for the
-    creator-profile form's Primary niche multi-select. Both vocabularies
-    feed the same Stage 3 hard filter in matcher.py: a brand can match
-    either via its own niche or via a confirmed Instagram collaborator's
-    classified niche, so creators need to be able to pick from either set.
+    Distinct niche values supplied through content_creator_re, for the
+    creator-profile form's Primary niche multi-select.
     """
     db = SessionLocal()
     try:
-        brand_rows = db.query(BrandNiche.niche).distinct().all()
-        creator_rows = db.query(InstagramUser.niche).distinct().all()
-        all_values = {r[0] for r in brand_rows if r[0]} | {r[0] for r in creator_rows if r[0] and r[0] != "unknown"}
-        niches = sorted(all_values, key=str.lower)
+        rows = (
+            db.query(ContentCreatorRE.niche)
+            .filter(ContentCreatorRE.niche.isnot(None), ContentCreatorRE.niche != "")
+            .distinct()
+            .all()
+        )
+        niches = sorted({row[0].strip() for row in rows if row[0] and row[0].strip()}, key=str.casefold)
         return {"niches": niches}
     finally:
         db.close()
