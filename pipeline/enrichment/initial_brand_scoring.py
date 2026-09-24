@@ -21,16 +21,18 @@ Section 1 — Influencer Buying Activity (50 pts: YouTube 25 + Instagram 25)
         >=1,000,000: 7   >=100,000: 5   >=10,000: 3   else: 0
     total = min(recency_pts + count_pts + subscriber_pts, 25)
 
-  Instagram (_score_instagram, from instagram_posts rows for the brand):
-    signal_posts = posts with paid_partnership OR sponsors OR tagged_users OR coauthor_producers
-    Recency (0-9 pts) — days since most recent signal_post.timestamp:
-        <=30d: 9   <=90d: 7   <=180d: 4   <=365d: 2   else/none: 0
-    Paid partnership posts (0-8 pts) — count where paid_partnership is true:
-        0: 0   1-2: 4   3-5: 6   6+: 8
-    Sponsors populated (0-2 pts) — any post has a non-empty sponsors field: 2 or 0
-    Creator network (0-4 pts) — count of brand_instagram_users rows:
-        0: 0   1-9: 2   10+: 4
-    Collaboration signals (0-2 pts) — any post has tagged_users OR coauthor_producers: 2 or 0
+  Instagram (_score_instagram, from straight and reverse-engineering evidence):
+    Recency (0-10 pts) — days since the most recent >=90-confidence sponsorship
+        timestamp in instagram_posts or test_creator_brand_partnership_posts:
+        <=60d: 10   <=120d: 8   <=180d: 5   <=365d: 3   else/none: 0
+    Paid partnership posts (0-9 pts) — count of >=90-confidence rows across
+        instagram_posts and test_creator_brand_partnership_posts:
+        0: 0   1-2: 4   3: 6   4+: 9
+    Creator network (0-4 pts) — distinct creator usernames from
+        brand_instagram_users/instagram_users and the test partnership table:
+        0: 0   1-3: 2   4+: 4
+    Creator follower reach (0-2 pts) — any linked non-commenter creator with
+        90,000 < followers_count < 900,000: 2 or 0
     total = min(sum of the above, 25)
 
 Section 2 — Advertising Budget / Meta Ads (15 pts max)
@@ -80,9 +82,10 @@ that module excluding Tranco rank/HQ country/traffic tier from match scores.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -91,6 +94,7 @@ from pipeline.db import (
     BrandInstagramUser,
     InitialBrandScore,
     InstagramPost,
+    InstagramUser,
     MetaAd,
     TestCreatorBrandPartnershipPost,
     YoutubeSponsorship,
@@ -189,30 +193,33 @@ def _score_youtube(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any]]
 
 
 def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any]]:
-    """Instagram Paid Partnerships — 25 pts max."""
+    """Instagram sponsorship evidence — 25 pts max."""
+    window_start, window_end = _sponsorship_date_bounds()
     posts = db.query(InstagramPost).filter(
-        InstagramPost.brand_raw_id == brand_raw_id
+        InstagramPost.brand_raw_id == brand_raw_id,
+        InstagramPost.sponsorship_confidence >= 90,
+        InstagramPost.timestamp >= window_start,
+        InstagramPost.timestamp < window_end,
+    ).all()
+    reverse_posts = db.query(TestCreatorBrandPartnershipPost).filter(
+        TestCreatorBrandPartnershipPost.brand_raw_id == brand_raw_id,
+        TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
+        TestCreatorBrandPartnershipPost.post_timestamp >= window_start,
+        TestCreatorBrandPartnershipPost.post_timestamp < window_end,
     ).all()
 
     details: dict[str, Any] = {}
 
-    # Posts that carry any collaboration signal — used for the recency sub-score
-    signal_posts = [
-        p for p in posts
-        if p.paid_partnership or p.sponsors or p.tagged_users or p.coauthor_producers
-    ]
-
-    # 2a. Recency (0-9 pts) — most recent post with any collaboration signal.
-    # Mirrors YouTube: a brand that worked with a creator last month outranks
-    # one whose last collab was over a year ago.
-    days_list = [d for d in (_days_since(p.timestamp) for p in signal_posts) if d is not None]
+    # 2a. Recency (0-10 pts) — use both straight and reverse-engineering rows.
+    timestamps = [p.timestamp for p in posts] + [p.post_timestamp for p in reverse_posts]
+    days_list = [d for d in (_days_since(value) for value in timestamps) if d is not None]
     if days_list:
         min_days = min(days_list)
         details["recency_days"] = min_days
         if min_days <= 60:
-            recency_pts = 9
+            recency_pts = 10
         elif min_days <= 120:
-            recency_pts = 7
+            recency_pts = 8
         elif min_days <= 180:
             recency_pts = 5
         elif min_days <= 365:
@@ -224,8 +231,9 @@ def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any
         recency_pts = 0
     details["recency_pts"] = recency_pts
 
-    # 2b. Paid partnership posts (0-8 pts)
-    paid_count = sum(1 for p in posts if p.paid_partnership)
+    # 2b. Paid partnership posts (0-9 pts) — both evidence tables are already
+    # sponsorship-only inputs, but retain the confidence filter in this query.
+    paid_count = len(posts) + len(reverse_posts)
     details["paid_partnership_posts"] = paid_count
     if paid_count == 0:
         paid_pts = 0
@@ -234,37 +242,54 @@ def _score_instagram(db: Session, brand_raw_id: int) -> tuple[int, dict[str, Any
     elif paid_count <= 3:
         paid_pts = 6
     else:
-        paid_pts = 8
+        paid_pts = 9
     details["paid_pts"] = paid_pts
 
-    # 2c. Sponsors field populated (0-2 pts)
-    sponsors_populated = any(p.sponsors for p in posts)
-    details["sponsors_populated"] = sponsors_populated
-    sponsors_pts = 2 if sponsors_populated else 0
-    details["sponsors_pts"] = sponsors_pts
-
-    # 2d. Creator network in brand_instagram_users (0-4 pts)
-    creator_count = db.query(BrandInstagramUser).filter(
-        BrandInstagramUser.brand_raw_id == brand_raw_id
-    ).count()
+    # 2c. Creator network (0-4 pts) — union direct links and reverse rows.
+    linked_users = db.query(InstagramUser).join(
+        BrandInstagramUser,
+        BrandInstagramUser.instagram_user_id == InstagramUser.id,
+    ).filter(
+        BrandInstagramUser.brand_raw_id == brand_raw_id,
+        InstagramUser.user_type != "commenter",
+    ).all()
+    creator_usernames = {user.username.casefold() for user in linked_users if user.username}
+    creator_usernames.update(
+        row.creator_username.casefold()
+        for row in reverse_posts
+        if row.creator_username
+    )
+    creator_count = len(creator_usernames)
     details["creator_network_count"] = creator_count
     if creator_count == 0:
         creator_pts = 0
-    elif creator_count < 4:
+    elif creator_count <= 3:
         creator_pts = 2
     else:
         creator_pts = 4
     details["creator_pts"] = creator_pts
 
-    # 2e. Collaboration signals (0-2 pts)
-    collab_signals = any(
-        (p.tagged_users or p.coauthor_producers) for p in posts
+    # 2d. Creator follower reach (0-2 pts). Reverse rows identify creators by
+    # username; join them back to InstagramUser for the follower snapshot.
+    reverse_usernames = {row.creator_username.casefold() for row in reverse_posts if row.creator_username}
+    reverse_users = []
+    if reverse_usernames:
+        reverse_users = db.query(InstagramUser).filter(
+            InstagramUser.user_type != "commenter",
+            func.lower(InstagramUser.username).in_(reverse_usernames),
+        ).all()
+    follower_users = linked_users + reverse_users
+    has_mid_reach_creator = any(
+        user.followers_count is not None
+        and 90_000 < user.followers_count < 900_000
+        and (user in linked_users or user.username.casefold() in reverse_usernames)
+        for user in follower_users
     )
-    details["collab_signals"] = collab_signals
-    collab_pts = 2 if collab_signals else 0
-    details["collab_pts"] = collab_pts
+    details["mid_reach_creator"] = has_mid_reach_creator
+    follower_pts = 2 if has_mid_reach_creator else 0
+    details["follower_pts"] = follower_pts
 
-    total = min(recency_pts + paid_pts + sponsors_pts + creator_pts + collab_pts, 25)
+    total = min(recency_pts + paid_pts + creator_pts + follower_pts, 25)
     details["total"] = total
     return total, details
 
@@ -470,21 +495,22 @@ def _band(score: int) -> str:
     return "COLD"
 
 
-def _sponsorship_year_bounds() -> tuple[str, str]:
-    """Return the current calendar year's ISO text bounds."""
-    year = datetime.now(timezone.utc).year
-    return f"{year}-01-01", f"{year + 1}-01-01"
+def _sponsorship_date_bounds() -> tuple[str, str]:
+    """Return ISO text bounds for the rolling 365-day sponsorship window."""
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=365)
+    return start.strftime("%Y-%m-%d"), (end + timedelta(days=1)).strftime("%Y-%m-%d")
 
 
 def _has_qualifying_sponsorship(db: Session, brand_raw_id: int) -> bool:
-    """True when a recent high-confidence Instagram partnership exists."""
-    year_start, next_year_start = _sponsorship_year_bounds()
+    """True when either sponsorship table has recent high-confidence evidence."""
+    window_start, window_end = _sponsorship_date_bounds()
 
     instagram_match = db.query(InstagramPost.id).filter(
         InstagramPost.brand_raw_id == brand_raw_id,
         InstagramPost.sponsorship_confidence >= 90,
-        InstagramPost.timestamp >= year_start,
-        InstagramPost.timestamp < next_year_start,
+        InstagramPost.timestamp >= window_start,
+        InstagramPost.timestamp < window_end,
     ).first()
     if instagram_match:
         return True
@@ -492,8 +518,8 @@ def _has_qualifying_sponsorship(db: Session, brand_raw_id: int) -> bool:
     creator_brand_match = db.query(TestCreatorBrandPartnershipPost.id).filter(
         TestCreatorBrandPartnershipPost.brand_raw_id == brand_raw_id,
         TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
-        TestCreatorBrandPartnershipPost.post_timestamp >= year_start,
-        TestCreatorBrandPartnershipPost.post_timestamp < next_year_start,
+        TestCreatorBrandPartnershipPost.post_timestamp >= window_start,
+        TestCreatorBrandPartnershipPost.post_timestamp < window_end,
     ).first()
     return creator_brand_match is not None
 
@@ -586,7 +612,7 @@ def score_brand(db: Session, brand_raw_id: int) -> dict[str, Any] | None:
 
 def run_brand_scoring(db: Session, limit: int = 500, brand_id: int | None = None) -> int:
     """
-    Score only non-referral brands with a current-year Instagram partnership
+    Score only non-referral brands with a rolling-365-day Instagram partnership
     confidence of at least 90 in InstagramPost or the creator-brand test table.
     Brands are scored regardless of enrichment_completeness; the completeness
     value in the output row lets callers filter before sending to Apollo.
@@ -596,7 +622,7 @@ def run_brand_scoring(db: Session, limit: int = 500, brand_id: int | None = None
     initial_brand_scored filters. The sponsorship and referral gate always
     applies, including when brand_id is supplied.
     """
-    year_start, next_year_start = _sponsorship_year_bounds()
+    window_start, window_end = _sponsorship_date_bounds()
     if brand_id is not None:
         brands = db.query(BrandRaw).filter(BrandRaw.id == brand_id).all()
     else:
@@ -616,15 +642,15 @@ def run_brand_scoring(db: Session, limit: int = 500, brand_id: int | None = None
                 db.query(InstagramPost.id).filter(
                     InstagramPost.brand_raw_id == BrandRaw.id,
                     InstagramPost.sponsorship_confidence >= 90,
-                    InstagramPost.timestamp >= year_start,
-                    InstagramPost.timestamp < next_year_start,
+                    InstagramPost.timestamp >= window_start,
+                    InstagramPost.timestamp < window_end,
                 ).exists()
                 |
                 db.query(TestCreatorBrandPartnershipPost.id).filter(
                     TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
                     TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
-                    TestCreatorBrandPartnershipPost.post_timestamp >= year_start,
-                    TestCreatorBrandPartnershipPost.post_timestamp < next_year_start,
+                    TestCreatorBrandPartnershipPost.post_timestamp >= window_start,
+                    TestCreatorBrandPartnershipPost.post_timestamp < window_end,
                 ).exists()
             )
             .limit(limit)
