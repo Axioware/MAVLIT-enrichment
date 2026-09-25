@@ -260,11 +260,11 @@
           </div>
           <div class="field">
             <label for="age">Age</label>
-            <input id="age" name="age" type="number" min="13" max="120" placeholder="28" />
+            <input id="age" name="age" type="number" min="13" max="120" placeholder="28" required />
           </div>
           <div class="field">
             <label for="gender">Gender</label>
-            <select id="gender" name="gender">
+            <select id="gender" name="gender" required>
               <option value="">Select gender…</option>
               <option value="female">Female</option>
               <option value="male">Male</option>
@@ -292,16 +292,16 @@
         <div class="grid">
           <div class="field">
             <label for="instagram_handle">Instagram username</label>
-            <input id="instagram_handle" name="instagram_handle" type="text" placeholder="@janedoe" />
+            <input id="instagram_handle" name="instagram_handle" type="text" placeholder="@janedoe" data-required-platform="instagram" />
           </div>
           <div class="field">
             <label for="instagram_followers">Follower count</label>
-            <input id="instagram_followers" name="instagram_followers" type="number" min="0" placeholder="50000" />
+            <input id="instagram_followers" name="instagram_followers" type="number" min="0" placeholder="50000" data-required-platform="instagram" />
           </div>
           <div class="field">
             <label for="instagram_primary_niche">Primary niche</label>
             <div class="niche-picker">
-              <input id="instagram_primary_niche" name="instagram_primary_niche" type="text" autocomplete="off" placeholder="Search and select niche(s)" oninput="showNicheSuggestions('instagram_primary_niche', 'primary')" />
+              <input id="instagram_primary_niche" name="instagram_primary_niche" type="text" autocomplete="off" placeholder="Search and select niche(s)" oninput="showNicheSuggestions('instagram_primary_niche', 'primary')" data-required-platform="instagram" />
               <div class="niche-suggestions" id="instagram_primary_niche_suggestions"></div>
             </div>
           </div>
@@ -323,7 +323,7 @@
             <label>How would you like to create your description?</label>
             <label class="check-choice"><input type="radio" name="instagram_description_mode" value="write" onchange="toggleDescription('instagram')"> Write it myself</label>
             <label class="check-choice"><input type="radio" name="instagram_description_mode" value="generate" onchange="toggleDescription('instagram')"> Let MAVLIT generate it from my content</label>
-            <textarea id="instagram_description" name="instagram_description" placeholder="Describe your Instagram content"></textarea>
+            <textarea id="instagram_description" name="instagram_description" placeholder="Describe your Instagram content" data-required-platform="instagram"></textarea>
           </div>
           <div class="field">
             <label for="instagram_audience_gender_male_pct">Audience male (%)</label>
@@ -344,16 +344,16 @@
         <div class="grid">
           <div class="field">
             <label for="youtube_channel_name">Channel name</label>
-            <input id="youtube_channel_name" name="youtube_channel_name" type="text" placeholder="Jane Doe" />
+            <input id="youtube_channel_name" name="youtube_channel_name" type="text" placeholder="Jane Doe" data-required-platform="youtube" />
           </div>
           <div class="field">
             <label for="youtube_subscribers">Subscriber count</label>
-            <input id="youtube_subscribers" name="youtube_subscribers" type="number" min="0" placeholder="50000" />
+            <input id="youtube_subscribers" name="youtube_subscribers" type="number" min="0" placeholder="50000" data-required-platform="youtube" />
           </div>
           <div class="field">
             <label for="youtube_primary_niche">Primary niche</label>
             <div class="niche-picker">
-              <input id="youtube_primary_niche" name="youtube_primary_niche" type="text" autocomplete="off" placeholder="Search and select niche(s)" oninput="showNicheSuggestions('youtube_primary_niche', 'primary')" />
+              <input id="youtube_primary_niche" name="youtube_primary_niche" type="text" autocomplete="off" placeholder="Search and select niche(s)" oninput="showNicheSuggestions('youtube_primary_niche', 'primary')" data-required-platform="youtube" />
               <div class="niche-suggestions" id="youtube_primary_niche_suggestions"></div>
             </div>
           </div>
@@ -368,7 +368,7 @@
             <label>How would you like to create your description?</label>
             <label class="check-choice"><input type="radio" name="youtube_description_mode" value="write" onchange="toggleDescription('youtube')"> Write it myself</label>
             <label class="check-choice"><input type="radio" name="youtube_description_mode" value="generate" onchange="toggleDescription('youtube')"> Let MAVLIT generate it from my content</label>
-            <textarea id="youtube_description" name="youtube_description" placeholder="Describe your YouTube content"></textarea>
+            <textarea id="youtube_description" name="youtube_description" placeholder="Describe your YouTube content" data-required-platform="youtube"></textarea>
           </div>
           <div class="field full">
             <label for="youtube_excluded_categories">Brand categories to avoid</label>
@@ -779,6 +779,32 @@
     };
   }
 
+  function validateProfileBody(body) {
+    var selected = selectedPlatforms();
+    if (!body.full_name || !body.age || !body.gender || !selected.length) {
+      throw new Error('Please complete your full name, age, gender, and primary platforms.');
+    }
+    if (!body.instagram_handle && selected.indexOf('instagram') !== -1) {
+      throw new Error('Please add your Instagram username before saving.');
+    }
+    if ((body.follower_count === null || body.follower_count === undefined || body.follower_count <= 0) && selected.length) {
+      throw new Error('Please add your follower count before saving.');
+    }
+    if (!body.content_niche) {
+      throw new Error('Please choose your primary niche before saving.');
+    }
+    if (!body.content_description) {
+      throw new Error('Please add a short creator description before saving.');
+    }
+    if (selected.indexOf('instagram') !== -1 && (!body.instagram_handle || !body.instagram_followers || body.instagram_followers <= 0)) {
+      throw new Error('Please complete the Instagram username and followers before saving.');
+    }
+    if (selected.indexOf('youtube') !== -1 && (!body.youtube_channel_name || !body.youtube_subscribers || body.youtube_subscribers <= 0)) {
+      throw new Error('Please complete the YouTube channel name and subscribers before saving.');
+    }
+    return true;
+  }
+
   function submitProfile(body, successMessage) {
     var btn = document.getElementById('saveBtn');
     btn.disabled = true;
@@ -824,12 +850,13 @@
       form.reportValidity();
       return false;
     }
-    if (!selectedPlatforms().length) {
-      setStatus('Select at least one primary platform.', true);
+    try {
+      var body = buildProfileBody();
+      validateProfileBody(body);
+    } catch (err) {
+      setStatus(err.message || 'Please complete the required fields.', true);
       return false;
     }
-
-    var body = buildProfileBody();
 
     if (isLoggedIn) {
       submitProfile(body);

@@ -15,7 +15,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.sql import Select
 from config import ADMIN_PASSKEY, FRONTEND_ORIGINS, IS_PRODUCTION, JWT_SECRET, POSTHOG_PROJECT_TOKEN, POSTHOG_HOST
 from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, ContractReview, CreatorProfile, CreatorNiche, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Pitch, Prompt, RateEstimate, SavedBrand, TestBrandsWithInstagramPosts, TestCreatorBrandPartnershipPost, TestNiche, YoutubeSponsorship, SessionLocal, engine
-from api.auth import get_current_user, router as auth_router
+from api.auth import get_current_user, get_current_user_optional, is_profile_complete, router as auth_router
 from api.schemas import CreatorProfileResponse, profile_to_response as _profile_to_response
 from api.advisory import router as advisory_router
 from api.brands import router as brands_router
@@ -1155,7 +1155,11 @@ app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 
 @app.get("/", include_in_schema=False)
-def frontend():
+def frontend(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
+    if not current_user:
+        return RedirectResponse(url="/signin?return_to=/", status_code=307)
+    if not is_profile_complete(current_user):
+        return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
     return FileResponse("frontend/index.html")
 
 
@@ -1174,27 +1178,45 @@ def login_redirect():
 
 
 @app.get("/dashboard", include_in_schema=False)
-def dashboard_page():
+def dashboard_page(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
+    if not current_user:
+        return RedirectResponse(url="/signin?return_to=/dashboard", status_code=307)
+    if not is_profile_complete(current_user):
+        return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
     return FileResponse("frontend/index.html")
 
 
 @app.get("/creator-profile", include_in_schema=False)
-def creator_profile_page():
+def creator_profile_page(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
+    if not current_user:
+        return RedirectResponse(url="/signin?return_to=/creator-profile", status_code=307)
     return FileResponse("frontend/creator-profile.html")
 
 
 @app.get("/matches", include_in_schema=False)
-def matches_page():
+def matches_page(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
+    if not current_user:
+        return RedirectResponse(url="/signin?return_to=/matches", status_code=307)
+    if not is_profile_complete(current_user):
+        return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
     return FileResponse("frontend/matches.html")
 
 
 @app.get("/add-creators", include_in_schema=False)
-def add_creators_page():
+def add_creators_page(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
+    if not current_user:
+        return RedirectResponse(url="/signin?return_to=/add-creators", status_code=307)
+    if not is_profile_complete(current_user):
+        return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
     return FileResponse("frontend/add-creators.html")
 
 
 @app.get("/brand-catalog", include_in_schema=False)
-def brand_catalog_page():
+def brand_catalog_page(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
+    if not current_user:
+        return RedirectResponse(url="/signin?return_to=/brand-catalog", status_code=307)
+    if not is_profile_complete(current_user):
+        return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
     return FileResponse("frontend/brand-catalog.html")
 
 
@@ -1580,8 +1602,14 @@ def upsert_my_creator_profile(
     """
     db = SessionLocal()
     try:
+        payload = body.model_dump()
+        if not is_profile_complete(payload):
+            raise HTTPException(
+                status_code=422,
+                detail="Complete the required onboarding fields before continuing: full name, age, gender, primary platforms, Instagram username, follower count, primary niche, and at least one creator description.",
+            )
         row = db.query(CreatorProfile).filter(CreatorProfile.id == current_user.id).first()
-        for field, value in body.model_dump().items():
+        for field, value in payload.items():
             setattr(row, field, value)
         row.creator_tier = bucket_creator_tier(row.follower_count)
 

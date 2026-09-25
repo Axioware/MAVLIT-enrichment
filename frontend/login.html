@@ -213,13 +213,38 @@
     return '/';
   }
 
+  function isProfileComplete(user) {
+    if (!user) return false;
+    var fullName = String(user.full_name || '').trim();
+    var age = user.age;
+    var gender = String(user.gender || '').trim();
+    var primaryPlatform = String(user.primary_platform || '').trim();
+    var followerCount = user.follower_count;
+    var contentNiche = String(user.content_niche || '').trim();
+    var description = String(user.content_description || user.instagram_description || user.youtube_description || '').trim();
+    var selectedPlatforms = primaryPlatform ? primaryPlatform.split(',').map(function(v) { return v.trim().toLowerCase(); }).filter(Boolean) : [];
+
+    if (!fullName || age === null || age === undefined || !gender || !selectedPlatforms.length || !contentNiche || !description || !followerCount || followerCount <= 0) {
+      return false;
+    }
+
+    if (selectedPlatforms.indexOf('instagram') !== -1) {
+      if (!String(user.instagram_handle || '').trim() || user.instagram_followers === null || user.instagram_followers === undefined || user.instagram_followers <= 0) return false;
+    }
+    if (selectedPlatforms.indexOf('youtube') !== -1) {
+      if (!String(user.youtube_channel_name || '').trim() || user.youtube_subscribers === null || user.youtube_subscribers === undefined || user.youtube_subscribers <= 0) return false;
+    }
+    return true;
+  }
+
   function checkAuth() {
     showSection('loading');
     fetch('/auth/me', { credentials: 'include' })
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(user) {
         if (user) {
-          window.location.replace(safeReturnTo());
+          var nextPath = isProfileComplete(user) ? safeReturnTo() : '/creator-profile';
+          window.location.replace(nextPath);
         } else {
           showSection('login');
         }
@@ -258,12 +283,15 @@
     })
       .then(function(r) {
         if (r.ok) {
-          window.location.replace(safeReturnTo());
-          return;
+          return r.json();
         }
         return r.json().then(function(data) {
           throw new Error((data && data.detail) || 'Sign in failed — please try again.');
         });
+      })
+      .then(function(user) {
+        var nextPath = isProfileComplete(user) ? safeReturnTo() : '/creator-profile';
+        window.location.replace(nextPath);
       })
       .catch(function(err) {
         setLoginError(err.message || 'Sign in failed — please try again.');

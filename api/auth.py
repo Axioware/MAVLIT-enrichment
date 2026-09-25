@@ -62,6 +62,83 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> Creator
     return user
 
 
+def get_current_user_optional(request: Request, db: Session = Depends(get_db)) -> CreatorProfile | None:
+    """Like get_current_user, but returns None rather than raising when unauthenticated."""
+    token = request.cookies.get("access_token")
+    if not token:
+        return None
+    try:
+        payload = _decode_jwt(token)
+    except HTTPException:
+        return None
+    user = db.query(CreatorProfile).filter(CreatorProfile.id == int(payload["sub"])).first()
+    if not user or not user.is_active:
+        return None
+    return user
+
+
+def is_profile_complete(profile: CreatorProfile | dict | None) -> bool:
+    """True when a creator has completed the required onboarding profile."""
+    if profile is None:
+        return False
+
+    if isinstance(profile, dict):
+        full_name = str(profile.get("full_name") or "").strip()
+        age = profile.get("age")
+        gender = str(profile.get("gender") or "").strip()
+        primary_platform = str(profile.get("primary_platform") or "").strip()
+        follower_count = profile.get("follower_count")
+        content_niche = str(profile.get("content_niche") or "").strip()
+        content_description = str(profile.get("content_description") or "").strip()
+        instagram_handle = str(profile.get("instagram_handle") or "").strip()
+        instagram_followers = profile.get("instagram_followers")
+        youtube_channel_name = str(profile.get("youtube_channel_name") or "").strip()
+        youtube_subscribers = profile.get("youtube_subscribers")
+        instagram_description = str(profile.get("instagram_description") or "").strip()
+        youtube_description = str(profile.get("youtube_description") or "").strip()
+    else:
+        full_name = (profile.full_name or "").strip()
+        age = profile.age
+        gender = (profile.gender or "").strip()
+        primary_platform = (profile.primary_platform or "").strip()
+        follower_count = profile.follower_count
+        content_niche = (profile.content_niche or "").strip()
+        content_description = (profile.content_description or "").strip()
+        instagram_handle = (profile.instagram_handle or "").strip()
+        instagram_followers = profile.instagram_followers
+        youtube_channel_name = (profile.youtube_channel_name or "").strip()
+        youtube_subscribers = profile.youtube_subscribers
+        instagram_description = (profile.instagram_description or "").strip()
+        youtube_description = (profile.youtube_description or "").strip()
+
+    if not full_name or age is None or not gender:
+        return False
+
+    selected_platforms = [p.strip().lower() for p in primary_platform.split(",") if p.strip()]
+    if not selected_platforms:
+        return False
+
+    if not follower_count or follower_count <= 0:
+        return False
+
+    if not content_niche:
+        return False
+
+    description_text = content_description or instagram_description or youtube_description
+    if not description_text:
+        return False
+
+    if "instagram" in selected_platforms:
+        if not instagram_handle or instagram_followers is None or instagram_followers <= 0:
+            return False
+
+    if "youtube" in selected_platforms:
+        if not youtube_channel_name or youtube_subscribers is None or youtube_subscribers <= 0:
+            return False
+
+    return True
+
+
 #  Routes
 
 @router.post("/login", response_model=CreatorProfileResponse)
@@ -90,11 +167,7 @@ def login(body: LoginRequest, response: Response, db: Session = Depends(get_db))
 @router.get("/me")
 def me(current_user: CreatorProfile = Depends(get_current_user)):
     """Return the logged-in user's profile."""
-    return {
-        "id":    current_user.id,
-        "email": current_user.email,
-        "name":  current_user.full_name,
-    }
+    return profile_to_response(current_user)
 
 
 @router.post("/logout")
