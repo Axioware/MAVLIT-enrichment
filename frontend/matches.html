@@ -283,7 +283,7 @@
   }
 
   function loadMatches() {
-    fetch('/matches/me?limit=20', { credentials: 'include' })
+    fetch('/matches/me?limit=100', { credentials: 'include' })
       .then(function(r) {
         if (r.status === 401) {
           window.location.href = '/signin?return_to=' + encodeURIComponent('/matches');
@@ -307,7 +307,7 @@
     btn.disabled = true;
     btn.textContent = 'Refreshing…';
 
-    fetch('/matches/me/refresh?limit=20', { method: 'POST', credentials: 'include' })
+    fetch('/matches/me/refresh?limit=100', { method: 'POST', credentials: 'include' })
       .then(function(r) {
         if (!r.ok) return errorFromResponse(r, 'Refresh failed');
         return r.json();

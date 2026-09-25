@@ -91,7 +91,7 @@ logger = logging.getLogger(__name__)
 
 _SHORTLIST_SIZE = 100
 _ACTIVITY_FLOOR = 0   # brands with a CONFIRMED score at or below this are dropped; unscored (NULL) brands are kept
-_FOLLOWER_TOLERANCE = 0.50   # +/-200% buffer beyond the brand's confirmed collaborator follower range
+_FOLLOWER_TOLERANCE = 2   # +/-200% buffer beyond the brand's confirmed collaborator follower range
 _CREATOR_SIMILARITY_FLOOR = 0.60
 
 
