@@ -91,14 +91,14 @@ logger = logging.getLogger(__name__)
 
 _SHORTLIST_SIZE = 100
 _ACTIVITY_FLOOR = 0   # brands with a CONFIRMED score at or below this are dropped; unscored (NULL) brands are kept
-_FOLLOWER_TOLERANCE = 0.30   # +/-30% buffer beyond the brand's confirmed collaborator follower range
+_FOLLOWER_TOLERANCE = 0.50   # +/-200% buffer beyond the brand's confirmed collaborator follower range
 _CREATOR_SIMILARITY_FLOOR = 0.60
 
 
 def get_matches(
     db: Session,
     creator_id: int,
-    limit: int = 20,
+    limit: int = 100,
     offset: int = 0,
     *,
     include_total: bool = False,
@@ -236,6 +236,8 @@ def get_matches(
         })
 
     results.sort(key=lambda r: r["total_score"], reverse=True)
+    logger.info("length========", len(results))
+    print("length========", len(results))
 
     logger.info(
         "Matching: creator_id=%d -> %d shortlisted, returning %d (offset=%d)",
