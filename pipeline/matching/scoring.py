@@ -250,6 +250,12 @@ def score_match(
     else:
         total = 0.0
 
+    # The weighted score is a normalized 0..1 signal, but some component
+    # formulas (notably the follower-fit subscore) can temporarily exceed 1.0
+    # before the weighted average is taken. Clamp the final total so the UI and
+    # downstream logic never display a >100% match score.
+    total = max(0.0, min(1.0, total))
+
     return {
         "total_score": total,
         "dimensions": {k: {"score": raw[k], "weight": WEIGHTS[k]} for k in raw},
