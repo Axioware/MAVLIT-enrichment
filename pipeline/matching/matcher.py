@@ -217,19 +217,17 @@ def get_matches(
                 func.lower(InstagramUser.niche).in_(creator_niches),
             )
         )
-        # Reverse-engineering path: a brand also passes if it's linked
-        # (brand_instagram_users) to a content_creator_re creator whose
-        # SOURCE content_creator_re.niche matches — looked up live via
-        # this join rather than trusting instagram_users.niche, which is
-        # only a snapshot copied at scrape time and goes stale if
-        # content_creator_re.niche is edited afterward.
+        # Reverse-engineering path: a brand also passes if its test
+        # partnership evidence links it to a content_creator_re row whose
+        # source niche matches. Use the evidence table directly so brands
+        # discovered only through reverse engineering are not missed.
         re_creator_niche_match = BrandRaw.id.in_(
-            db.query(BrandInstagramUser.brand_raw_id)
-            .join(InstagramUser, InstagramUser.id == BrandInstagramUser.instagram_user_id)
-            .join(ContentCreatorRE, ContentCreatorRE.username == InstagramUser.username)
+            db.query(TestCreatorBrandPartnershipPost.brand_raw_id)
+            .join(
+                ContentCreatorRE,
+                ContentCreatorRE.id == TestCreatorBrandPartnershipPost.content_creator_re_id,
+            )
             .filter(
-                InstagramUser.user_type != "commenter",
-                InstagramUser.is_content_creator_re.is_(True),
                 func.lower(ContentCreatorRE.niche).in_(creator_niches),
             )
         )
