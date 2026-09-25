@@ -114,7 +114,7 @@ _TIMEOUT    = 20
 _RANK_TIMEOUT = 180.0
 _SEARCH_PER_PAGE = 50   # search is free — no credit reason to keep this small
 _PHONE_TOP_N = 2        # of those, only this many (rank <= this) also get phone reveal — extra ~8 credits each
-_ENRICH_MIN_CONFIDENCE = 90
+_ENRICH_MIN_CONFIDENCE = 80
 
 # Phone reveal is async — see module docstring. Apollo's own guidance is
 # "retry after ~10 seconds"; this polls up to 7 times (~70s worst case per
