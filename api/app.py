@@ -128,6 +128,9 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS operating_area TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS website TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS domain TEXT",
+        "ALTER TABLE pitches ADD COLUMN IF NOT EXISTS sent_at DATE",
+        "ALTER TABLE pitches ADD COLUMN IF NOT EXISTS agreed_rate NUMERIC(12, 2)",
+        "ALTER TABLE pitches ADD COLUMN IF NOT EXISTS is_manual BOOLEAN NOT NULL DEFAULT false",
         # Entity identity and metadata columns
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS wikidata_id TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS entity_type TEXT",

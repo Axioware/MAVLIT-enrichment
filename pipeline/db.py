@@ -1,5 +1,5 @@
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, Column, Float, ForeignKey, Integer, Text, TIMESTAMP, UniqueConstraint, create_engine
+from sqlalchemy import Boolean, Column, Date, Float, ForeignKey, Integer, Numeric, Text, TIMESTAMP, UniqueConstraint, create_engine
 from sqlalchemy.dialects.postgresql import insert, JSONB
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker, relationship
 from sqlalchemy.sql import func
@@ -635,7 +635,10 @@ class Pitch(Base):
     pitch_text = Column(Text)
     # Free text, not a DB enum — same convention as InitialBrandScore.score_band,
     # so new lifecycle values can be introduced later without a migration.
-    status     = Column(Text, nullable=False, server_default="proposal_sent", default="proposal_sent")
+    status     = Column(Text, nullable=False, server_default="generated", default="generated")
+    sent_at    = Column(Date)
+    agreed_rate = Column(Numeric(12, 2))
+    is_manual  = Column(Boolean, nullable=False, server_default="false", default=False)
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

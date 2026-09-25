@@ -1,9 +1,7 @@
 """
-pipeline/pitching.py
-
 Generates a personal, relationship-building outreach pitch for a creator to
 send a brand (existing brands_raw row, or a brand they typed in themselves),
-and persists it as a Pitch row with status="proposal_sent".
+and persists it as a generated, unsent Pitch row.
 """
 
 import logging
@@ -90,7 +88,7 @@ def generate_pitch(
         contact_name=contact["name"] if contact else None,
         contact_email=contact["email"] if contact else None,
         pitch_text=pitch_text,
-        status="proposal_sent",
+        status="generated",
     )
     db.add(pitch)
     db.commit()

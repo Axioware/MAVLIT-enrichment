@@ -1,4 +1,7 @@
-from pydantic import BaseModel
+from datetime import date
+from decimal import Decimal
+
+from pydantic import BaseModel, Field
 
 from pipeline.db import BrandRaw, ContractReview, CreatorProfile, Pitch, RateEstimate
 
@@ -183,6 +186,19 @@ class PitchRequest(BaseModel):
     content_link: str | None = None
 
 
+class PitchUpdateRequest(BaseModel):
+    status: str | None = None
+    sent_at: date | None = None
+    agreed_rate: Decimal | None = Field(default=None, ge=0)
+
+
+class ManualPitchRequest(BaseModel):
+    brand_id: int | None = None
+    custom_brand_name: str | None = None
+    status: str = "sent"
+    sent_at: date
+
+
 class PitchResponse(BaseModel):
     id: int
     brand_id: int | None = None
@@ -196,6 +212,10 @@ class PitchResponse(BaseModel):
     contact_email: str | None = None
     pitch_text: str | None = None
     status: str
+    source: str
+    sent_at: date | None = None
+    agreed_rate: Decimal | None = None
+    is_manual: bool
     created_at: str
 
 
@@ -213,8 +233,19 @@ def pitch_to_response(pitch: Pitch) -> PitchResponse:
         contact_email=pitch.contact_email,
         pitch_text=pitch.pitch_text,
         status=pitch.status,
+        source="manual" if pitch.is_manual else "generated",
+        sent_at=pitch.sent_at,
+        agreed_rate=pitch.agreed_rate,
+        is_manual=pitch.is_manual,
         created_at=str(pitch.created_at) if pitch.created_at else "",
     )
+
+
+class PitchListResponse(BaseModel):
+    pitches: list[PitchResponse]
+    total: int
+    limit: int
+    offset: int
 
 
 #  Dashboard (pipeline/dashboard.py -> api/dashboard.py)
