@@ -242,6 +242,9 @@ db.close()
 
 ## run apollo_contacts.py
 python3 -c "
+import logging
+from dotenv import load_dotenv; load_dotenv()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
 from pipeline.db import SessionLocal
 from pipeline.enrichment.apollo_contacts import run_apollo_contacts
 db = SessionLocal()
