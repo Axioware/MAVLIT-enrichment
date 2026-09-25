@@ -283,7 +283,8 @@ def enrich_instagram_posts(
     max_creators: int = _DEFAULT_MAX_CREATORS,
 ) -> int:
     """
-    For each brand with instagram_handle set, instagram_checked=False, and
+    For each brand with instagram_handle set, instagram_checked=False,
+    refferls=False, geo_reach_score NULL or 0-40, and
     has_official_website=True:
       1. Scrape posts via Apify
       2. Apply LLM filtering based on ENABLE_INSTA_LLM flag
@@ -318,7 +319,11 @@ def enrich_instagram_posts(
         logger.warning("APIFY_TOKEN not set — skipping Instagram enrichment")
         return 0
 
-    query = db.query(BrandRaw).filter(BrandRaw.instagram_handle.isnot(None))
+    query = db.query(BrandRaw).filter(
+        BrandRaw.instagram_handle.isnot(None),
+        BrandRaw.refferls.is_(False),
+        (BrandRaw.geo_reach_score.is_(None) | BrandRaw.geo_reach_score.between(0, 40)),
+    )
     if brand_id is not None:
         query = query.filter(
             BrandRaw.id == brand_id,

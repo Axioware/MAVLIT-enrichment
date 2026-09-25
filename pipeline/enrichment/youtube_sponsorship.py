@@ -37,7 +37,7 @@ import re
 import time
 
 import httpx
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2, YOUTUBE_API_KEY_3, YOUTUBE_API_KEY_4, YOUTUBE_API_KEY_5, YOUTUBE_API_KEY_6, YOUTUBE_API_KEY_7, YOUTUBE_API_KEY_8, YOUTUBE_API_KEY_9, YOUTUBE_API_KEY_10, YOUTUBE_API_KEY_11, YOUTUBE_API_KEY_12, OPENAI_KEY, ENABLE_LLM
@@ -606,7 +606,8 @@ def enrich_youtube_sponsorships(
     db: Session, limit: int = 50, brand_id: int | None = None, niche: str | None = None
 ) -> int:
     """
-    For each brand with youtube_checked=False:
+    For each brand with youtube_checked=False, refferls=False, and
+    geo_reach_score NULL or 0-40:
       1. Run 14 tier-based YouTube searches (brand name embedded in every query)
       2. Fetch video details and analyse descriptions
       3. Store sponsorship rows in youtube_sponsorships
@@ -639,6 +640,11 @@ def enrich_youtube_sponsorships(
     query = db.query(BrandRaw).filter(
         BrandRaw.name.isnot(None),
         BrandRaw.has_official_website.is_(True),
+        BrandRaw.refferls.is_(False),
+        or_(
+            BrandRaw.geo_reach_score.is_(None),
+            BrandRaw.geo_reach_score.between(0, 40),
+        ),
     )
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
