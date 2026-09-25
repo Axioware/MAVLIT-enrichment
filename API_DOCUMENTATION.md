@@ -242,7 +242,7 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
 - **Auth:** Required.
 - **Query parameters:** `limit` default `20`; `offset` default `0`.
 - **Example request:** `GET /matches/me?limit=20&offset=0`.
-- **Response:** `200`, `MatchesResponse`.
+- **Response:** `200`, `MatchesResponse`. `total` is the count before pagination and shortlist truncation.
 
   ```json
   {
@@ -259,6 +259,7 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
         "reasons": ["Niche overlap", "Audience gender fit"]
       }
     ],
+    "total": 37,
     "cached": false,
     "computed_at": "2026-09-24T10:20:00+00:00"
   }
@@ -266,7 +267,7 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
 
 - **Errors:** `401` unauthenticated; `422` invalid query values.
 - **Frontend:** `frontend/matches.html`.
-- **Behavior:** Always computes live today; `cached` is always `false`.
+- **Behavior:** Always computes live today; `cached` is always `false`. A brand qualifies when it has a processed match-profile with an embedding, passes the sponsorship-activity floor, excluded-category filter, platform-specific Instagram/YouTube presence and follower-fit filters, similarity exclusions, and the exact niche overlap rule against the brand, qualifying Instagram collaborators, or linked reverse-engineered creators. The returned page is then ranked and limited; `total` counts all qualifying brands.
 
 #### `POST /matches/me/refresh`
 
@@ -331,7 +332,7 @@ The following endpoints are authenticated and implemented for API consumers, but
 
 #### `POST /pitches`
 
-- **Purpose:** Generate and persist a personalized pitch. The saved status is currently `proposal_sent`.
+- **Purpose:** Generate and persist a personalized pitch as `generated` (unsent). It does not imply that the creator sent the text.
 - **Auth:** Required.
 - **Body:** `PitchRequest`: `is_custom`, `story`, optional `product_reference`, `past_brand_partnership`, `content_link`; non-custom requests require `brand_id`, while custom requests require `custom_brand_name` and omit `brand_id`.
 - **Example request:**
@@ -347,21 +348,28 @@ The following endpoints are authenticated and implemented for API consumers, but
   }
   ```
 
-- **Response:** `200`, `PitchResponse` with `id`, brand fields, submitted story fields, optional contact fields, generated `pitch_text`, `status`, and `created_at`.
+- **Response:** `200`, `PitchResponse` with `id`, brand fields, submitted story fields, optional contact fields, generated `pitch_text`, canonical `status`, `source`, `sent_at`, `agreed_rate`, and `created_at`.
 - **Errors:** `400` invalid custom/non-custom combination; `401` unauthenticated; `404` brand not found; `502` LLM generation failed and no pitch is saved; `422` malformed body.
+
+#### `POST /pitches/manual`
+
+- **Purpose:** Record outreach performed outside MAVLIT without generating an AI email.
+- **Body:** `brand_id` or `custom_brand_name`, optional `status` (default `sent`), and required date-only `sent_at`.
+- **Response:** `200`, a `PitchResponse` with `source: "manual"` and `pitch_text: null`.
 
 #### `GET /pitches/me`
 
 - **Purpose:** Return the current creator's pitch history newest first.
 - **Auth:** Required.
-- **Response:** `200`, array of `PitchResponse`.
+- **Query:** `limit` (default 20, maximum 100) and `offset` (default 0).
+- **Response:** `200`, `{ "pitches": [...], "total": 37, "limit": 20, "offset": 0 }`.
 - **Errors:** `401` unauthenticated.
 
 #### `GET /dashboard/me`
 
 - **Purpose:** Return summary counts for the creator dashboard.
 - **Auth:** Required.
-- **Response:** `200` `{ "brand_matches": 37, "active_deals": 3, "saved_brands": 8, "verified_contacts": 5 }`.
+- **Response:** `200` `{ "brand_matches": 37, "active_deals": 3, "saved_brands": 8, "verified_contacts": 5 }`. `brand_matches` counts all brands passing the persisted Stage-3 eligibility rules, not only the returned page. `active_deals` counts persisted creator-owned pitches excluding `closed_won`, `closed_lost`, and `declined`. `saved_brands` counts persisted creator-owned saved-brand rows. `verified_contacts` counts distinct enriched contact rows for brands the creator saved or pitched.
 - **Errors:** `401` unauthenticated.
 
 #### `POST /rate-intelligence`

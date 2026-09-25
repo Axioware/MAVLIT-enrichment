@@ -95,7 +95,14 @@ _FOLLOWER_TOLERANCE = 0.30   # +/-30% buffer beyond the brand's confirmed collab
 _CREATOR_SIMILARITY_FLOOR = 0.60
 
 
-def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) -> list[dict]:
+def get_matches(
+    db: Session,
+    creator_id: int,
+    limit: int = 20,
+    offset: int = 0,
+    *,
+    include_total: bool = False,
+) -> list[dict] | tuple[list[dict], int]:
     """
     Returns up to `limit` ranked brand matches for one creator, best-first,
     starting at `offset`. Each result:
@@ -110,10 +117,10 @@ def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) 
     creator = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
     if not creator:
         logger.warning("Matching: creator_id=%d not found", creator_id)
-        return []
+        return ([], 0) if include_total else []
     if creator.embedding is None:
         logger.info("Matching: creator_id=%d has no embedding yet — run Stage 2 first", creator_id)
-        return []
+        return ([], 0) if include_total else []
 
     distance_expr = BrandProfile.embedding.cosine_distance(creator.embedding)
 
@@ -230,13 +237,15 @@ def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) 
 
         query = query.filter(or_(*match_clauses))
 
+    total = query.count()
+
     # Step B — semantic shortlist (single indexed pgvector query)
     query = query.order_by(distance_expr).limit(_SHORTLIST_SIZE)
     shortlist = query.all()
 
     if not shortlist:
         logger.info("Matching: creator_id=%d — no qualifying brands after hard filters", creator_id)
-        return []
+        return ([], total) if include_total else []
 
     # Step C — weighted scoring + match text
     results = []
@@ -258,4 +267,5 @@ def get_matches(db: Session, creator_id: int, limit: int = 20, offset: int = 0) 
         "Matching: creator_id=%d -> %d shortlisted, returning %d (offset=%d)",
         creator_id, len(results), min(limit, max(0, len(results) - offset)), offset,
     )
-    return results[offset:offset + limit]
+    page = results[offset:offset + limit]
+    return (page, total) if include_total else page

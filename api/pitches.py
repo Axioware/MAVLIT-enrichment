@@ -109,10 +109,12 @@ def update_pitch(
         allowed_next_statuses = _STATUS_TRANSITIONS.get(pitch.status)
         if allowed_next_statuses is None or body.status not in allowed_next_statuses:
             raise HTTPException(status_code=400, detail=f"Cannot transition from {pitch.status} to {body.status}")
-        if body.status == "sent" and pitch.sent_at is None and "sent_at" not in body.model_fields_set:
+        if body.status == "sent" and pitch.sent_at is None and body.sent_at is None:
             raise HTTPException(status_code=400, detail="sent_at is required when marking a pitch sent")
         pitch.status = body.status
     if "sent_at" in body.model_fields_set:
+        if body.sent_at is None and pitch.status != "generated":
+            raise HTTPException(status_code=400, detail="sent_at cannot be cleared after a pitch is sent")
         if body.sent_at is not None and body.status not in {"sent", "negotiating", "closed_won", "closed_lost", "declined"} and pitch.status == "generated":
             raise HTTPException(status_code=400, detail="sent_at requires a sent or later pitch status")
         pitch.sent_at = body.sent_at

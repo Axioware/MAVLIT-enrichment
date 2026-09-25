@@ -142,16 +142,28 @@ Validation: `is_custom: true` requires `custom_brand_name` and `brand_id` must b
   "contact_name": "Jane Doe",
   "contact_email": "jane@brand.com",
   "pitch_text": "Hi Jane,\n\nI've been a fan of...",
-  "status": "proposal_sent",
+  "status": "generated",
+  "source": "generated",
+  "sent_at": null,
+  "agreed_rate": null,
   "created_at": "2026-08-10 12:00:00+00"
 }
 ```
 Errors: `400` bad combination of `is_custom`/`brand_id`/`custom_brand_name`, `404` brand_id not found, `502` LLM generation failed (nothing is saved in this case — safe to let the user retry).
 
 ### `GET /pitches/me`
-Auth required. Response `200` — array of the same shape as above, newest first. This is the creator's pitch history/tracker list.
+Auth required. Query parameters: `limit` (default 20, maximum 100) and `offset` (default 0). Response `200`:
+```json
+{
+  "pitches": [/* PitchResponse objects, newest first */],
+  "total": 37,
+  "limit": 20,
+  "offset": 0
+}
+```
+The `status` values are canonical: `generated` means an AI pitch exists but has not been sent; `sent` requires `sent_at`; later statuses are `negotiating`, `closed_won`, `closed_lost`, or `declined`. `source` is `generated` or `manual`.
 
-`status` is free text (not a fixed enum in the DB) — currently only `"proposal_sent"` is ever set by the backend. Treat any other value the same way (design for a future status like `"in_discussion"` / `"closed_won"` / `"closed_lost"` / `"declined"` without assuming today's UI covers them).
+`status` is stored as text but the API uses canonical lifecycle values: `generated`, `sent`, `negotiating`, `closed_won`, `closed_lost`, and `declined`. Existing `proposal_sent` rows are normalized to `generated` at startup.
 
 ---
 
@@ -167,10 +179,10 @@ Auth required. Response `200`:
   "verified_contacts": 5
 }
 ```
-- `brand_matches` — count of the creator's current Stage-3 match results (capped at 100).
-- `active_deals` — count of the creator's pitches not in a terminal status (`closed_won`/`closed_lost`/`declined` — none exist yet in practice, so today this equals total pitch count).
-- `saved_brands` — count from the saved-brands list above.
-- `verified_contacts` — count of verified (real email) contacts, scoped to brands this creator has **saved or pitched** — not a platform-wide total.
+- `brand_matches` — count of all brands eligible under the current Stage-3 hard filters, before the returned page/shortlist limit. This uses the same rules as `GET /matches/me`.
+- `active_deals` — count of persisted pitches owned by the creator whose status is not `closed_won`, `closed_lost`, or `declined`. Browser-only edits are not counted.
+- `saved_brands` — count of persisted saved-brand rows owned by the creator.
+- `verified_contacts` — count of distinct persisted `brand_contacts` rows with `is_enriched=true`, whose brand is saved or pitched by the creator. A contact is counted once even if both paths qualify it.
 
 ---
 

@@ -16,11 +16,8 @@ from pipeline.matching.matcher import get_matches
 # once one does.
 _TERMINAL_PITCH_STATUSES = {"closed_won", "closed_lost", "declined"}
 
-_MATCH_COUNT_LIMIT = 100
-
-
 def get_dashboard_summary(db: Session, creator: CreatorProfile) -> dict:
-    brand_matches = len(get_matches(db, creator.id, limit=_MATCH_COUNT_LIMIT))
+    _, brand_matches = get_matches(db, creator.id, include_total=True)
 
     active_deals = (
         db.query(Pitch)

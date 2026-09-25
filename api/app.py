@@ -3,7 +3,7 @@ import uuid
 import wtforms
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -131,6 +131,8 @@ def _run_migrations() -> None:
         "ALTER TABLE pitches ADD COLUMN IF NOT EXISTS sent_at DATE",
         "ALTER TABLE pitches ADD COLUMN IF NOT EXISTS agreed_rate NUMERIC(12, 2)",
         "ALTER TABLE pitches ADD COLUMN IF NOT EXISTS is_manual BOOLEAN NOT NULL DEFAULT false",
+        "UPDATE pitches SET status = 'generated' WHERE status = 'proposal_sent'",
+        "ALTER TABLE pitches ALTER COLUMN status SET DEFAULT 'generated'",
         # Entity identity and metadata columns
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS wikidata_id TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS entity_type TEXT",
@@ -1597,14 +1599,15 @@ class MatchResult(BaseModel):
 
 class MatchesResponse(BaseModel):
     matches:     list[MatchResult]
+    total:       int
     cached:      bool
     computed_at: str
 
 
 @app.get("/matches/me", response_model=MatchesResponse)
 def get_my_matches(
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     current_user: CreatorProfile = Depends(get_current_user),
 ):
     """
@@ -1615,15 +1618,15 @@ def get_my_matches(
     """
     db = SessionLocal()
     try:
-        matches = get_matches(db, current_user.id, limit=limit, offset=offset)
-        return MatchesResponse(matches=matches, cached=False, computed_at=datetime.now(timezone.utc).isoformat())
+        matches, total = get_matches(db, current_user.id, limit=limit, offset=offset, include_total=True)
+        return MatchesResponse(matches=matches, total=total, cached=False, computed_at=datetime.now(timezone.utc).isoformat())
     finally:
         db.close()
 
 
 @app.post("/matches/me/refresh", response_model=MatchesResponse)
 def refresh_my_matches(
-    limit: int = 20,
+    limit: int = Query(20, ge=1, le=100),
     current_user: CreatorProfile = Depends(get_current_user),
 ):
     """
@@ -1633,7 +1636,7 @@ def refresh_my_matches(
     """
     db = SessionLocal()
     try:
-        matches = get_matches(db, current_user.id, limit=limit, offset=0)
-        return MatchesResponse(matches=matches, cached=False, computed_at=datetime.now(timezone.utc).isoformat())
+        matches, total = get_matches(db, current_user.id, limit=limit, offset=0, include_total=True)
+        return MatchesResponse(matches=matches, total=total, cached=False, computed_at=datetime.now(timezone.utc).isoformat())
     finally:
         db.close()
