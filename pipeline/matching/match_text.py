@@ -23,6 +23,8 @@ from pipeline.db import (
     CreatorProfile,
     InstagramPost,
     InstagramUser,
+    ContentCreatorRE,
+    TestCreatorBrandPartnershipPost,
     YoutubeSponsorship,
 )
 
@@ -170,6 +172,44 @@ def _creator_sub_niche_names(creator: CreatorProfile) -> set[str]:
         for niche in (values or [])
         if str(niche).strip()
     }
+
+
+def _brand_niche_bridge_reason(creator: CreatorProfile, brand: BrandRaw, db) -> str | None:
+    creator_niches = _creator_niche_names(creator)
+    brand_niche = (brand.niche or "").strip().lower()
+    if not creator_niches or not brand_niche or brand_niche in creator_niches:
+        return None
+
+    collaborator_niche = (
+        db.query(InstagramUser.niche)
+        .join(BrandInstagramUser, BrandInstagramUser.instagram_user_id == InstagramUser.id)
+        .filter(
+            BrandInstagramUser.brand_raw_id == brand.id,
+            InstagramUser.user_type != "commenter",
+            func.lower(InstagramUser.niche).in_(creator_niches),
+        )
+        .first()
+    )
+    matched_niche = collaborator_niche[0] if collaborator_niche else None
+
+    if matched_niche is None:
+        reverse_niche = (
+            db.query(ContentCreatorRE.niche)
+            .join(
+                TestCreatorBrandPartnershipPost,
+                TestCreatorBrandPartnershipPost.content_creator_re_id == ContentCreatorRE.id,
+            )
+            .filter(
+                TestCreatorBrandPartnershipPost.brand_raw_id == brand.id,
+                func.lower(ContentCreatorRE.niche).in_(creator_niches),
+            )
+            .first()
+        )
+        matched_niche = reverse_niche[0] if reverse_niche else None
+
+    if matched_niche is None:
+        return None
+    return f"Although {brand.name} is a {brand.niche} brand, it also sponsors creators in the {matched_niche} niche, the same niche as you."
 
 
 def _additional_priority_reasons(creator: CreatorProfile, brand: BrandRaw, db) -> list[tuple[int, str]]:
@@ -369,6 +409,9 @@ def generate_match_reasons(
     `dimensions` is the score_match()["dimensions"] dict for this pair.
     """
     reasons: list[tuple[int, str]] = []
+    bridge_reason = _brand_niche_bridge_reason(creator, brand, db)
+    if bridge_reason:
+        reasons.append((10_000, bridge_reason))
     recent_reason = _priority_1_recent_sponsorship_similarity(creator, brand, profile, dimensions, db)
     if recent_reason:
         recent_candidates = _recent_sponsorship_candidates(creator, brand, db)
