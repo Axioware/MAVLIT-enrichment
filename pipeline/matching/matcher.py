@@ -162,36 +162,11 @@ def get_matches(
                 creator.youtube_followers <= BrandProfile.youtube_highest * (1 + _FOLLOWER_TOLERANCE),
             )
 
-    # Exclude brands with a known qualifying Instagram partnership creator
-    # whose embedding is below the similarity floor. Missing creator
-    # embeddings remain eligible until that creator has been embedded.
-    low_similarity_direct = db.query(InstagramUser.id).join(
-        BrandInstagramUser,
-        BrandInstagramUser.instagram_user_id == InstagramUser.id,
-    ).join(
-        InstagramPost,
-        InstagramPost.post_id == InstagramUser.post_id,
-    ).join(
-        CreatorNiche,
-        func.lower(CreatorNiche.username) == func.lower(InstagramUser.username),
-    ).filter(
-        BrandInstagramUser.brand_raw_id == BrandRaw.id,
-        InstagramUser.user_type != "commenter",
-        InstagramPost.brand_raw_id == BrandRaw.id,
-        InstagramPost.sponsorship_confidence >= 90,
-        CreatorNiche.embedding.isnot(None),
-        (1.0 - CreatorNiche.embedding.cosine_distance(creator.embedding)) < _CREATOR_SIMILARITY_FLOOR,
-    ).exists()
-    low_similarity_reverse = db.query(TestCreatorBrandPartnershipPost.id).join(
-        CreatorNiche,
-        func.lower(CreatorNiche.username) == func.lower(TestCreatorBrandPartnershipPost.creator_username),
-    ).filter(
-        TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
-        TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
-        CreatorNiche.embedding.isnot(None),
-        (1.0 - CreatorNiche.embedding.cosine_distance(creator.embedding)) < _CREATOR_SIMILARITY_FLOOR,
-    ).exists()
-    query = query.filter(~low_similarity_direct, ~low_similarity_reverse)
+    # Keep brands eligible regardless of partner-creator embedding similarity.
+    # This was acting as a hard exclusion and could remove perfectly relevant
+    # niche matches (like beauty brands) before the semantic shortlist even ran.
+    # The similarity floor still exists as a soft ranking signal in the later
+    # weighted score step, but it should not zero out matches outright.
 
     # Creator must share at least one EXACT niche with EITHER the brand
     # itself OR one of the brand's confirmed Instagram collaborators — a
