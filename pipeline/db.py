@@ -573,6 +573,7 @@ class CreatorProfile(Base):
     instagram_description_mode = Column(Text)
     instagram_audience_gender_male_pct = Column(Float)
     instagram_audience_gender_female_pct = Column(Float)
+    
     youtube_channel_name = Column(Text)
     youtube_subscribers = Column(Integer)
     youtube_primary_niche = Column(Text)

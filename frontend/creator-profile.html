@@ -314,7 +314,10 @@
           </div>
           <div class="field full">
             <label for="instagram_excluded_categories">Brand categories to avoid</label>
-            <input id="instagram_excluded_categories" name="instagram_excluded_categories" type="text" placeholder="Alcohol, gambling" />
+            <div class="niche-picker">
+              <input id="instagram_excluded_categories" name="instagram_excluded_categories" type="text" autocomplete="off" placeholder="Search and select category(ies)" oninput="showNicheSuggestions('instagram_excluded_categories', 'avoid')" />
+              <div class="niche-suggestions" id="instagram_excluded_categories_suggestions"></div>
+            </div>
           </div>
           <div class="field full">
             <label>How would you like to create your description?</label>
@@ -369,7 +372,10 @@
           </div>
           <div class="field full">
             <label for="youtube_excluded_categories">Brand categories to avoid</label>
-            <input id="youtube_excluded_categories" name="youtube_excluded_categories" type="text" placeholder="Alcohol, gambling" />
+            <div class="niche-picker">
+              <input id="youtube_excluded_categories" name="youtube_excluded_categories" type="text" autocomplete="off" placeholder="Search and select category(ies)" oninput="showNicheSuggestions('youtube_excluded_categories', 'avoid')" />
+              <div class="niche-suggestions" id="youtube_excluded_categories_suggestions"></div>
+            </div>
           </div>
           <div class="field">
             <label for="youtube_audience_gender_male_pct">Audience male (%)</label>
@@ -401,6 +407,7 @@
   var generatedDescriptions = {};
   var PRIMARY_NICHES = ['Health', 'Music', 'Fitness', 'Beauty'];
   var creatorSubNiches = [];
+  var brandCategoryNiches = [];
 
   // The min/max range is derived from the selected bracket rather than typed
   // separately, so the saved profile retains the audience age selection for
@@ -637,6 +644,13 @@
       .catch(function() { creatorSubNiches = []; });
   }
 
+  function loadBrandCategoryNiches() {
+    return fetch('/brand-category-niches')
+      .then(function(r) { return r.ok ? r.json() : { niches: [] }; })
+      .then(function(data) { brandCategoryNiches = data.niches || []; })
+      .catch(function() { brandCategoryNiches = []; });
+  }
+
   function currentNicheSearch(value) {
     var parts = value.split(',');
     return parts[parts.length - 1].trim();
@@ -646,7 +660,9 @@
     var input = document.getElementById(inputId);
     var menu = document.getElementById(inputId + '_suggestions');
     var query = currentNicheSearch(input.value).toLowerCase();
-    var source = kind === 'primary' ? PRIMARY_NICHES : creatorSubNiches;
+    var source = kind === 'primary'
+      ? PRIMARY_NICHES
+      : kind === 'avoid' ? brandCategoryNiches : creatorSubNiches;
     var selected = input.value.split(',').map(function(value) { return value.trim().toLowerCase(); });
     var matches = source.filter(function(value) {
       return value.toLowerCase().indexOf(query) === 0 && selected.indexOf(value.toLowerCase()) === -1;
@@ -741,7 +757,7 @@
     var mode = function(name) { var radio = document.querySelector('input[name="' + name + '"]:checked'); return radio ? radio.value : null; };
 
     return {
-      full_name: value('full_name'), creator_handle: value('instagram_handle') || value('youtube_channel_name') || value('full_name'), age: number('age'), gender: value('gender'),
+      full_name: value('full_name'), creator_handle: value('instagram_handle') || value('youtube_channel_name'), age: number('age'), gender: value('gender'),
       primary_platform: platforms.length ? platforms.join(',') : null,
       follower_count: primary === 'instagram' ? number('instagram_followers') : number('youtube_subscribers'),
       content_niche: primary ? value(primary + '_primary_niche') : null,
@@ -865,6 +881,7 @@
 
   updatePlatformSections();
   loadNiches();
+  loadBrandCategoryNiches();
   checkAuth();
 </script>
 </body>

@@ -1449,6 +1449,23 @@ def list_brand_niches():
         db.close()
 
 
+@app.get("/brand-category-niches")
+def list_brand_category_niches():
+    """Distinct brand category values used by the creator avoid fields."""
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(BrandNiche.niche)
+            .filter(BrandNiche.niche.isnot(None), BrandNiche.niche != "")
+            .distinct()
+            .all()
+        )
+        niches = sorted({row[0].strip() for row in rows if row[0] and row[0].strip()}, key=str.casefold)
+        return {"niches": niches}
+    finally:
+        db.close()
+
+
 @app.get("/creator-sub-niches")
 def list_creator_sub_niches():
     """Distinct brand tag values used as searchable creator sub-niches."""
