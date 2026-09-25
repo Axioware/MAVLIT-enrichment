@@ -1,13 +1,13 @@
 """One-time enrichment of existing pending Apollo contact rows.
 
-Selects at most five existing brand_contacts rows that:
+For every brand, selects up to five existing brand_contacts rows that:
   - are not enriched yet
   - have sponsorship_contact_confidence >= 60
   - have an Apollo person ID
 
-The rows are processed highest-confidence first. This script does not run an
-Apollo search and does not create new contact rows; it only enriches contacts
-already stored in brand_contacts.
+The rows are processed highest-confidence first within each brand. This
+script does not run an Apollo search and does not create new contact rows; it
+only enriches contacts already stored in brand_contacts.
 
 Run:
     python run_apollo_pending_contacts_once.py
@@ -25,7 +25,7 @@ from config import APOLLO_API_KEY
 from pipeline.db import BrandContact, SessionLocal
 from pipeline.enrichment.apollo_contacts import _ApolloAuthError, _enrich_person
 
-_MAX_CONTACTS = 5
+_MAX_CONTACTS_PER_BRAND = 5
 _MIN_CONFIDENCE = 60
 
 logging.basicConfig(
@@ -72,7 +72,7 @@ def main(dry_run: bool = False) -> int:
 
     db = SessionLocal()
     try:
-        contacts = (
+        candidates = (
             db.query(BrandContact)
             .filter(
                 or_(
@@ -83,18 +83,30 @@ def main(dry_run: bool = False) -> int:
                 BrandContact.apollo_person_id.isnot(None),
             )
             .order_by(
+                BrandContact.brand_raw_id.asc(),
                 BrandContact.sponsorship_contact_confidence.desc(),
                 BrandContact.id.asc(),
             )
-            .limit(_MAX_CONTACTS)
             .all()
         )
+        contacts = []
+        selected_by_brand = {}
+        for contact in candidates:
+            selected_count = selected_by_brand.get(contact.brand_raw_id, 0)
+            if selected_count >= _MAX_CONTACTS_PER_BRAND:
+                continue
+            contacts.append(contact)
+            selected_by_brand[contact.brand_raw_id] = selected_count + 1
 
         if not contacts:
             logger.info("No unenriched contacts with confidence >= %d found", _MIN_CONFIDENCE)
             return 0
 
-        logger.info("Selected %d contact(s) for one-time enrichment", len(contacts))
+        logger.info(
+            "Selected %d contact(s) across %d brand(s) for one-time enrichment",
+            len(contacts),
+            len(selected_by_brand),
+        )
         if dry_run:
             for contact in contacts:
                 logger.info(
@@ -132,10 +144,10 @@ def main(dry_run: bool = False) -> int:
             db.commit()
 
         logger.info(
-            "One-time Apollo enrichment complete: %d attempted, %d enriched, maximum=%d",
+            "One-time Apollo enrichment complete: %d attempted, %d enriched, maximum_per_brand=%d",
             processed,
             enriched,
-            _MAX_CONTACTS,
+            _MAX_CONTACTS_PER_BRAND,
         )
         return 0
     finally:
