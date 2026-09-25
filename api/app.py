@@ -335,6 +335,9 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_excluded_categories JSONB",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_description TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_description_mode TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_description_status TEXT NOT NULL DEFAULT 'idle'",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_description_job_id TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_description_error TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_gender_male_pct FLOAT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_gender_female_pct FLOAT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_channel_name TEXT",
@@ -344,6 +347,9 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_excluded_categories JSONB",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_description TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_description_mode TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_description_status TEXT NOT NULL DEFAULT 'idle'",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_description_job_id TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_description_error TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_gender_male_pct FLOAT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_gender_female_pct FLOAT",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS location_city",
@@ -1446,10 +1452,13 @@ class CreatorDescriptionRequest(BaseModel):
 
 class CreatorDescriptionResponse(BaseModel):
     platform: str
-    description: str
+    status: str
+    job_id: str
+    description: str | None = None
     posts_analyzed: int | None = None
     videos_analyzed: int | None = None
-    bio_found: bool
+    bio_found: bool = False
+    error: str | None = None
 
 
 
@@ -1553,28 +1562,102 @@ def get_my_creator_profile(current_user: CreatorProfile = Depends(get_current_us
     return _profile_to_response(current_user)
 
 
+def _run_creator_description_job(
+    creator_id: int,
+    platform: str,
+    username: str,
+    niche: str,
+    job_id: str,
+) -> None:
+    db = SessionLocal()
+    status_field = f"{platform}_description_status"
+    job_field = f"{platform}_description_job_id"
+    description_field = f"{platform}_description"
+    error_field = f"{platform}_description_error"
+    try:
+        row = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
+        if not row or getattr(row, job_field) != job_id:
+            return
+
+        setattr(row, status_field, "running")
+        db.commit()
+
+        if platform == "instagram":
+            result = generate_instagram_description(db, username, niche)
+        else:
+            result = generate_youtube_description(db, username, niche)
+
+        row = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
+        if not row or getattr(row, job_field) != job_id:
+            return
+        setattr(row, description_field, result["description"])
+        setattr(row, status_field, "completed")
+        setattr(row, error_field, None)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Creator %s description job failed for creator_id=%d", platform, creator_id)
+        row = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
+        if row and getattr(row, job_field) == job_id:
+            setattr(row, status_field, "failed")
+            setattr(row, error_field, str(exc))
+            db.commit()
+    finally:
+        db.close()
+
+
 @app.post("/creator-profile/me/generate-description", response_model=CreatorDescriptionResponse)
 def generate_my_creator_description(
     body: CreatorDescriptionRequest,
+    background_tasks: BackgroundTasks,
     current_user: CreatorProfile = Depends(get_current_user),
 ):
-    """Generate one platform description from the creator's public content."""
-    del current_user  # Authentication also scopes this expensive operation to a user.
+    """Queue one platform description generation job and return immediately."""
     platform = body.platform.strip().lower()
     db = SessionLocal()
     try:
-        try:
-            if platform == "instagram":
-                result = generate_instagram_description(db, body.username, body.niche)
-            elif platform == "youtube":
-                result = generate_youtube_description(db, body.username, body.niche)
-            else:
-                raise HTTPException(status_code=400, detail="Platform must be instagram or youtube")
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except RuntimeError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        return CreatorDescriptionResponse(platform=platform, **result)
+        if platform not in {"instagram", "youtube"}:
+            raise HTTPException(status_code=400, detail="Platform must be instagram or youtube")
+        if not body.username.strip():
+            raise HTTPException(status_code=400, detail=f"{platform.title()} username is required")
+        if not body.niche.strip():
+            raise HTTPException(status_code=400, detail=f"{platform.title()} niche is required")
+
+        status_field = f"{platform}_description_status"
+        job_field = f"{platform}_description_job_id"
+        description_field = f"{platform}_description"
+        error_field = f"{platform}_description_error"
+        row = db.query(CreatorProfile).filter(CreatorProfile.id == current_user.id).first()
+        current_status = getattr(row, status_field) or "idle"
+        current_job_id = getattr(row, job_field)
+        if current_status in {"queued", "running"} and current_job_id:
+            return CreatorDescriptionResponse(
+                platform=platform,
+                status=current_status,
+                job_id=current_job_id,
+                description=getattr(row, description_field),
+                error=getattr(row, error_field),
+            )
+
+        job_id = str(uuid.uuid4())
+        setattr(row, status_field, "queued")
+        setattr(row, job_field, job_id)
+        setattr(row, error_field, None)
+        db.commit()
+        background_tasks.add_task(
+            _run_creator_description_job,
+            current_user.id,
+            platform,
+            body.username.strip(),
+            body.niche.strip(),
+            job_id,
+        )
+        return CreatorDescriptionResponse(
+            platform=platform,
+            status="queued",
+            job_id=job_id,
+            description=getattr(row, description_field),
+        )
     finally:
         db.close()
 

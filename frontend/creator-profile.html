@@ -417,6 +417,7 @@
   var allSubNicheTags = [];
   var subNicheTagsByNiche = {};
   var generatedDescriptions = {};
+  var descriptionGenerationStatuses = { instagram: 'idle', youtube: 'idle' };
   var PRIMARY_NICHES = ['Health', 'Music', 'Fitness', 'Beauty'];
   var SUB_NICHES_BY_PRIMARY = {
     music: [
@@ -470,8 +471,15 @@
   }
 
   function setButtonMode() {
-    document.getElementById('saveBtn').textContent =
-      isLoggedIn ? 'Save profile' : 'Continue with Google to save';
+    var button = document.getElementById('saveBtn');
+    var busy = descriptionGenerationStatuses.instagram === 'queued' ||
+      descriptionGenerationStatuses.instagram === 'running' ||
+      descriptionGenerationStatuses.youtube === 'queued' ||
+      descriptionGenerationStatuses.youtube === 'running';
+    button.disabled = busy;
+    button.textContent = busy
+      ? 'Generating description…'
+      : (isLoggedIn ? 'Save profile' : 'Continue with Google to save');
   }
 
   var GENERATED_DESCRIPTIONS = {
@@ -526,12 +534,24 @@
         });
       })
       .then(function(data) {
-        body[platform + '_description'] = data.description;
-        body.content_description = selectedPlatforms()[0] === platform ? data.description : body.content_description;
-        generatedDescriptions[platform] = data.description;
-        description.value = data.description;
-        description.readOnly = false;
-        return data;
+        descriptionGenerationStatuses[platform] = data.status;
+        setButtonMode();
+        if (data.status === 'failed') {
+          throw new Error(data.error || 'Description generation failed.');
+        }
+        if (data.status === 'completed') {
+          body[platform + '_description'] = data.description || '';
+          body.content_description = selectedPlatforms()[0] === platform ? data.description : body.content_description;
+          generatedDescriptions[platform] = data.description || '';
+          description.value = data.description || '';
+          description.readOnly = false;
+          return data;
+        }
+        setStatus('MAVLIT is generating your ' + platform + ' description…', false);
+        return pollDescriptionGeneration(platform, data.job_id, body).then(function() {
+          description.readOnly = false;
+          return data;
+        });
       })
   }
 
@@ -600,6 +620,21 @@
       if (mode) toggleDescription(platform, false);
     });
     updatePlatformSections();
+    updateDescriptionGenerationState(profile);
+  }
+
+  function updateDescriptionGenerationState(profile) {
+    ['instagram', 'youtube'].forEach(function(platform) {
+      var status = profile[platform + '_description_status'] || 'idle';
+      descriptionGenerationStatuses[platform] = status;
+      if (status === 'failed' && profile[platform + '_description_error']) {
+        setStatus(profile[platform + '_description_error'], true);
+      }
+      if ((status === 'queued' || status === 'running') && profile[platform + '_description_job_id']) {
+        pollDescriptionGeneration(platform, profile[platform + '_description_job_id']);
+      }
+    });
+    setButtonMode();
   }
 
   // Primary niche is a checkbox dropdown populated from GET /brand-niches
@@ -728,6 +763,44 @@
       menu.appendChild(option);
     });
     menu.classList.toggle('open', matches.length > 0);
+  }
+
+  function pollDescriptionGeneration(platform, jobId, body) {
+    return fetch('/creator-profile/me', { credentials: 'include' })
+      .then(function(response) {
+        if (!response.ok) throw new Error('Could not check description generation status.');
+        return response.json();
+      })
+      .then(function(profile) {
+        var status = profile[platform + '_description_status'] || 'idle';
+        var currentJobId = profile[platform + '_description_job_id'];
+        descriptionGenerationStatuses[platform] = status;
+        setButtonMode();
+
+        if (currentJobId !== jobId) {
+          throw new Error('Description generation job was replaced.');
+        }
+        if (status === 'completed') {
+          var description = profile[platform + '_description'] || '';
+          generatedDescriptions[platform] = description;
+          document.getElementById(platform + '_description').value = description;
+          if (body) {
+            body[platform + '_description'] = description;
+            if (selectedPlatforms()[0] === platform) body.content_description = description;
+          }
+          return profile;
+        }
+        if (status === 'failed') {
+          throw new Error(profile[platform + '_description_error'] || 'Description generation failed.');
+        }
+
+        setStatus('MAVLIT is generating your ' + platform + ' description…', false);
+        return new Promise(function(resolve) {
+          window.setTimeout(function() {
+            resolve(pollDescriptionGeneration(platform, jobId, body));
+          }, 1000);
+        });
+      });
   }
 
   document.addEventListener('click', function(event) {

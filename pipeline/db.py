@@ -571,6 +571,9 @@ class CreatorProfile(Base):
     instagram_excluded_categories = Column(JSONB)
     instagram_description = Column(Text)
     instagram_description_mode = Column(Text)
+    instagram_description_status = Column(Text, nullable=False, server_default="idle", default="idle")
+    instagram_description_job_id = Column(Text)
+    instagram_description_error = Column(Text)
     instagram_audience_gender_male_pct = Column(Float)
     instagram_audience_gender_female_pct = Column(Float)
     
@@ -581,6 +584,9 @@ class CreatorProfile(Base):
     youtube_excluded_categories = Column(JSONB)
     youtube_description = Column(Text)
     youtube_description_mode = Column(Text)
+    youtube_description_status = Column(Text, nullable=False, server_default="idle", default="idle")
+    youtube_description_job_id = Column(Text)
+    youtube_description_error = Column(Text)
     youtube_audience_gender_male_pct = Column(Float)
     youtube_audience_gender_female_pct = Column(Float)
 

@@ -31,6 +31,9 @@ class CreatorProfileResponse(BaseModel):
     instagram_excluded_categories: list[str] | None = None
     instagram_description: str | None = None
     instagram_description_mode: str | None = None
+    instagram_description_status: str = "idle"
+    instagram_description_job_id: str | None = None
+    instagram_description_error: str | None = None
     instagram_audience_gender_male_pct: float | None = None
     instagram_audience_gender_female_pct: float | None = None
     youtube_channel_name: str | None = None
@@ -40,6 +43,9 @@ class CreatorProfileResponse(BaseModel):
     youtube_excluded_categories: list[str] | None = None
     youtube_description: str | None = None
     youtube_description_mode: str | None = None
+    youtube_description_status: str = "idle"
+    youtube_description_job_id: str | None = None
+    youtube_description_error: str | None = None
     youtube_audience_gender_male_pct: float | None = None
     youtube_audience_gender_female_pct: float | None = None
 
@@ -87,6 +93,9 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         instagram_excluded_categories=_as_list(row.instagram_excluded_categories),
         instagram_description=row.instagram_description,
         instagram_description_mode=row.instagram_description_mode,
+        instagram_description_status=row.instagram_description_status or "idle",
+        instagram_description_job_id=row.instagram_description_job_id,
+        instagram_description_error=row.instagram_description_error,
         instagram_audience_gender_male_pct=row.instagram_audience_gender_male_pct,
         instagram_audience_gender_female_pct=row.instagram_audience_gender_female_pct,
         youtube_channel_name=row.youtube_channel_name,
@@ -96,6 +105,9 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         youtube_excluded_categories=_as_list(row.youtube_excluded_categories),
         youtube_description=row.youtube_description,
         youtube_description_mode=row.youtube_description_mode,
+        youtube_description_status=row.youtube_description_status or "idle",
+        youtube_description_job_id=row.youtube_description_job_id,
+        youtube_description_error=row.youtube_description_error,
         youtube_audience_gender_male_pct=row.youtube_audience_gender_male_pct,
         youtube_audience_gender_female_pct=row.youtube_audience_gender_female_pct,
         creator_tier=row.creator_tier,
