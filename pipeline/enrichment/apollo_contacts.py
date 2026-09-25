@@ -4,9 +4,10 @@ pipeline/enrichment/apollo_contacts.py
 Finds up to 50 marketing/sponsorship contacts for high-scoring brands,
 ranks ALL of them best-first via OpenAI, and stores the full ranked list
 in brand_contacts — gives a content creator a whole queue of people to try,
-not just one. Candidates with an LLM sponsorship confidence score of 90 or
-higher are enriched (the paid Apollo call that reveals a real email); the
-rest are stored from the free search preview only. Also updates
+not just one. The five highest-ranked candidates with an LLM sponsorship
+confidence score of 60 or higher are enriched (the paid Apollo call that
+reveals a real email); the rest are stored from the free search preview only.
+Also updates
 brand_match_profile's contact routing fields
 (has_marketing_contact, contact_mode, best_contact_title_score) per the
 matching design doc, based on the top-ranked (rank=1) contact.
@@ -38,20 +39,19 @@ Pipeline (adapted from apollo_sponsorship_finder.py, minus the CSV/testing bits)
                   usage, not Apollo credits. Falls back to keyword/order
                   ranking if OPENAI_KEY isn't set, or if the LLM's
                   response is unusable.
-  3) ENRICH    -> Apollo /v1/people/match. Only the top ENRICH_TOP_N-ranked
-                  candidates get enriched to reveal a real name/email —
-                  this is the only step that costs Apollo credits, and it
-                  only ever runs once per person (up to ENRICH_TOP_N
-                  credits per brand, never more, regardless of how many
-                  candidates were found/ranked/stored). Of those,
+    3) ENRICH    -> Apollo /v1/people/match. Only the five highest-confidence
+                                    candidates scoring at least 60 get enriched to reveal a
+                                    real name/email — this is the only step that costs Apollo
+                                    credits, and it never exceeds five calls per brand,
+                                    regardless of how many candidates were found/ranked/stored. Of those,
                   only the top PHONE_TOP_N also get phone reveal (see
                   below) — a separate, additional cost per person.
 
 Credit-conscious by design:
   - Search is free — no need to ration it.
-  - At most ENRICH_TOP_N Apollo email-enrich calls per brand (default 5),
-    never more, no matter how many of the up-to-50 ranked candidates get
-    stored.
+    - At most five Apollo email-enrich calls per brand, and only for contacts
+        with confidence >= 60, no matter how many of the up-to-50 ranked
+        candidates get stored.
   - A brand is only ever attempted once: a brand_contacts row is created
     even when nothing is found, so it's never re-queried on a later run.
   - Phone reveal (see below) is a SEPARATE, additional cost on top of the
@@ -114,7 +114,8 @@ _TIMEOUT    = 20
 _RANK_TIMEOUT = 180.0
 _SEARCH_PER_PAGE = 50   # search is free — no credit reason to keep this small
 _PHONE_TOP_N = 2        # of those, only this many (rank <= this) also get phone reveal — extra ~8 credits each
-_ENRICH_MIN_CONFIDENCE = 80
+_ENRICH_MIN_CONFIDENCE = 60
+_MAX_HIGH_CONFIDENCE_ENRICHMENTS = 5
 
 # Phone reveal is async — see module docstring. Apollo's own guidance is
 # "retry after ~10 seconds"; this polls up to 7 times (~70s worst case per
@@ -508,11 +509,12 @@ def _upsert_profile_contact_fields(db: Session, brand_raw_id: int, values: dict)
 def find_brand_contact(db: Session, brand_raw_id: int) -> list[dict]:
     """
     Find and store up to 50 ranked marketing/sponsorship contacts for one
-    brand, best-first. Only the top ENRICH_TOP_N get the paid Apollo enrich
-    call (real name/email); the rest are stored from free search-preview
-    data only. Always writes at least an empty marker row so the brand is
-    never re-queried. Returns the list of stored contact dicts (rank 1
-    first), or [] if none were found. Returns [] if the brand doesn't exist.
+    brand, best-first. Only the five highest-confidence contacts scoring at
+    least 60 get the paid Apollo enrich call (real name/email); the rest are
+    stored from free search-preview data only. Always writes at least an
+    empty marker row so the brand is never re-queried. Returns the list of
+    stored contact dicts (rank 1 first), or [] if none were found. Returns []
+    if the brand doesn't exist.
     """
     brand = db.query(BrandRaw).filter(BrandRaw.id == brand_raw_id).first()
     if not brand:
@@ -552,10 +554,15 @@ def find_brand_contact(db: Session, brand_raw_id: int) -> list[dict]:
         for _candidate, _reason, confidence_score in picks
     )
     enriched_count = 0
+    high_confidence_selected = 0
 
     for rank, (candidate, reason, confidence_score) in enumerate(picks, start=1):
         enriched = None
-        if confidence_score >= _ENRICH_MIN_CONFIDENCE:
+        if (
+            confidence_score >= _ENRICH_MIN_CONFIDENCE
+            and high_confidence_selected < _MAX_HIGH_CONFIDENCE_ENRICHMENTS
+        ):
+            high_confidence_selected += 1
             enriched = _enrich_person(candidate["id"], reveal_phone=(rank <= _PHONE_TOP_N))
             if not enriched:
                 logger.warning("Apollo contact: '%s' — enrich failed for rank %d (confidence %d), saving search data only", brand.name, rank, confidence_score)

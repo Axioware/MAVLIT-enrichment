@@ -128,6 +128,7 @@
       background: #0f172a;
     }
     .niche-suggestions.open { display: block; }
+    .sub-niche-suggestions { max-height: none; }
     .niche-suggestion {
       display: block;
       width: 100%;
@@ -319,14 +320,14 @@
           <div class="field">
             <label for="instagram_sub_niches">Sub-niches</label>
             <div class="niche-picker">
-              <input id="instagram_sub_niches" name="instagram_sub_niches" type="text" autocomplete="off" placeholder="Search and select sub-niche(s)" oninput="showNicheSuggestions('instagram_sub_niches', 'sub')" />
-              <div class="niche-suggestions" id="instagram_sub_niches_suggestions"></div>
+              <input id="instagram_sub_niches" name="instagram_sub_niches" type="text" autocomplete="off" placeholder="Search and select sub-niche(s)" onfocus="showNicheSuggestions('instagram_sub_niches', 'sub')" oninput="showNicheSuggestions('instagram_sub_niches', 'sub')" />
+              <div class="niche-suggestions sub-niche-suggestions" id="instagram_sub_niches_suggestions"></div>
             </div>
           </div>
           <div class="field full">
             <label for="instagram_excluded_categories">Brand categories to avoid</label>
             <div class="niche-picker">
-              <input id="instagram_excluded_categories" name="instagram_excluded_categories" type="text" autocomplete="off" placeholder="Search and select category(ies)" oninput="showNicheSuggestions('instagram_excluded_categories', 'avoid')" />
+              <input id="instagram_excluded_categories" name="instagram_excluded_categories" type="text" autocomplete="off" placeholder="Search and select category(ies)" onfocus="showNicheSuggestions('instagram_excluded_categories', 'avoid')" oninput="showNicheSuggestions('instagram_excluded_categories', 'avoid')" />
               <div class="niche-suggestions" id="instagram_excluded_categories_suggestions"></div>
             </div>
           </div>
@@ -371,8 +372,8 @@
           <div class="field">
             <label for="youtube_sub_niches">Sub-niches</label>
             <div class="niche-picker">
-              <input id="youtube_sub_niches" name="youtube_sub_niches" type="text" autocomplete="off" placeholder="Search and select sub-niche(s)" oninput="showNicheSuggestions('youtube_sub_niches', 'sub')" />
-              <div class="niche-suggestions" id="youtube_sub_niches_suggestions"></div>
+              <input id="youtube_sub_niches" name="youtube_sub_niches" type="text" autocomplete="off" placeholder="Search and select sub-niche(s)" onfocus="showNicheSuggestions('youtube_sub_niches', 'sub')" oninput="showNicheSuggestions('youtube_sub_niches', 'sub')" />
+              <div class="niche-suggestions sub-niche-suggestions" id="youtube_sub_niches_suggestions"></div>
             </div>
           </div>
           <div class="field full">
@@ -384,7 +385,7 @@
           <div class="field full">
             <label for="youtube_excluded_categories">Brand categories to avoid</label>
             <div class="niche-picker">
-              <input id="youtube_excluded_categories" name="youtube_excluded_categories" type="text" autocomplete="off" placeholder="Search and select category(ies)" oninput="showNicheSuggestions('youtube_excluded_categories', 'avoid')" />
+              <input id="youtube_excluded_categories" name="youtube_excluded_categories" type="text" autocomplete="off" placeholder="Search and select category(ies)" onfocus="showNicheSuggestions('youtube_excluded_categories', 'avoid')" oninput="showNicheSuggestions('youtube_excluded_categories', 'avoid')" />
               <div class="niche-suggestions" id="youtube_excluded_categories_suggestions"></div>
             </div>
           </div>
@@ -417,7 +418,26 @@
   var subNicheTagsByNiche = {};
   var generatedDescriptions = {};
   var PRIMARY_NICHES = ['Health', 'Music', 'Fitness', 'Beauty'];
-  var creatorSubNiches = [];
+  var SUB_NICHES_BY_PRIMARY = {
+    music: [
+      'Singing', 'Songwriting', 'Music Production', 'Instrumental Performance',
+      'DJing', 'Music Reviews', 'Music Education', 'Live Performance',
+      'Music Theory', 'Music News'
+    ],
+    health: [
+      'Nutrition', 'Mental Health', 'Wellness', 'Healthy Living',
+      'Supplements', 'Holistic Health', 'Fitness Recovery', 'Preventive Care',
+      "Women's Health", "Men's Health"
+    ],
+    beauty: [
+      'Skincare', 'Makeup', 'Haircare', 'Hair Styling', 'Nail Care',
+      'Fragrance', 'Beauty Reviews', 'Clean Beauty', 'Anti-Aging', 'Body Care'
+    ],
+    fitness: [
+      'Strength Training', 'Weight Loss', 'Yoga', 'Pilates', 'Running',
+      'Home Workouts', 'Bodybuilding', 'CrossFit', 'Mobility', 'Sports Training'
+    ]
+  };
   var brandCategoryNiches = [];
 
   // The min/max range is derived from the selected bracket rather than typed
@@ -653,13 +673,6 @@
     updateMselLabel('sub_niches_list');
   }
 
-  function loadNiches() {
-    return fetch('/creator-sub-niches')
-      .then(function(r) { return r.ok ? r.json() : { niches: [] }; })
-      .then(function(data) { creatorSubNiches = data.niches || []; })
-      .catch(function() { creatorSubNiches = []; });
-  }
-
   function loadBrandCategoryNiches() {
     return fetch('/brand-category-niches')
       .then(function(r) { return r.ok ? r.json() : { niches: [] }; })
@@ -676,13 +689,27 @@
     var input = document.getElementById(inputId);
     var menu = document.getElementById(inputId + '_suggestions');
     var query = currentNicheSearch(input.value).toLowerCase();
-    var source = kind === 'primary'
-      ? PRIMARY_NICHES
-      : kind === 'avoid' ? brandCategoryNiches : creatorSubNiches;
+    var source;
+    if (kind === 'primary') {
+      source = PRIMARY_NICHES;
+    } else if (kind === 'avoid') {
+      source = brandCategoryNiches;
+    } else {
+      var platform = inputId.indexOf('youtube_') === 0 ? 'youtube' : 'instagram';
+      var primaryInput = document.getElementById(platform + '_primary_niche');
+      var selectedPrimaryNiches = (primaryInput ? primaryInput.value : '')
+        .split(',')
+        .map(function(value) { return value.trim().toLowerCase(); })
+        .filter(Boolean);
+      source = Array.from(new Set(selectedPrimaryNiches.reduce(function(all, niche) {
+        return all.concat(SUB_NICHES_BY_PRIMARY[niche] || []);
+      }, [])));
+    }
     var selected = input.value.split(',').map(function(value) { return value.trim().toLowerCase(); });
     var matches = source.filter(function(value) {
       return value.toLowerCase().indexOf(query) === 0 && selected.indexOf(value.toLowerCase()) === -1;
-    }).slice(0, 5);
+    });
+    if (kind === 'primary') matches = matches.slice(0, 5);
 
     menu.innerHTML = '';
     matches.forEach(function(value) {
@@ -924,7 +951,6 @@
   }
 
   updatePlatformSections();
-  loadNiches();
   loadBrandCategoryNiches();
   checkAuth();
 </script>
