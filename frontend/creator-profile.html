@@ -38,6 +38,17 @@
       border-radius: 6px;
     }
     .nav-link:hover { background: #334155; color: #e2e8f0; }
+    .onboarding-label { color: #94a3b8; font-size: .875rem; }
+    .btn-signout {
+      padding: .35rem .7rem;
+      background: transparent;
+      color: #94a3b8;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: .8rem;
+    }
+    .btn-signout:hover { color: #f87171; border-color: #f87171; }
 
     .wrap {
       max-width: 720px;
@@ -238,8 +249,8 @@
 
   <nav>
     <a class="nav-brand" href="/">&#9889; MAVLIT Pipeline</a>
-    <a class="nav-link" href="/matches">Your Matches</a>
-    <a class="nav-link" href="/dashboard">&larr; Dashboard</a>
+    <span class="onboarding-label">Complete your profile to continue</span>
+    <button class="btn-signout" type="button" onclick="signOut()">Sign out</button>
   </nav>
 
   <div class="wrap">
@@ -431,6 +442,11 @@
     var el = document.getElementById('statusMsg');
     el.textContent = text;
     el.className = 'status-msg ' + (isError ? 'err' : 'ok');
+  }
+
+  function signOut() {
+    fetch('/auth/logout', { method: 'POST', credentials: 'include' })
+      .then(function() { window.mavlitResetIdentity(); window.location.replace('/signin'); });
   }
 
   function setButtonMode() {
@@ -822,7 +838,8 @@
         return r.json();
       })
       .then(function() {
-        setStatus(successMessage || 'Profile saved.', false);
+        setStatus(successMessage || 'Profile saved. Redirecting to your dashboard…', false);
+        window.setTimeout(function() { window.location.replace('/dashboard'); }, 400);
       })
       .catch(function(err) {
         // Keep the data around so the user doesn't lose it on a failed save

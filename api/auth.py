@@ -139,6 +139,13 @@ def is_profile_complete(profile: CreatorProfile | dict | None) -> bool:
     return True
 
 
+def get_completed_user(current_user: CreatorProfile = Depends(get_current_user)) -> CreatorProfile:
+    """Require authentication and a completed creator profile."""
+    if not is_profile_complete(current_user):
+        raise HTTPException(status_code=403, detail="Complete your creator profile before accessing the application")
+    return current_user
+
+
 #  Routes
 
 @router.post("/login", response_model=CreatorProfileResponse)

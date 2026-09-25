@@ -15,7 +15,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.sql import Select
 from config import ADMIN_PASSKEY, FRONTEND_ORIGINS, IS_PRODUCTION, JWT_SECRET, POSTHOG_PROJECT_TOKEN, POSTHOG_HOST
 from pipeline.db import Base, BrandContact, BrandInstagramUser, BrandNiche, BrandProfile, BrandRaw, ContentCreatorRE, ContractReview, CreatorProfile, CreatorNiche, InitialBrandScore, InstagramCreatorCommenter, InstagramPost, InstagramUser, MetaAd, Pitch, Prompt, RateEstimate, SavedBrand, TestBrandsWithInstagramPosts, TestCreatorBrandPartnershipPost, TestNiche, YoutubeSponsorship, SessionLocal, engine
-from api.auth import get_current_user, get_current_user_optional, is_profile_complete, router as auth_router
+from api.auth import get_completed_user, get_current_user, get_current_user_optional, is_profile_complete, router as auth_router
 from api.schemas import CreatorProfileResponse, profile_to_response as _profile_to_response
 from api.advisory import router as advisory_router
 from api.brands import router as brands_router
@@ -1153,6 +1153,8 @@ def posthog_init_js():
 
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
+_PROTECTED_PAGE_HEADERS = {"Cache-Control": "no-store, no-cache, must-revalidate"}
+
 
 @app.get("/", include_in_schema=False)
 def frontend(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
@@ -1160,7 +1162,7 @@ def frontend(current_user: CreatorProfile | None = Depends(get_current_user_opti
         return RedirectResponse(url="/signin?return_to=/", status_code=307)
     if not is_profile_complete(current_user):
         return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
-    return FileResponse("frontend/index.html")
+    return FileResponse("frontend/index.html", headers=_PROTECTED_PAGE_HEADERS)
 
 
 @app.get("/signin", include_in_schema=False)
@@ -1183,14 +1185,14 @@ def dashboard_page(current_user: CreatorProfile | None = Depends(get_current_use
         return RedirectResponse(url="/signin?return_to=/dashboard", status_code=307)
     if not is_profile_complete(current_user):
         return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
-    return FileResponse("frontend/index.html")
+    return FileResponse("frontend/index.html", headers=_PROTECTED_PAGE_HEADERS)
 
 
 @app.get("/creator-profile", include_in_schema=False)
 def creator_profile_page(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
     if not current_user:
         return RedirectResponse(url="/signin?return_to=/creator-profile", status_code=307)
-    return FileResponse("frontend/creator-profile.html")
+    return FileResponse("frontend/creator-profile.html", headers=_PROTECTED_PAGE_HEADERS)
 
 
 @app.get("/matches", include_in_schema=False)
@@ -1199,7 +1201,7 @@ def matches_page(current_user: CreatorProfile | None = Depends(get_current_user_
         return RedirectResponse(url="/signin?return_to=/matches", status_code=307)
     if not is_profile_complete(current_user):
         return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
-    return FileResponse("frontend/matches.html")
+    return FileResponse("frontend/matches.html", headers=_PROTECTED_PAGE_HEADERS)
 
 
 @app.get("/add-creators", include_in_schema=False)
@@ -1208,7 +1210,7 @@ def add_creators_page(current_user: CreatorProfile | None = Depends(get_current_
         return RedirectResponse(url="/signin?return_to=/add-creators", status_code=307)
     if not is_profile_complete(current_user):
         return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
-    return FileResponse("frontend/add-creators.html")
+    return FileResponse("frontend/add-creators.html", headers=_PROTECTED_PAGE_HEADERS)
 
 
 @app.get("/brand-catalog", include_in_schema=False)
@@ -1217,7 +1219,7 @@ def brand_catalog_page(current_user: CreatorProfile | None = Depends(get_current
         return RedirectResponse(url="/signin?return_to=/brand-catalog", status_code=307)
     if not is_profile_complete(current_user):
         return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
-    return FileResponse("frontend/brand-catalog.html")
+    return FileResponse("frontend/brand-catalog.html", headers=_PROTECTED_PAGE_HEADERS)
 
 
 class SeedJobResponse(BaseModel):
@@ -1653,7 +1655,7 @@ class MatchesResponse(BaseModel):
 def get_my_matches(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    current_user: CreatorProfile = Depends(get_current_user),
+    current_user: CreatorProfile = Depends(get_completed_user),
 ):
     """
     Ranked brand matches for the logged-in creator (Stage 3). Always
@@ -1672,7 +1674,7 @@ def get_my_matches(
 @app.post("/matches/me/refresh", response_model=MatchesResponse)
 def refresh_my_matches(
     limit: int = Query(20, ge=1, le=100),
-    current_user: CreatorProfile = Depends(get_current_user),
+    current_user: CreatorProfile = Depends(get_completed_user),
 ):
     """
     Force-recompute matches, bypassing any cache. There's no cache to
