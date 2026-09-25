@@ -127,6 +127,7 @@ def get_matches(
     query = (
         db.query(BrandRaw, BrandProfile, distance_expr.label("distance"))
         .join(BrandProfile, BrandProfile.brand_raw_id == BrandRaw.id)
+        .filter(BrandRaw.name.isnot(None))
         .filter(BrandProfile.embedding.isnot(None))
     )
 
