@@ -24,7 +24,7 @@ from pipeline.helpers.gpt_llm import embed_text
 
 
 # --- Edit this test MAVLIT user profile before running -----------------
-MAVLIT_USER_NICHE = "Fitness"
+MAVLIT_USER_NICHE = "Beauty"
 MAVLIT_USER_DESCRIPTION = "Strength training and gym motivation content for everyday athletes."
 MAVLIT_USER_TAGS = ["fitness", "gym", "strength training", "workouts", "motivation"]
 # -------------------------------------------------------------------------

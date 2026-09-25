@@ -153,6 +153,7 @@ def login(body: LoginRequest, response: Response, db: Session = Depends(get_db))
     email = body.email.strip().lower()
 
     user = db.query(CreatorProfile).filter(CreatorProfile.email == email).first()
+    print('email, user', email, user)
     # Generic error either way — don't reveal whether the email exists.
     if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
