@@ -29,6 +29,7 @@ from pipeline.helpers.passwords import hash_password
 from pipeline.helpers.prompts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
     COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT,
+    INSTAGRAM_POST_SPONSORSHIP_PROMPT_NAME, INSTAGRAM_POST_SPONSORSHIP_DEFAULT_PROMPT,
     DEMOGRAPHICS_PROMPT_NAME, DEMOGRAPHICS_DEFAULT_PROMPT,
     CREATOR_NICHE_PROMPT_NAME, CREATOR_NICHE_DEFAULT_PROMPT,
     GENDER_PROMPT_NAME, GENDER_DEFAULT_PROMPT,
@@ -199,8 +200,8 @@ def _run_migrations() -> None:
         "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS llm_checked BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS is_users_scraped BOOLEAN NOT NULL DEFAULT false",
         # instagram_posts: LLM-estimated 0-100 sponsorship confidence with the
-        # creator(s) referenced on the post, backfilled by
-        # pipeline/enrichment/score_instagram_post_sponsorship.py.
+        # creator(s) referenced on the post, scored by
+        # pipeline/enrichment/instagram_posts.py.
         "ALTER TABLE instagram_posts ADD COLUMN IF NOT EXISTS sponsorship_confidence INTEGER",
         # instagram_posts: allow a "profile-only" row (brand_raw_id + profile
         # snapshot, no post fields) for brands whose scrape returns zero
@@ -487,6 +488,7 @@ def _run_migrations() -> None:
         for name, content in [
             (FULL_PROMPT_NAME,          FULL_DEFAULT_PROMPT),
             (COAUTHOR_PROMPT_NAME,      COAUTHOR_DEFAULT_PROMPT),
+            (INSTAGRAM_POST_SPONSORSHIP_PROMPT_NAME, INSTAGRAM_POST_SPONSORSHIP_DEFAULT_PROMPT),
             (DEMOGRAPHICS_PROMPT_NAME,  DEMOGRAPHICS_DEFAULT_PROMPT),
             (CREATOR_NICHE_PROMPT_NAME, CREATOR_NICHE_DEFAULT_PROMPT),
             (TAGS_PROMPT_NAME,          TAGS_DEFAULT_PROMPT),

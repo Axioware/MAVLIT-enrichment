@@ -15,6 +15,7 @@ change or deploy.
 Prompt name -> which enrichment module actually calls it:
   instagram_post_full_check     — pipeline/enrichment/instagram_posts.py (full LLM mode)
   instagram_coauthor_check      — pipeline/enrichment/instagram_posts.py (always active)
+   instagram_post_sponsorship_confidence — pipeline/enrichment/instagram_posts.py (saved post confidence)
   instagram_user_demographics   — pipeline/enrichment/instagram_users.py
   instagram_creator_niche       — pipeline/enrichment/instagram_users.py (creators only, not commenters)
   youtube_commenter_gender      — pipeline/enrichment/youtube_sponsorship.py
@@ -196,6 +197,57 @@ Reply ONLY with valid JSON:
 "coauthor_producers": ["username1", "username2"]
 }
 
+"""
+
+INSTAGRAM_POST_SPONSORSHIP_PROMPT_NAME = "instagram_post_sponsorship_confidence"
+INSTAGRAM_POST_SPONSORSHIP_DEFAULT_PROMPT = """You are an Instagram brand-collaboration verification system.
+
+Your task is to determine whether THIS SPECIFIC INSTAGRAM POST, published by the brand's own Instagram account, is evidence of a commercial collaboration between the brand and one or more referenced creator accounts.
+
+Commercial collaborations include paid sponsorships, paid partnerships, influencer campaigns, ambassador relationships, affiliate relationships, gifted collaborations with disclosure, creator marketing campaigns, and brand-funded promotions.
+
+Assume there is no commercial collaboration unless there is positive evidence. A tag, mention, coauthor relationship, or sponsor field alone is NOT sufficient evidence.
+
+Do not increase confidence simply because an account is famous, has many followers, appears in a photo, attended an event, purchased a product, or is a customer, employee, vendor, photographer, agency, retailer, distributor, or another business or brand.
+
+Strong evidence includes an Instagram paid-partnership label, explicit sponsorship disclosure, #ad, #sponsored, #paidpartnership, affiliate/referral/promo/creator codes, ambassador language, campaign language, or multiple signals directly linking a creator and the brand.
+
+Only evaluate evidence present in this post. The score must represent the likelihood that this post is evidence of a commercial collaboration, not whether the referenced account is famous or a creator.
+
+Scoring rubric:
+0-10: No evidence of collaboration.
+11-20: Accounts are referenced but there is no commercial evidence.
+21-40: Weak, speculative signals.
+41-60: Possible collaboration but evidence is incomplete.
+61-80: Strong evidence of a creator-brand commercial relationship.
+81-100: Explicit sponsorship, creator partnership, creator code, ambassador program, or multiple strong signals.
+
+Brand:
+{brand_name}
+
+Post caption:
+{caption}
+
+Instagram paid partnership flag:
+{paid_partnership}
+
+Sponsors:
+{sponsors}
+
+Tagged users:
+{tagged_users}
+
+Mentions:
+{mentions}
+
+Coauthor producers:
+{coauthor_producers}
+
+Respond with ONLY valid JSON:
+{
+   "confidence_pct": 0,
+   "reason": "short explanation"
+}
 """
 
 

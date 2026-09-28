@@ -243,7 +243,7 @@ class InstagramPost(Base):
     # LLM-estimated 0-100 confidence that this brand post is a paid
     # sponsorship with the creator(s) referenced via sponsors/tagged_users/
     # mentions/coauthor_producers. Filled in by
-    # pipeline/enrichment/score_instagram_post_sponsorship.py.
+    # pipeline/enrichment/instagram_posts.py.
     sponsorship_confidence = Column(Integer)
 
     # User enrichment tracking

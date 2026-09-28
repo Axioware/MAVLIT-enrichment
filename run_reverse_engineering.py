@@ -12,7 +12,7 @@ End-to-end reverse-engineering pipeline:
      targeting EXACTLY that discovered brand_id set, one brand at a time,
      via each function's own brand_id (or brand_raw_id) parameter:
 
-       2. score_post_sponsorship.py (per-row, not per-brand — see below;
+         2. score_post_sponsorship.py (per-row, not per-brand — see below;
           scores the creator/brand/post evidence rows step 1 just wrote
           into test_creator_brand_partnership_posts)
        3. brand_wikidata_lookup.py
@@ -25,10 +25,9 @@ End-to-end reverse-engineering pipeline:
        7. tranco.py
        8. youtube_sponsorship.py
        9. meta_ads.py
-      10. instagram_posts.py
-      11. score_instagram_post_sponsorship.py  (per-post, not per-brand — see below)
-      12. instagram_users.py                   (per-post, not per-brand — see below)
-      13. initial_brand_scoring.py
+            10. instagram_posts.py (scores saved post confidence inline)
+            11. instagram_users.py                   (per-post, not per-brand — see below)
+            12. initial_brand_scoring.py
 
 If step 1 discovers zero brands, nothing further runs — there's nothing to
 enrich. Each per-brand call bypasses that step's own *_checked filter (the
@@ -38,15 +37,13 @@ it, so a brand_id parameter was added to both, matching every other step).
 A brand that isn't applicable to a given step (e.g. no website yet, so
 shopify_detect has nothing to fetch) just no-ops for that one call.
 
-Steps 2 (score_post_sponsorship), 11 (score_instagram_post_sponsorship) and
-12 (instagram_users) are the exception to "one call per brand" — all three
-operate on ROWS (test_creator_brand_partnership_posts for step 2,
-instagram_posts for steps 11-12), not brands directly, so for each
+Steps 2 (score_post_sponsorship) and 11 (instagram_users) are the exception
+to "one call per brand" — both operate on ROWS (test_creator_brand_partnership_posts
+for step 2, instagram_posts for step 11), not brands directly, so for each
 discovered brand they loop their respective fn(brand_raw_id=...) call
 until that brand's rows are fully drained, before moving to the next
-brand. Step 11 runs before step 12 so a post's sponsorship_confidence is
-on file before instagram_users.py scrapes its referenced accounts'
-profiles.
+brand. Instagram post sponsorship confidence is computed inline during
+step 10, before instagram_users.py processes the saved post rows.
 
 One brand failing at one step is logged and skipped — it does not stop
 the rest of that step's brands, or any later step.
@@ -71,7 +68,6 @@ from pipeline.enrichment.tranco import enrich_tranco
 from pipeline.enrichment.youtube_sponsorship import enrich_youtube_sponsorships
 from pipeline.enrichment.meta_ads import enrich_meta_ads
 from pipeline.enrichment.instagram_posts import enrich_instagram_posts
-from pipeline.enrichment.score_instagram_post_sponsorship import score_instagram_post_sponsorship
 from pipeline.enrichment.instagram_users import enrich_instagram_users
 from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 
@@ -204,40 +200,6 @@ def _pending_for_scoring(db, brand_ids: set[int]) -> set[int]:
     }
 
 
-def run_score_instagram_post_sponsorship_per_brand(label: str, db, brand_ids: set[int], batch_limit: int = 50) -> None:
-    """
-    score_instagram_post_sponsorship.py operates on instagram_posts ROWS,
-    not brands directly (same shape as run_instagram_users_per_brand below)
-    — for each brand this drains every pending post
-    (score_instagram_post_sponsorship(brand_raw_id=...)) before moving to
-    the next.
-    """
-    _step_start(label)
-    total_posts = 0
-    for i, bid in enumerate(sorted(brand_ids), start=1):
-        logger.info("[%s] (%d/%d) brand_id=%d — starting", label, i, len(brand_ids), bid)
-        brand_posts = 0
-        batch_num = 0
-        while True:
-            batch_num += 1
-            try:
-                processed = score_instagram_post_sponsorship(db, brand_raw_id=bid, limit=batch_limit)
-            except Exception:
-                logger.exception(
-                    "[%s] brand_id=%d batch %d — failed, moving to the next brand",
-                    label, bid, batch_num,
-                )
-                break
-            if not processed:
-                break
-            brand_posts += processed
-            total_posts += processed
-            logger.info("[%s] brand_id=%d batch %d — %d post(s) processed (%d so far for this brand)",
-                        label, bid, batch_num, processed, brand_posts)
-        logger.info("[%s] (%d/%d) brand_id=%d — done, %d post(s) total", label, i, len(brand_ids), bid, brand_posts)
-    _step_end(label, f"{total_posts} post(s) processed across {len(brand_ids)} brand(s)")
-
-
 def run_instagram_users_per_brand(label: str, db, brand_ids: set[int], batch_limit: int = 5) -> None:
     """
     instagram_users.py operates on instagram_posts ROWS, not brands
@@ -302,20 +264,19 @@ def main() -> None:
         if not website_brand_ids:
             logger.info("No discovered brands with has_official_website=True — skipping instagram_posts.")
         else:
-            run_per_brand("10/13 instagram_posts", enrich_instagram_posts, db, website_brand_ids)
+            run_per_brand("10/12 instagram_posts", enrich_instagram_posts, db, website_brand_ids)
 
-        run_score_instagram_post_sponsorship_per_brand("11/13 score_instagram_post_sponsorship", db, brand_ids, batch_limit=50)
-        run_instagram_users_per_brand("12/13 instagram_users", db, brand_ids, batch_limit=5)
+        run_instagram_users_per_brand("11/12 instagram_users", db, brand_ids, batch_limit=5)
 
         pending_score_ids = _pending_for_scoring(db, brand_ids)
         skipped = brand_ids - pending_score_ids
         if skipped:
             logger.info(
-                "[13/13 initial_brand_scoring] skipping %d brand(s) not yet fully "
+                "[12/12 initial_brand_scoring] skipping %d brand(s) not yet fully "
                 "enriched (or already scored): %s",
                 len(skipped), sorted(skipped),
             )
-        run_per_brand("13/13 initial_brand_scoring", run_brand_scoring, db, pending_score_ids)
+        run_per_brand("12/12 initial_brand_scoring", run_brand_scoring, db, pending_score_ids)
     finally:
         db.close()
 

@@ -34,7 +34,7 @@ import json
 import logging
 import time
 
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, ENABLE_INSTA_LLM, OPENAI_KEY
@@ -45,6 +45,8 @@ from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
     COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT,
+    INSTAGRAM_POST_SPONSORSHIP_PROMPT_NAME,
+    INSTAGRAM_POST_SPONSORSHIP_DEFAULT_PROMPT,
 )
 from pipeline.helpers.social import normalize_handle
 
@@ -68,6 +70,13 @@ def _get_full_prompt(db: Session) -> str:
 def _get_coauthor_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == COAUTHOR_PROMPT_NAME).first()
     return row.content if row else COAUTHOR_DEFAULT_PROMPT
+
+
+def _get_sponsorship_confidence_prompt(db: Session) -> str:
+    row = db.query(Prompt).filter(
+        Prompt.name == INSTAGRAM_POST_SPONSORSHIP_PROMPT_NAME
+    ).first()
+    return row.content if row else INSTAGRAM_POST_SPONSORSHIP_DEFAULT_PROMPT
 
 
 def _fmt(value) -> str:
@@ -244,6 +253,140 @@ def _build_row(brand_raw_id: int, handle: str, item: dict) -> dict | None:
     }
 
 
+def _score_post_sponsorship_confidence(
+    prompt_template: str,
+    brand_name: str,
+    row: dict,
+) -> int | None:
+    prompt = fill_template(
+        prompt_template,
+        brand_name=brand_name or "unknown",
+        caption=(row.get("caption") or "")[:600] or "none",
+        paid_partnership=str(bool(row.get("paid_partnership"))).lower(),
+        sponsors=_fmt(row.get("sponsors")),
+        tagged_users=_fmt(row.get("tagged_users")),
+        mentions=_fmt(row.get("mentions")),
+        coauthor_producers=_fmt(row.get("coauthor_producers")),
+    )
+    result = call_gpt_json(
+        prompt,
+        context=f"instagram post sponsorship score {brand_name} {row.get('post_id')}",
+    )
+    confidence = result.get("confidence_pct") if isinstance(result, dict) else None
+    if not isinstance(confidence, (int, float)):
+        return None
+    return max(0, min(100, round(confidence)))
+
+
+def _save_post_with_confidence(
+    db: Session,
+    brand_name: str,
+    row: dict,
+    prompt_template: str | None,
+) -> int:
+    inserted = upsert_rows(db, InstagramPost, [row], ["post_id"])
+    if not prompt_template:
+        return inserted
+
+    stored_post = db.query(InstagramPost).filter(
+        InstagramPost.post_id == row["post_id"]
+    ).first()
+    if stored_post is None or stored_post.sponsorship_confidence is not None:
+        return inserted
+
+    confidence = _score_post_sponsorship_confidence(
+        prompt_template,
+        brand_name,
+        {
+            "post_id": stored_post.post_id,
+            "caption": stored_post.caption,
+            "paid_partnership": stored_post.paid_partnership,
+            "sponsors": stored_post.sponsors,
+            "tagged_users": stored_post.tagged_users,
+            "mentions": stored_post.mentions,
+            "coauthor_producers": stored_post.coauthor_producers,
+        },
+    )
+    if confidence is not None:
+        stored_post.sponsorship_confidence = confidence
+        db.commit()
+    return inserted
+
+
+def score_instagram_post_sponsorship(
+    db: Session,
+    limit: int | None = None,
+    brand_raw_id: int | None = None,
+) -> int:
+    """Score pending saved Instagram posts that contain creator references."""
+    if not OPENAI_KEY:
+        logger.warning("OPENAI_KEY not set — skipping Instagram post sponsorship scoring")
+        return 0
+
+    prompt_template = _get_sponsorship_confidence_prompt(db)
+    query = (
+        db.query(InstagramPost)
+        .filter(InstagramPost.sponsorship_confidence.is_(None))
+        .filter(
+            or_(
+                InstagramPost.sponsors.isnot(None),
+                InstagramPost.tagged_users.isnot(None),
+                InstagramPost.mentions.isnot(None),
+                InstagramPost.coauthor_producers.isnot(None),
+            )
+        )
+    )
+    if brand_raw_id is not None:
+        query = query.filter(InstagramPost.brand_raw_id == brand_raw_id)
+    if limit is not None:
+        query = query.limit(limit)
+    rows: list[InstagramPost] = query.all()
+
+    if not rows:
+        logger.info("Instagram post sponsorship scoring: no rows pending")
+        return 0
+
+    logger.info("Instagram post sponsorship scoring: processing %d row(s)", len(rows))
+    updated = 0
+    failed = 0
+    for row in rows:
+        brand_name = row.brand_raw.name if row.brand_raw else row.instagram_handle
+        score = _score_post_sponsorship_confidence(
+            prompt_template,
+            brand_name,
+            {
+                "post_id": row.post_id,
+                "caption": row.caption,
+                "paid_partnership": row.paid_partnership,
+                "sponsors": row.sponsors,
+                "tagged_users": row.tagged_users,
+                "mentions": row.mentions,
+                "coauthor_producers": row.coauthor_producers,
+            },
+        )
+        if score is None:
+            logger.warning(
+                "Instagram post sponsorship scoring: id=%d @%s — LLM call failed",
+                row.id, row.instagram_handle,
+            )
+            failed += 1
+            time.sleep(0.5)
+            continue
+
+        row_id, row_handle = row.id, row.instagram_handle
+        row.sponsorship_confidence = score
+        db.commit()
+        updated += 1
+        logger.info(
+            "Instagram post sponsorship scoring: id=%d @%s → %d%%",
+            row_id, row_handle, score,
+        )
+        time.sleep(0.5)
+
+    logger.info("Instagram post sponsorship scoring: %d updated, %d failed", updated, failed)
+    return updated
+
+
 def _build_profile_only_row(brand_raw_id: int, handle: str, items: list[dict]) -> dict:
     """
     Row for a brand whose scrape returned zero posts worth keeping (no
@@ -365,6 +508,9 @@ def enrich_instagram_posts(
                 time.sleep(1.0)
                 continue
 
+            sponsorship_prompt = (
+                _get_sponsorship_confidence_prompt(db) if OPENAI_KEY else None
+            )
             inserted          = 0
             skipped_no_signal = 0
             skipped_llm       = 0
@@ -419,7 +565,9 @@ def enrich_instagram_posts(
                         row["mentions"]           = _usernames_only(filtered.get("mentions"))
                         row["coauthor_producers"] = _usernames_only(filtered.get("coauthor_producers"))
                         row["llm_checked"]        = True
-                        inserted += upsert_rows(db, InstagramPost, [row], ["post_id"])
+                        inserted += _save_post_with_confidence(
+                            db, brand.name, row, sponsorship_prompt
+                        )
                         unique_creators |= _row_creators(row)
                     time.sleep(0.3)
 
@@ -446,7 +594,9 @@ def enrich_instagram_posts(
                         if filtered_coauthors is not None:
                             row["coauthor_producers"] = filtered_coauthors or None
                         # llm_checked stays False in this mode
-                        inserted += upsert_rows(db, InstagramPost, [row], ["post_id"])
+                        inserted += _save_post_with_confidence(
+                            db, brand.name, row, sponsorship_prompt
+                        )
                         unique_creators |= _row_creators(row)
 
             if inserted == 0:
