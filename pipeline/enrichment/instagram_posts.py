@@ -1,9 +1,10 @@
 """
 pipeline/enrichment/instagram_posts.py
 
-Scrapes recent Instagram posts for each brand and uses the full LLM creator
-filter on posts with sponsorship signals. Only posts with a confirmed creator
-are saved. Prompts are editable via /admin > Prompts.
+Scrapes recent Instagram posts for each brand. Every fetched post with a post
+ID is saved with its Apify creator-reference fields. When the full LLM filter
+confirms a partnership, those fields are narrowed to the confirmed creators.
+Prompts are editable via /admin > Prompts.
 """
 
 import json
@@ -350,7 +351,8 @@ def enrich_instagram_posts(
     has_official_website=True:
       1. Scrape posts via Apify
     2. Apply LLM filtering to all creator signals
-      3. Store qualifying posts in instagram_posts
+        3. Store every fetched post with a post ID in instagram_posts, keeping
+            raw creator references unless the LLM confirms a narrower set
       4. Mark instagram_checked=True
 
     posts_limit caps the scrape at the brand's last N posts (resultsLimit),
@@ -420,8 +422,9 @@ def enrich_instagram_posts(
                 _get_sponsorship_confidence_prompt(db) if OPENAI_KEY else None
             )
             inserted          = 0
-            skipped_no_signal = 0
-            skipped_llm       = 0
+            without_creator_signals = 0
+            partnership_matches = 0
+            llm_failures = 0
 
             for item in items:
                 # sponsors/tagged_users/mentions/coauthor_producers are the only
@@ -432,37 +435,39 @@ def enrich_instagram_posts(
                 has_coauth   = bool(_real_coauthors(item, handle))
                 has_social   = bool(item.get("taggedUsers") or item.get("mentions"))
 
-                if not (has_sponsors or has_coauth or has_social):
-                    skipped_no_signal += 1
-                    continue
-
-                filtered = _llm_filter_all(db, item, brand.name, handle)
-                if filtered is None:
-                    skipped_llm += 1
-                    continue
-
-                has_creator = (
-                    filtered.get("sponsors")
-                    or filtered.get("tagged_users")
-                    or filtered.get("mentions")
-                    or filtered.get("coauthor_producers")
-                )
-                if not has_creator:
-                    skipped_llm += 1
-                    continue
-
                 row = _build_row(brand.id, handle, item)
-                if row:
-                    # Keep only usernames selected by the creator-filter LLM.
-                    row["paid_partnership"]   = bool(filtered.get("paid_partnership"))
-                    row["sponsors"]           = filtered.get("sponsors") or None
-                    row["tagged_users"]       = _usernames_only(filtered.get("tagged_users"))
-                    row["mentions"]           = _usernames_only(filtered.get("mentions"))
-                    row["coauthor_producers"] = _usernames_only(filtered.get("coauthor_producers"))
-                    row["llm_checked"]        = True
-                    inserted += _save_post_with_confidence(
-                        db, brand.name, row, sponsorship_prompt
-                    )
+
+                if row is None:
+                    continue
+
+                has_creator_signals = has_sponsors or has_coauth or has_social
+                filtered = None
+                if has_creator_signals:
+                    filtered = _llm_filter_all(db, item, brand.name, handle)
+                    if filtered is None:
+                        llm_failures += 1
+                    else:
+                        row["llm_checked"] = True
+                        if any((
+                            filtered.get("sponsors"),
+                            filtered.get("tagged_users"),
+                            filtered.get("mentions"),
+                            filtered.get("coauthor_producers"),
+                        )):
+                            row["paid_partnership"] = bool(filtered.get("paid_partnership"))
+                            row["sponsors"] = filtered.get("sponsors") or None
+                            row["tagged_users"] = _usernames_only(filtered.get("tagged_users"))
+                            row["mentions"] = _usernames_only(filtered.get("mentions"))
+                            row["coauthor_producers"] = _usernames_only(
+                                filtered.get("coauthor_producers")
+                            )
+                            partnership_matches += 1
+                else:
+                    without_creator_signals += 1
+
+                inserted += _save_post_with_confidence(
+                    db, brand.name, row, sponsorship_prompt
+                )
                 time.sleep(0.3)
 
             if inserted == 0:
@@ -474,10 +479,10 @@ def enrich_instagram_posts(
 
             total_posts += inserted
             logger.info(
-                "Instagram: '%s' (@%s) → %d saved | %d no signal | %d LLM-rejected | "
-                "%d total fetched",
-                brand.name, handle, inserted, skipped_no_signal, skipped_llm,
-                len(items),
+                "Instagram: '%s' (@%s) → %d row(s) inserted | %d partnership match(es) | "
+                "%d without creator signals | %d LLM failures | %d total fetched",
+                brand.name, handle, inserted, partnership_matches,
+                without_creator_signals, llm_failures, len(items),
             )
 
             brand.instagram_checked = True
