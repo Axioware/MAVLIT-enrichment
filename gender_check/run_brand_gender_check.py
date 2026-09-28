@@ -15,7 +15,6 @@ from sqlalchemy import text
 from pipeline.db import InstagramPost, SessionLocal
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 
-
 PROMPT = """You are analyzing an Instagram brand to determine the primary gender audience the brand's products or services are marketed toward.
 
 Classify the brand into exactly ONE of:
@@ -145,9 +144,19 @@ def _post_evidence(post: InstagramPost) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Classify target-audience gender for selected brands.")
-    parser.add_argument("--dry-run", action="store_true", help="List qualifying brands without calling the LLM.")
-    parser.add_argument("--limit", type=int, help="Maximum number of qualifying brands to send to the LLM.")
+    parser = argparse.ArgumentParser(
+        description="Classify target-audience gender for selected brands."
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List qualifying brands without calling the LLM.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help="Maximum number of qualifying brands to send to the LLM.",
+    )
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be at least 1")
@@ -163,7 +172,9 @@ def main() -> int:
         posts = (
             db.query(InstagramPost)
             .filter(InstagramPost.brand_raw_id.in_(brand_ids))
-            .order_by(InstagramPost.brand_raw_id, InstagramPost.timestamp.desc().nullslast())
+            .order_by(
+                InstagramPost.brand_raw_id, InstagramPost.timestamp.desc().nullslast()
+            )
             .all()
         )
         posts_by_brand = defaultdict(list)
@@ -176,7 +187,7 @@ def main() -> int:
             if len(posts_by_brand[brand["brand_raw_id"]]) > MIN_INSTAGRAM_POSTS
         ]
         if args.limit is not None:
-            eligible = eligible[:args.limit]
+            eligible = eligible[: args.limit]
 
         logger.info(
             "%d candidate brand(s); %d have more than %d Instagram post rows.",
@@ -196,9 +207,16 @@ def main() -> int:
                 )
                 continue
 
-            bio = next((post.biography for post in brand_posts if post.biography), "Not available")
+            bio = next(
+                (post.biography for post in brand_posts if post.biography),
+                "Not available",
+            )
             business_category_name = next(
-                (post.business_category_name for post in brand_posts if post.business_category_name),
+                (
+                    post.business_category_name
+                    for post in brand_posts
+                    if post.business_category_name
+                ),
                 "Not available",
             )
             post_evidence = [_post_evidence(post) for post in brand_posts]
@@ -213,14 +231,20 @@ def main() -> int:
                 prompt,
                 context=f"brand gender check brand_raw_id={brand['brand_raw_id']}",
             )
-            print(json.dumps({
-                "brand_raw_id": brand["brand_raw_id"],
-                "brand_name": brand["brand_name"],
-                "post_count": len(brand_posts),
-                "gender": result.get("gender"),
-                "confidence": result.get("confidence"),
-                "explanation": result.get("explanation"),
-            }, ensure_ascii=True, default=str))
+            print(
+                json.dumps(
+                    {
+                        "brand_raw_id": brand["brand_raw_id"],
+                        "brand_name": brand["brand_name"],
+                        "post_count": len(brand_posts),
+                        "gender": result.get("gender"),
+                        "confidence": result.get("confidence"),
+                        "explanation": result.get("explanation"),
+                    },
+                    ensure_ascii=True,
+                    default=str,
+                )
+            )
 
         return 0
     finally:
