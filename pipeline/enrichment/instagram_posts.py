@@ -56,10 +56,6 @@ _ACTOR_ID     = "shu8hvrXbJbY3Eb9W"
 _POSTS_LIMIT  = 40   # last N posts, regardless of how far back that goes
 _RESULTS_TYPE = "posts"
 
-_DEFAULT_MAX_CREATORS = 10   # stop saving a brand's posts early once this
-                             # many unique creator usernames have been found
-                             # — see enrich_instagram_posts()
-
 #  Prompt helpers
 
 def _get_full_prompt(db: Session) -> str:
@@ -126,21 +122,6 @@ def _real_coauthors(item: dict, brand_handle: str) -> list[dict]:
     ):
         candidates.append({"username": owner})
     return candidates
-
-
-def _row_creators(row: dict) -> set[str]:
-    """
-    Union of mentions/tagged_users/coauthor_producers usernames actually
-    stored in a saved row — used to track progress toward max_creators.
-    Lowercased so the same person tagged with different casing across
-    posts still counts once.
-    """
-    creators: set[str] = set()
-    for field in ("mentions", "tagged_users", "coauthor_producers"):
-        for u in row.get(field) or []:
-            if isinstance(u, str) and u:
-                creators.add(u.lower())
-    return creators
 
 
 #  LLM functions 
@@ -423,7 +404,6 @@ def enrich_instagram_posts(
     posts_limit: int = _POSTS_LIMIT,
     brand_id: int | None = None,
     niche: str | None = None,
-    max_creators: int = _DEFAULT_MAX_CREATORS,
 ) -> int:
     """
     For each brand with instagram_handle set, instagram_checked=False,
@@ -438,14 +418,6 @@ def enrich_instagram_posts(
     regardless of how far back that goes — no time-window filter is applied.
     All posts_limit posts are always fetched from Apify in one call (no
     change to scrape cost).
-
-    max_creators stops SAVING posts once this many unique creator usernames
-    (union of mentions + tagged_users + coauthor_producers across saved
-    rows) have been found — posts are processed newest-first (Apify's own
-    order), so once the cap is hit the rest of that brand's fetched batch is
-    dropped without being LLM-filtered or written to instagram_posts. Pass
-    max_creators=0 to disable the cap and save every qualifying post in the
-    batch, same as before this parameter existed.
 
     Pass brand_id to target one specific brand directly — this bypasses the
     has_official_website filter, but still skips the brand when
@@ -487,8 +459,8 @@ def enrich_instagram_posts(
         return 0
 
     logger.info(
-        "Instagram: processing %d brands (ENABLE_INSTA_LLM=%s, max_creators=%s)",
-        len(brands), ENABLE_INSTA_LLM, max_creators or "disabled",
+        "Instagram: processing %d brands (ENABLE_INSTA_LLM=%s)",
+        len(brands), ENABLE_INSTA_LLM,
     )
     total_posts = 0
     checked_count = 0
@@ -514,14 +486,8 @@ def enrich_instagram_posts(
             inserted          = 0
             skipped_no_signal = 0
             skipped_llm       = 0
-            dropped_cap       = 0
-            unique_creators: set[str] = set()
 
             for item in items:
-                if max_creators and len(unique_creators) >= max_creators:
-                    dropped_cap += 1
-                    continue
-
                 # sponsors/tagged_users/mentions/coauthor_producers are the only
                 # fields that actually name a creator — paid_partnership is just
                 # a boolean flag Apify sets on the post and never identifies who
@@ -568,7 +534,6 @@ def enrich_instagram_posts(
                         inserted += _save_post_with_confidence(
                             db, brand.name, row, sponsorship_prompt
                         )
-                        unique_creators |= _row_creators(row)
                     time.sleep(0.3)
 
                 else:
@@ -597,7 +562,6 @@ def enrich_instagram_posts(
                         inserted += _save_post_with_confidence(
                             db, brand.name, row, sponsorship_prompt
                         )
-                        unique_creators |= _row_creators(row)
 
             if inserted == 0:
                 upsert_rows(
@@ -609,9 +573,9 @@ def enrich_instagram_posts(
             total_posts += inserted
             logger.info(
                 "Instagram: '%s' (@%s) → %d saved | %d no signal | %d LLM-rejected | "
-                "%d dropped (cap reached) | %d unique creators | %d total fetched",
+                "%d total fetched",
                 brand.name, handle, inserted, skipped_no_signal, skipped_llm,
-                dropped_cap, len(unique_creators), len(items),
+                len(items),
             )
 
             brand.instagram_checked = True
