@@ -4,6 +4,7 @@
 # or --limit 10 to process at most 10 brands.
 # Classification results are printed as JSON lines in the terminal; this script
 # reads from the database but does not save the results to a database table.
+# python -m gender_check.run_brand_gender_check --limit 1
 
 import argparse
 import json

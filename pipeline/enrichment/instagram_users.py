@@ -498,8 +498,8 @@ def enrich_instagram_users(
     brand_raw_id: int | None = None,
 ) -> int:
     """
-    Process up to `limit` instagram_posts where is_users_scraped=False.
-    Returns number of posts processed.
+    Process up to `limit` instagram_posts with sponsorship_confidence >= 90
+    where is_users_scraped=False. Returns number of posts processed.
 
     Pass row_id to target one specific instagram_posts row by its primary
     key (instagram_posts.id) — bypasses the is_users_scraped filter (so you
@@ -516,7 +516,7 @@ def enrich_instagram_users(
         logger.warning("APIFY_TOKEN not set — skipping Instagram user enrichment")
         return 0
 
-    query = db.query(InstagramPost)
+    query = db.query(InstagramPost).filter(InstagramPost.sponsorship_confidence >= 90)
     if row_id is not None:
         query = query.filter(InstagramPost.id == row_id)
     elif brand_raw_id is not None:
