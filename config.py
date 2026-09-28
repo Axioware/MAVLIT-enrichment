@@ -59,11 +59,6 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 POSTHOG_PROJECT_TOKEN = os.getenv("POSTHOG_PROJECT_TOKEN", "")
 POSTHOG_HOST          = os.getenv("POSTHOG_HOST", "https://us.i.posthog.com")
 
-# Instagram post LLM creator verification — independent of ENABLE_LLM
-# When true: taggedUsers + mentions are also sent to LLM (in addition to coauthorProducers)
-# When false: only coauthorProducers is LLM-checked (always on)
-ENABLE_INSTA_LLM  = os.getenv("ENABLE_INSTA_LLM", "false").strip().lower() == "true"
-
 # Origins of separate frontend apps (different domain than this API) allowed
 # to call this API cross-origin with cookies via CORS. Comma-separated, no
 # trailing slash, e.g. "https://app.example.com,http://localhost:5173"

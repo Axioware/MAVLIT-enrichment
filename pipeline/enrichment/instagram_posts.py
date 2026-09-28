@@ -1,33 +1,9 @@
 """
 pipeline/enrichment/instagram_posts.py
 
-Scrapes recent Instagram posts for each brand via Apify (shu8hvrXbJbY3Eb9W).
-
- Saving logic 
-
-ENABLE_INSTA_LLM = True  (full LLM mode)
-  • ALL signals (paid_partnership, sponsors, taggedUsers, mentions,
-    coauthorProducers) go through the LLM.
-  • LLM filters out false positives and returns trimmed versions of each field.
-  • Filtered values are stored back into their own columns.
-  • llm_checked = True
-  • Post is skipped unless a real creator survives filtering — sponsors,
-    tagged_users, mentions, or coauthor_producers. paid_partnership is just
-    a boolean flag and does not count as a creator on its own.
-
-ENABLE_INSTA_LLM = False  (coauthor-only LLM mode)
-  • paid_partnership, sponsors, taggedUsers, mentions → saved as-is from Apify.
-  • coauthorProducers → ALWAYS filtered through the LLM (even when flag is off).
-  • Filtered coauthors stored in coauthor_producers column.
-  • llm_checked = False  (never True in this mode)
-  • Post is skipped unless a real creator is present — sponsors, tagged_users,
-    mentions, or a confirmed coauthor. paid_partnership alone is not enough.
-
- Prompts (editable via /admin > Prompts)
-  instagram_post_full_check   — used when ENABLE_INSTA_LLM=True; this already
-                                 covers coauthorProducers as one of its signals
-  instagram_coauthor_check    — only used when ENABLE_INSTA_LLM=False, since
-                                 instagram_post_full_check doesn't run then
+Scrapes recent Instagram posts for each brand and uses the full LLM creator
+filter on posts with sponsorship signals. Only posts with a confirmed creator
+are saved. Prompts are editable via /admin > Prompts.
 """
 
 import json
@@ -37,14 +13,13 @@ import time
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
-from config import APIFY_TOKEN, ENABLE_INSTA_LLM, OPENAI_KEY
+from config import APIFY_TOKEN, OPENAI_KEY
 from pipeline.db import BrandRaw, InstagramPost, Prompt
 from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import (
     FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
-    COAUTHOR_PROMPT_NAME, COAUTHOR_DEFAULT_PROMPT,
     INSTAGRAM_POST_SPONSORSHIP_PROMPT_NAME,
     INSTAGRAM_POST_SPONSORSHIP_DEFAULT_PROMPT,
 )
@@ -61,11 +36,6 @@ _RESULTS_TYPE = "posts"
 def _get_full_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == FULL_PROMPT_NAME).first()
     return row.content if row else FULL_DEFAULT_PROMPT
-
-
-def _get_coauthor_prompt(db: Session) -> str:
-    row = db.query(Prompt).filter(Prompt.name == COAUTHOR_PROMPT_NAME).first()
-    return row.content if row else COAUTHOR_DEFAULT_PROMPT
 
 
 def _get_sponsorship_confidence_prompt(db: Session) -> str:
@@ -128,7 +98,7 @@ def _real_coauthors(item: dict, brand_handle: str) -> list[dict]:
 
 def _llm_filter_all(db: Session, item: dict, brand_name: str, handle: str) -> dict | None:
     """
-    Full-filter mode (ENABLE_INSTA_LLM=True).
+    Filter all sponsorship signals through the creator-partnership LLM.
     Sends all signals to the LLM; returns dict with filtered field values.
     Returns None when OPENAI_KEY is not set so the caller can skip the post.
     """
@@ -160,37 +130,6 @@ def _llm_filter_all(db: Session, item: dict, brand_name: str, handle: str) -> di
         len(result.get("coauthor_producers") or []),
     )
     return result
-
-
-def _llm_filter_coauthors(db: Session, item: dict, brand_name: str, handle: str) -> list:
-    """
-    Coauthor-only filter — always active regardless of ENABLE_INSTA_LLM.
-    Returns the filtered coauthor list (may be empty).
-    Falls back to the raw Apify list when OPENAI_KEY is not set.
-    """
-    raw = _real_coauthors(item, handle)
-    if not OPENAI_KEY:
-        logger.warning("Instagram LLM coauthor: OPENAI_KEY not set — saving coauthors as-is")
-        return raw
-
-    caption = (item.get("caption") or "")[:600]
-    prompt = fill_template(
-        _get_coauthor_prompt(db),
-        brand_name=brand_name,
-        caption=caption,
-        coauthor_producers=_fmt(raw),
-    )
-    result = call_gpt_json(prompt, context=f"{brand_name} coauthor-filter post {item.get('id')}")
-    if not isinstance(result, dict):
-        return []
-    filtered = result.get("coauthor_producers", [])
-    if not isinstance(filtered, list):
-        filtered = []
-    logger.info(
-        "Instagram LLM coauthor: post %s → %d/%d confirmed for '%s'",
-        item.get("id"), len(filtered), len(raw), brand_name,
-    )
-    return filtered
 
 
 #  Row builder 
@@ -410,7 +349,7 @@ def enrich_instagram_posts(
     refferls=False, geo_reach_score NULL or 0-40, and
     has_official_website=True:
       1. Scrape posts via Apify
-      2. Apply LLM filtering based on ENABLE_INSTA_LLM flag
+    2. Apply LLM filtering to all creator signals
       3. Store qualifying posts in instagram_posts
       4. Mark instagram_checked=True
 
@@ -458,10 +397,7 @@ def enrich_instagram_posts(
         logger.info("Instagram: no pending brands with instagram_handle")
         return 0
 
-    logger.info(
-        "Instagram: processing %d brands (ENABLE_INSTA_LLM=%s)",
-        len(brands), ENABLE_INSTA_LLM,
-    )
+    logger.info("Instagram: processing %d brands", len(brands))
     total_posts = 0
     checked_count = 0
 
@@ -496,72 +432,38 @@ def enrich_instagram_posts(
                 has_coauth   = bool(_real_coauthors(item, handle))
                 has_social   = bool(item.get("taggedUsers") or item.get("mentions"))
 
-                if ENABLE_INSTA_LLM:
-                    #  Full LLM mode: all signals filtered
-                    if not (has_sponsors or has_coauth or has_social):
-                        skipped_no_signal += 1
-                        continue
+                if not (has_sponsors or has_coauth or has_social):
+                    skipped_no_signal += 1
+                    continue
 
-                    filtered = _llm_filter_all(db, item, brand.name, handle)
-                    if filtered is None:          # no API key
-                        skipped_llm += 1
-                        continue
+                filtered = _llm_filter_all(db, item, brand.name, handle)
+                if filtered is None:
+                    skipped_llm += 1
+                    continue
 
-                    has_creator = (
-                        filtered.get("sponsors")
-                        or filtered.get("tagged_users")
-                        or filtered.get("mentions")
-                        or filtered.get("coauthor_producers")
+                has_creator = (
+                    filtered.get("sponsors")
+                    or filtered.get("tagged_users")
+                    or filtered.get("mentions")
+                    or filtered.get("coauthor_producers")
+                )
+                if not has_creator:
+                    skipped_llm += 1
+                    continue
+
+                row = _build_row(brand.id, handle, item)
+                if row:
+                    # Keep only usernames selected by the creator-filter LLM.
+                    row["paid_partnership"]   = bool(filtered.get("paid_partnership"))
+                    row["sponsors"]           = filtered.get("sponsors") or None
+                    row["tagged_users"]       = _usernames_only(filtered.get("tagged_users"))
+                    row["mentions"]           = _usernames_only(filtered.get("mentions"))
+                    row["coauthor_producers"] = _usernames_only(filtered.get("coauthor_producers"))
+                    row["llm_checked"]        = True
+                    inserted += _save_post_with_confidence(
+                        db, brand.name, row, sponsorship_prompt
                     )
-                    if not has_creator:
-                        skipped_llm += 1
-                        continue
-
-                    row = _build_row(brand.id, handle, item)
-                    if row:
-                        # tagged_users/coauthor_producers/mentions: the LLM is
-                        # handed Apify's raw dicts (id/username/full_name/
-                        # is_verified) so it can judge who's a real creator, but
-                        # it also echoes that same dict shape back — reduce to
-                        # bare usernames here so only usernames ever land in the
-                        # DB, same as when ENABLE_INSTA_LLM is off.
-                        row["paid_partnership"]   = bool(filtered.get("paid_partnership"))
-                        row["sponsors"]           = filtered.get("sponsors") or None
-                        row["tagged_users"]       = _usernames_only(filtered.get("tagged_users"))
-                        row["mentions"]           = _usernames_only(filtered.get("mentions"))
-                        row["coauthor_producers"] = _usernames_only(filtered.get("coauthor_producers"))
-                        row["llm_checked"]        = True
-                        inserted += _save_post_with_confidence(
-                            db, brand.name, row, sponsorship_prompt
-                        )
-                    time.sleep(0.3)
-
-                else:
-                    #  Coauthor-only LLM mode
-                    # Direct signals (sponsors/tagged/mentions) saved as-is.
-                    # coauthorProducers always goes through LLM.
-                    has_direct = has_sponsors or has_social
-
-                    filtered_coauthors: list | None = None
-                    if has_coauth:
-                        filtered_coauthors = _usernames_only(_llm_filter_coauthors(db, item, brand.name, handle))
-                        time.sleep(0.3)
-
-                    if not has_direct and not filtered_coauthors:
-                        if has_coauth:
-                            skipped_llm += 1
-                        else:
-                            skipped_no_signal += 1
-                        continue
-
-                    row = _build_row(brand.id, handle, item)
-                    if row:
-                        if filtered_coauthors is not None:
-                            row["coauthor_producers"] = filtered_coauthors or None
-                        # llm_checked stays False in this mode
-                        inserted += _save_post_with_confidence(
-                            db, brand.name, row, sponsorship_prompt
-                        )
+                time.sleep(0.3)
 
             if inserted == 0:
                 upsert_rows(
