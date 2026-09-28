@@ -123,7 +123,7 @@ def main() -> int:
                 db.commit()
 
             logger.info(
-                "Scraping up to 40 Instagram posts for brand_id=%s (%s).",
+                "Scraping up to 20 Instagram posts for brand_id=%s (%s).",
                 brand_id,
                 result["brand_name"],
             )
@@ -131,7 +131,7 @@ def main() -> int:
                 processed += enrich_instagram_posts(
                     db,
                     limit=1,
-                    posts_limit=40,
+                    posts_limit=20,
                     brand_id=brand_id,
                 )
             except Exception:
