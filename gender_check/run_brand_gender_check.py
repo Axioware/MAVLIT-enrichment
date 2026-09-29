@@ -103,6 +103,11 @@ BRAND_QUERY = text("""
         AND ccr.niche = 'Beauty'
         AND tcbp.sponsorship_confidence >= 90
         AND br.refferls = false
+        AND br.male_pct IS NULL
+        AND br.male_confidence IS NULL
+        AND br.female_pct IS NULL
+        AND br.female_confidence IS NULL
+        AND br.gender_explanation IS NULL
         AND (
           br.geo_reach_score BETWEEN 0 AND 40
           OR br.geo_reach_score IS NULL
