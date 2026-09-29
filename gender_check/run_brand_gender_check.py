@@ -80,7 +80,7 @@ Each post may contain:
 Analyze the complete available evidence and return only the JSON object.
 """
 
-MIN_INSTAGRAM_POSTS = 20
+MIN_INSTAGRAM_POSTS = 10
 
 BRAND_QUERY = text("""
     WITH best_per_brand AS (
