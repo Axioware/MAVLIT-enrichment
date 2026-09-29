@@ -47,6 +47,11 @@ class BrandRaw(Base):
     # True when content_creator_re's brand_check LLM sees this brand using
     # a creator discount/referral code in a confirmed partnership post.
     refferls          = Column(Boolean, nullable=False, server_default="false", default=False)
+    male_pct          = Column(Float)
+    male_confidence   = Column(Integer)
+    female_pct        = Column(Float)
+    female_confidence = Column(Integer)
+    gender_explanation = Column(Text)
     # Official website (P856) resolved at seed time
     website           = Column(Text)
     domain            = Column(Text)

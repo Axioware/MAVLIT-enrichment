@@ -141,6 +141,11 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS wikipedia_url TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS source_confidence INTEGER",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS refferls BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS male_pct FLOAT",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS male_confidence INTEGER",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS female_pct FLOAT",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS female_confidence INTEGER",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS gender_explanation TEXT",
         # Full unique index on wikidata_id — PostgreSQL treats NULLs as distinct,
         # so multiple NULL rows are permitted even with a UNIQUE index.
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_brands_raw_wikidata_id ON brands_raw(wikidata_id)",

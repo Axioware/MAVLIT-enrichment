@@ -9,19 +9,21 @@
 import argparse
 import json
 import logging
+import math
 from collections import defaultdict
 
 from sqlalchemy import text
 
-from pipeline.db import InstagramPost, SessionLocal
+from pipeline.db import BrandRaw, InstagramPost, SessionLocal
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 
-PROMPT = """You are analyzing an Instagram brand to determine the primary gender audience the brand's products or services are marketed toward.
+PROMPT = """You are analyzing an Instagram brand to independently estimate how strongly its products or services are marketed toward male and female audiences.
 
-Classify the brand into exactly ONE of:
-- Male
-- Female
-- Both
+Estimate both independent percentages:
+- male_pct: how strongly the brand targets a male audience, from 0 to 100
+- female_pct: how strongly the brand targets a female audience, from 0 to 100
+
+These are independent targeting estimates, not shares of one audience. Do not make them add to 100, do not derive one from the other, and do not lower one just because the other is high. Both may be high when the brand clearly targets both audiences. Use 0 when there is evidence that a gender is not a target; use lower confidence when evidence is limited or ambiguous.
 
 Use all available evidence:
 - Instagram bio
@@ -35,20 +37,23 @@ Important:
 - Do not assume gender based only on the brand name.
 - Do not assume that a beauty, fashion, fitness, health, or lifestyle brand is automatically Female or Male.
 - Look for explicit evidence of who the products/services are intended for.
-- "Both" should be used when the brand clearly serves both genders or when the available evidence does not strongly support Male or Female.
+- Do not force a Male or Female classification when the evidence supports a mixed audience.
 - A brand can be Female even if some posts feature men, and vice versa. Consider the overall pattern.
 - Do not use stereotypes.
-- Confidence must reflect the strength and consistency of the evidence.
+- Give male_confidence and female_confidence separately, each from 0 to 100, based on the strength and consistency of evidence for that estimate.
+- Give one short, evidence-based explanation that covers the evidence for both percentages.
 
 Return ONLY valid JSON:
 
 {
-    "gender": "Male|Female|Both",
-    "confidence": 0,
-    "explanation": "Short explanation based on the strongest evidence."
+    "male_pct": 85,
+    "male_confidence": 80,
+    "female_pct": 90,
+    "female_confidence": 80,
+    "explanation": "The brand explicitly markets products to both men and women."
 }
 
-Confidence:
+Confidence scale for each estimate:
 - 90-100 = very strong and explicit evidence
 - 75-89 = strong evidence
 - 60-74 = moderate evidence
@@ -75,7 +80,7 @@ Each post may contain:
 Analyze the complete available evidence and return only the JSON object.
 """
 
-MIN_INSTAGRAM_POSTS = 5
+MIN_INSTAGRAM_POSTS = 20
 
 BRAND_QUERY = text("""
     WITH best_per_brand AS (
@@ -144,6 +149,51 @@ def _post_evidence(post: InstagramPost) -> dict:
     }
 
 
+def _bounded_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not math.isfinite(number) or not 0 <= number <= 100:
+        return None
+    return number
+
+
+def _explanation(value: object, fallback: str) -> str:
+    return value.strip() if isinstance(value, str) and value.strip() else fallback
+
+
+def _gender_metrics_result(result: dict) -> dict:
+    male_pct = _bounded_number(result.get("male_pct"))
+    female_pct = _bounded_number(result.get("female_pct"))
+    male_confidence = _bounded_number(result.get("male_confidence"))
+    female_confidence = _bounded_number(result.get("female_confidence"))
+
+    return {
+        "male_pct": round(male_pct) if male_pct is not None else None,
+        "male_confidence": round(male_confidence) if male_pct is not None and male_confidence is not None else 0,
+        "female_pct": round(female_pct) if female_pct is not None else None,
+        "female_confidence": round(female_confidence) if female_pct is not None and female_confidence is not None else 0,
+        "explanation": _explanation(
+            result.get("explanation"),
+            "No valid gender estimates were returned."
+            if male_pct is None and female_pct is None
+            else "No explanation provided.",
+        ),
+    }
+
+
+def _ensure_gender_columns(db) -> None:
+    for column, sql_type in (
+        ("male_pct", "FLOAT"),
+        ("male_confidence", "INTEGER"),
+        ("female_pct", "FLOAT"),
+        ("female_confidence", "INTEGER"),
+        ("gender_explanation", "TEXT"),
+    ):
+        db.execute(text(f"ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS {column} {sql_type}"))
+    db.commit()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Classify target-audience gender for selected brands."
@@ -164,6 +214,7 @@ def main() -> int:
 
     db = SessionLocal()
     try:
+        _ensure_gender_columns(db)
         brands = db.execute(BRAND_QUERY).mappings().all()
         if not brands:
             logger.info("The brand query returned no rows.")
@@ -232,15 +283,31 @@ def main() -> int:
                 prompt,
                 context=f"brand gender check brand_raw_id={brand['brand_raw_id']}",
             )
+            gender_metrics = _gender_metrics_result(result)
+            updated = (
+                db.query(BrandRaw)
+                .filter(BrandRaw.id == brand["brand_raw_id"])
+                .update(
+                    {
+                        "male_pct": gender_metrics["male_pct"],
+                        "male_confidence": gender_metrics["male_confidence"],
+                        "female_pct": gender_metrics["female_pct"],
+                        "female_confidence": gender_metrics["female_confidence"],
+                        "gender_explanation": gender_metrics["explanation"],
+                    },
+                    synchronize_session=False,
+                )
+            )
+            db.commit()
+            if not updated:
+                logger.error("Could not save gender metrics for brand_raw_id=%s", brand["brand_raw_id"])
             print(
                 json.dumps(
                     {
                         "brand_raw_id": brand["brand_raw_id"],
                         "brand_name": brand["brand_name"],
                         "post_count": len(brand_posts),
-                        "gender": result.get("gender"),
-                        "confidence": result.get("confidence"),
-                        "explanation": result.get("explanation"),
+                        **gender_metrics,
                     },
                     ensure_ascii=True,
                     default=str,
