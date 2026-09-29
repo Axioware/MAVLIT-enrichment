@@ -40,4 +40,3 @@ data/seeds/*.csv
 *.json
 searxng-settings.yml
 *.csv
-hardfilter.txt
