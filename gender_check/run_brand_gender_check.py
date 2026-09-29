@@ -2,8 +2,7 @@
 #   .\venv\Scripts\python.exe -m gender_check.run_brand_gender_check
 # Optional: add --dry-run to list qualifying brands without calling the LLM,
 # or --limit 10 to process at most 10 brands.
-# Classification results are printed as JSON lines in the terminal; this script
-# reads from the database but does not save the results to a database table.
+# Classification results are saved to brands_raw and printed as JSON lines.
 # python -m gender_check.run_brand_gender_check --limit 1
 
 import argparse
@@ -17,49 +16,109 @@ from sqlalchemy import text
 from pipeline.db import BrandRaw, InstagramPost, SessionLocal
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 
-PROMPT = """You are analyzing an Instagram brand to independently estimate how strongly its products or services are marketed toward male and female audiences.
+PROMPT = """Analyze this brand's Instagram presence and offerings. You must evaluate THREE DISTINCT audience concepts:
 
-Estimate both independent percentages:
-- male_pct: how strongly the brand targets a male audience, from 0 to 100
-- female_pct: how strongly the brand targets a female audience, from 0 to 100
+1. TARGET AUDIENCE GENDER
+Who is the brand's marketing primarily aimed at?
+This means the person the brand is trying to attract, influence, or persuade to buy, engage, or take action.
 
-These are independent targeting estimates, not shares of one audience. Do not make them add to 100, do not derive one from the other, and do not lower one just because the other is high. Both may be high when the brand clearly targets both audiences. Use 0 when there is evidence that a gender is not a target; use lower confidence when evidence is limited or ambiguous.
+2. PRODUCT AUDIENCE GENDER
+Who is the actual product or service designed for, intended for, or useful to?
+This means the end user or recipient of the product/service, NOT necessarily the person who purchases it.
 
-Use all available evidence:
+3. PRODUCT AUDIENCE AGE RANGE
+What age range is the product or service designed for?
+Return the youngest reasonable age and oldest reasonable age as separate integer fields.
+
+IMPORTANT: TARGET AUDIENCE AND PRODUCT AUDIENCE ARE DIFFERENT.
+
+Examples:
+- A flower/gift brand may market heavily to men because men purchase flowers as gifts, while the flowers can be given to people of any gender. Target audience = male; product audience = both.
+- A home-decor brand may primarily feature women and speak to women in its marketing, while home-decor products are useful for people of any gender. Target audience = female; product audience = both.
+- A men's skincare brand marketed directly to men: target audience = male; product audience = male.
+- A children's toy brand may market to parents, while the actual product audience is children. The target gender should be based on the marketing evidence, while product gender should be based on the actual intended users.
+
+Do NOT assume that the person shown in an advertisement is necessarily the product's end user.
+Do NOT assume the buyer and end user are the same person.
+Do NOT conflate marketing representation with product purpose.
+
+For each gender field, return exactly ONE of:
+- "male"
+- "female"
+- "both"
+
+"both" means there is evidence that the brand/product genuinely serves both male and female audiences. Do NOT use "both" simply because the evidence is uncertain.
+
+For age:
+- Return integer ages from 0 to 120.
+- Estimate the youngest and oldest reasonable ages the product/service is designed for.
+- Use evidence from the actual products/services, not the age of people appearing in posts.
+- If the product/service is genuinely suitable for almost all ages, use a broad range.
+- If there is not enough evidence to estimate an endpoint, return null for that endpoint.
+- If the age range cannot reasonably be determined, return null for both.
+- Do not invent a precise age range without evidence.
+
+Use ALL available evidence:
 - Instagram bio
 - Business category
 - Recent post captions
 - Hashtags
 - Repeated product/service references
-- People/models shown or discussed in the content when that information is available
+- Product names
+- Service descriptions
+- Promotions and offers
+- People/models shown or discussed
+- Explicit statements about who products/services are for
+- Any other information contained in the supplied Instagram evidence
 
-Important:
-- Do not assume gender based only on the brand name.
-- Do not assume that a beauty, fashion, fitness, health, or lifestyle brand is automatically Female or Male.
-- Look for explicit evidence of who the products/services are intended for.
-- Do not force a Male or Female classification when the evidence supports a mixed audience.
-- A brand can be Female even if some posts feature men, and vice versa. Consider the overall pattern.
+Evidence rules:
+- Do not determine gender from the brand name.
+- Do not assume beauty, fashion, fitness, health, lifestyle, home, or similar categories are automatically male or female.
+- Product audience must be based primarily on the actual product/service.
+- Target audience must be based primarily on marketing language, positioning, promotions, creative choices, and who the brand appears to be trying to reach.
+- A brand can have a female target audience while its products are for both genders.
+- A brand can have a male target audience while its products are for both genders.
+- A brand can market to one gender while the product is intended for another gender.
 - Do not use stereotypes.
-- Give male_confidence and female_confidence separately, each from 0 to 100, based on the strength and consistency of evidence for that estimate.
-- Give one short, evidence-based explanation that covers the evidence for both percentages.
+- Do not infer gender solely from models or people appearing in photographs.
+- Consider the overall repeated pattern of evidence rather than one post.
 
-Return ONLY valid JSON:
+CONFIDENCE:
 
-{
-    "male_pct": 85,
-    "male_confidence": 80,
-    "female_pct": 90,
-    "female_confidence": 80,
-    "explanation": "The brand explicitly markets products to both men and women."
-}
+Return a separate confidence score from 0 to 100 for:
+- target audience gender
+- product audience gender
+- product audience age range
 
-Confidence scale for each estimate:
+Confidence measures how certain the evidence supports the classification or estimate.
+
+Confidence scale:
 - 90-100 = very strong and explicit evidence
 - 75-89 = strong evidence
 - 60-74 = moderate evidence
 - 0-59 = weak or ambiguous evidence
 
-Keep the explanation under 30 words.
+A high confidence score does NOT mean the brand strongly targets that gender. It means the evidence strongly supports the classification.
+
+If the evidence is insufficient:
+- Use null for the affected gender field.
+- Use null for unsupported age endpoints.
+- Lower the corresponding confidence score.
+
+Return ONLY valid JSON:
+
+{
+    "target_audience_gender": "male|female|both|null",
+    "target_audience_gender_confidence": 0,
+    "product_audience_gender": "male|female|both|null",
+    "product_audience_gender_confidence": 0,
+    "product_audience_min_age": 0,
+    "product_audience_max_age": 120,
+    "product_audience_age_confidence": 0,
+    "audience_analysis_explanation": "Short explanation distinguishing the marketing target from the actual product audience and explaining the age estimate."
+}
+
+Keep "audience_analysis_explanation" under 50 words.
 
 Brand name:
 {brand_name}
@@ -77,7 +136,7 @@ Each post may contain:
 - caption
 - hashtags
 
-Analyze the complete available evidence and return only the JSON object.
+Analyze the complete available evidence and return ONLY the JSON object.
 """
 
 MIN_INSTAGRAM_POSTS = 10
@@ -103,11 +162,14 @@ BRAND_QUERY = text("""
         AND ccr.niche = 'Beauty'
         AND tcbp.sponsorship_confidence >= 90
         AND br.refferls = false
-        AND br.male_pct IS NULL
-        AND br.male_confidence IS NULL
-        AND br.female_pct IS NULL
-        AND br.female_confidence IS NULL
-        AND br.gender_explanation IS NULL
+        AND br.target_audience_gender IS NULL
+        AND br.target_audience_gender_confidence IS NULL
+        AND br.product_audience_gender IS NULL
+        AND br.product_audience_gender_confidence IS NULL
+        AND br.product_audience_min_age IS NULL
+        AND br.product_audience_max_age IS NULL
+        AND br.product_audience_age_confidence IS NULL
+        AND br.audience_analysis_explanation IS NULL
         AND (
           br.geo_reach_score BETWEEN 0 AND 40
           OR br.geo_reach_score IS NULL
@@ -167,35 +229,68 @@ def _explanation(value: object, fallback: str) -> str:
     return value.strip() if isinstance(value, str) and value.strip() else fallback
 
 
+def _gender_category(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return normalized if normalized in {"male", "female", "both"} else None
+
+
+def _age(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not math.isfinite(number) or not 0 <= number <= 120 or not number.is_integer():
+        return None
+    return int(number)
+
+
 def _gender_metrics_result(result: dict) -> dict:
-    male_pct = _bounded_number(result.get("male_pct"))
-    female_pct = _bounded_number(result.get("female_pct"))
-    male_confidence = _bounded_number(result.get("male_confidence"))
-    female_confidence = _bounded_number(result.get("female_confidence"))
+    target_gender = _gender_category(result.get("target_audience_gender"))
+    product_gender = _gender_category(result.get("product_audience_gender"))
+    min_age = _age(result.get("product_audience_min_age"))
+    max_age = _age(result.get("product_audience_max_age"))
+    if min_age is not None and max_age is not None and min_age > max_age:
+        min_age = None
+        max_age = None
+
+    target_confidence = _bounded_number(result.get("target_audience_gender_confidence"))
+    product_confidence = _bounded_number(result.get("product_audience_gender_confidence"))
+    age_confidence = _bounded_number(result.get("product_audience_age_confidence"))
+    has_estimate = any(value is not None for value in (target_gender, product_gender, min_age, max_age))
 
     return {
-        "male_pct": round(male_pct) if male_pct is not None else None,
-        "male_confidence": round(male_confidence) if male_pct is not None and male_confidence is not None else 0,
-        "female_pct": round(female_pct) if female_pct is not None else None,
-        "female_confidence": round(female_confidence) if female_pct is not None and female_confidence is not None else 0,
-        "explanation": _explanation(
-            result.get("explanation"),
-            "No valid gender estimates were returned."
-            if male_pct is None and female_pct is None
-            else "No explanation provided.",
+        "target_audience_gender": target_gender,
+        "target_audience_gender_confidence": round(target_confidence) if target_gender and target_confidence is not None else 0,
+        "product_audience_gender": product_gender,
+        "product_audience_gender_confidence": round(product_confidence) if product_gender and product_confidence is not None else 0,
+        "product_audience_min_age": min_age,
+        "product_audience_max_age": max_age,
+        "product_audience_age_confidence": round(age_confidence) if min_age is not None and max_age is not None and age_confidence is not None else 0,
+        "audience_analysis_explanation": _explanation(
+            result.get("audience_analysis_explanation"),
+            "No valid audience estimates were returned." if not has_estimate else "No explanation provided.",
         ),
     }
 
 
 def _ensure_gender_columns(db) -> None:
-    for column, sql_type in (
-        ("male_pct", "FLOAT"),
-        ("male_confidence", "INTEGER"),
-        ("female_pct", "FLOAT"),
-        ("female_confidence", "INTEGER"),
-        ("gender_explanation", "TEXT"),
-    ):
-        db.execute(text(f"ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS {column} {sql_type}"))
+    db.execute(text("""
+        ALTER TABLE brands_raw
+            DROP COLUMN IF EXISTS male_pct,
+            DROP COLUMN IF EXISTS male_confidence,
+            DROP COLUMN IF EXISTS female_pct,
+            DROP COLUMN IF EXISTS female_confidence,
+            DROP COLUMN IF EXISTS gender_explanation,
+            ADD COLUMN IF NOT EXISTS target_audience_gender TEXT,
+            ADD COLUMN IF NOT EXISTS target_audience_gender_confidence INTEGER,
+            ADD COLUMN IF NOT EXISTS product_audience_gender TEXT,
+            ADD COLUMN IF NOT EXISTS product_audience_gender_confidence INTEGER,
+            ADD COLUMN IF NOT EXISTS product_audience_min_age INTEGER,
+            ADD COLUMN IF NOT EXISTS product_audience_max_age INTEGER,
+            ADD COLUMN IF NOT EXISTS product_audience_age_confidence INTEGER,
+            ADD COLUMN IF NOT EXISTS audience_analysis_explanation TEXT
+    """))
     db.commit()
 
 
@@ -294,11 +389,7 @@ def main() -> int:
                 .filter(BrandRaw.id == brand["brand_raw_id"])
                 .update(
                     {
-                        "male_pct": gender_metrics["male_pct"],
-                        "male_confidence": gender_metrics["male_confidence"],
-                        "female_pct": gender_metrics["female_pct"],
-                        "female_confidence": gender_metrics["female_confidence"],
-                        "gender_explanation": gender_metrics["explanation"],
+                        **gender_metrics,
                     },
                     synchronize_session=False,
                 )
