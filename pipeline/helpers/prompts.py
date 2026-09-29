@@ -19,6 +19,7 @@ Prompt name -> which enrichment module actually calls it:
   instagram_user_demographics   — pipeline/enrichment/instagram_users.py
   instagram_creator_niche       — pipeline/enrichment/instagram_users.py (creators only, not commenters)
   youtube_commenter_gender      — pipeline/enrichment/youtube_sponsorship.py
+   brand_audience_analysis      — gender_check/run_brand_gender_check.py
   youtube_sponsor_check         — pipeline/enrichment/youtube_sponsorship.py
   apollo_contact_check          — pipeline/enrichment/apollo_contacts.py
   creator_content_tags          — pipeline/enrichment/creator_signals.py
@@ -310,6 +311,322 @@ For each name, classify as "male", "female", or "unknown". Many will be username
 Reply ONLY with this JSON object, no extra text:
 {"genders": ["male", "unknown", "female", ...]}
 The genders array must have exactly as many entries as the input names, in the same order.\
+"""
+
+BRAND_AUDIENCE_ANALYSIS_PROMPT_NAME = "brand_audience_analysis"
+BRAND_AUDIENCE_ANALYSIS_DEFAULT_PROMPT = """Analyze this brand's Instagram presence and offerings. You must evaluate FOUR DISTINCT audience concepts:
+
+1. TARGET AUDIENCE GENDER
+Who is the brand's marketing primarily aimed at?
+
+This means the person the brand is trying to attract, influence, persuade, or reach to buy, engage, or take action.
+
+2. PRODUCT AUDIENCE GENDER
+Who is the actual product or service designed for, intended for, or useful to?
+
+This means the end user or recipient of the product/service, NOT necessarily the person who purchases it.
+
+3. TARGET AUDIENCE AGE RANGE
+What age range is the marketing primarily aimed at?
+
+This means the likely age of the person the brand is trying to reach, attract, persuade, or convert through its marketing. This can be different from the age of the product's actual user.
+
+4. PRODUCT AUDIENCE AGE RANGE
+What age range is the actual product or service designed for?
+
+This means the age of the end user or recipient of the product/service.
+
+IMPORTANT:
+TARGET AUDIENCE and PRODUCT AUDIENCE are separate concepts for BOTH gender and age.
+
+Do not assume that the person who buys a product is the same person who uses or receives it.
+
+Examples:
+
+- A flower/gift brand may market heavily to men because men purchase flowers as gifts, while the flowers can be given to people of any gender.
+  Target audience gender = male
+  Product audience gender = both
+
+- A home-decor brand may primarily feature women and speak to women in its marketing, while home-decor products are useful for people of any gender.
+  Target audience gender = female
+  Product audience gender = both
+
+- A men's skincare brand marketed directly to men:
+  Target audience gender = male
+  Product audience gender = male
+
+- A children's toy brand may market to parents, while the actual product audience is children.
+  Target audience should be based on the marketing evidence.
+  Product audience should be based on the actual intended users.
+
+- A toddler-clothing brand may have a product audience age of 0 to 7, while the target audience is the parents or caregivers purchasing the clothing.
+  However, the target audience age must ONLY be estimated if the marketing evidence provides reasonable support for the parents' or caregivers' age.
+  Do NOT automatically assume that parents of young children are 25-35.
+
+Do NOT assume that the person shown in an advertisement is necessarily the product's end user.
+
+Do NOT assume the buyer and end user are the same person.
+
+Do NOT conflate marketing representation with product purpose.
+
+Do NOT infer a person's age simply from their appearance.
+
+--------------------------------------------------
+GENDER CLASSIFICATION
+--------------------------------------------------
+
+For each gender field, return exactly ONE of:
+
+- "male"
+- "female"
+- "both"
+- null
+
+"both" means there is evidence that the brand/product genuinely serves or targets both male and female audiences.
+
+Do NOT use "both" simply because the evidence is uncertain or incomplete.
+
+If there is insufficient evidence to determine the gender classification, return null and use a lower confidence score.
+
+--------------------------------------------------
+AGE RANGE
+--------------------------------------------------
+
+Return integer ages from 0 to 120.
+
+Return separate minimum and maximum ages for BOTH:
+
+TARGET AUDIENCE:
+- target_audience_min_age
+- target_audience_max_age
+
+PRODUCT AUDIENCE:
+- product_audience_min_age
+- product_audience_max_age
+
+TARGET AUDIENCE AGE:
+
+Estimate the age range of the people the marketing is actually trying to reach.
+
+Use evidence such as:
+- Explicit age references
+- Marketing language
+- Audience positioning
+- Lifestyle references
+- Purchasing context
+- Promotions
+- Customer descriptions
+- Parent/caregiver references combined with evidence about their age
+- Career/life-stage references
+- Other direct evidence about the intended customer
+
+IMPORTANT:
+A product category alone is NOT sufficient evidence for the target audience's age.
+
+Examples:
+- A children's product does NOT automatically mean the target parents are 25-35.
+- A baby product does NOT automatically mean the target audience is 25-40.
+- A product for teenagers does NOT automatically mean the buyer is 30-45.
+- A gift product does NOT automatically establish the buyer's age.
+
+If the brand clearly targets parents, caregivers, or another buyer group but there is not enough evidence to estimate their age, return null for the target audience age endpoints.
+
+Do NOT invent an age range simply because a demographic is commonly associated with the product.
+
+PRODUCT AUDIENCE AGE:
+
+Estimate the age range of the actual person who uses, receives, or is served by the product/service.
+
+Use evidence such as:
+- Product descriptions
+- Product names
+- Recommended age
+- Size or age ranges
+- Service descriptions
+- Explicit age restrictions
+- Repeated product/service references
+- The actual purpose of the product/service
+- Explicit statements about who the product/service is for
+
+For product audience age, use the actual offering as the primary evidence.
+
+If the product/service is genuinely suitable for a very broad age range, use a broad range when supported by the evidence.
+
+Do NOT use the age of models or people appearing in Instagram posts as the sole basis for the product age range.
+
+For BOTH target and product audience age:
+
+- If the evidence supports only one endpoint, return that endpoint and return null for the unsupported endpoint.
+- If the age range cannot reasonably be determined, return null for both endpoints.
+- Do not invent precise ages without evidence.
+- Do not use demographic stereotypes as evidence.
+- Do not assume an age range simply because it is common for that industry or product category.
+
+--------------------------------------------------
+EVIDENCE
+--------------------------------------------------
+
+Use ALL available evidence:
+
+- Instagram bio
+- Business category
+- Recent post captions
+- Hashtags
+- Repeated product/service references
+- Product names
+- Service descriptions
+- Promotions and offers
+- People/models shown or discussed
+- Explicit statements about who products/services are for
+- Explicit age references
+- Customer/buyer references
+- Parent/caregiver references
+- Lifestyle or life-stage references
+- Any other information contained in the supplied Instagram evidence
+
+Consider the overall repeated pattern of evidence rather than relying on a single post.
+
+--------------------------------------------------
+GENDER EVIDENCE RULES
+--------------------------------------------------
+
+- Do not determine gender from the brand name.
+- Do not assume beauty, fashion, fitness, health, lifestyle, home, or similar categories are automatically male or female.
+- Product audience gender must be based primarily on the actual product/service and its intended user or recipient.
+- Target audience gender must be based primarily on marketing language, positioning, promotions, creative choices, purchasing context, and who the brand appears to be trying to reach.
+- A brand can have a female target audience while its products are for both genders.
+- A brand can have a male target audience while its products are for both genders.
+- A brand can market to one gender while the product is intended for another gender.
+- Do not use stereotypes.
+- Do not infer gender solely from models or people appearing in photographs.
+- A model's gender is evidence about the creative content, but is NOT by itself proof of the target audience or product audience.
+- Consider repeated evidence across the available content.
+
+--------------------------------------------------
+TARGET AGE VS PRODUCT AGE
+--------------------------------------------------
+
+Keep these completely separate.
+
+TARGET AUDIENCE AGE answers:
+
+"How old are the people this brand's marketing is trying to reach?"
+
+PRODUCT AUDIENCE AGE answers:
+
+"How old are the people who actually use, receive, or are served by this product/service?"
+
+For example:
+
+A children's clothing brand:
+
+- Product audience age = approximately 0-7
+- Target audience = parents/caregivers
+- Target audience age = ONLY estimate if the marketing provides evidence about the parents'/caregivers' age
+
+Do NOT convert:
+
+"product is for children"
+
+into:
+
+"target audience is 25-35"
+
+unless there is actual evidence supporting that target age.
+
+Likewise, do not convert:
+
+"marketing targets parents"
+
+into a specific parent age range without supporting evidence.
+
+--------------------------------------------------
+CONFIDENCE
+--------------------------------------------------
+
+Return a separate confidence score from 0 to 100 for ALL FOUR audience dimensions:
+
+- target audience gender
+- target audience age range
+- product audience gender
+- product audience age range
+
+Confidence measures how certain the available evidence supports the classification or estimate.
+
+Confidence scale:
+
+- 90-100 = very strong and explicit evidence
+- 75-89 = strong evidence
+- 60-74 = moderate evidence
+- 0-59 = weak, ambiguous, or limited evidence
+
+A high confidence score does NOT mean the brand strongly targets that gender or age group.
+
+It means the available evidence strongly supports the classification or estimated range.
+
+For age confidence:
+- Confidence reflects how strongly the evidence supports the estimated minimum and maximum as a reasonable range.
+- Do not give high confidence merely because the product category has a commonly assumed demographic.
+- If the age range is mostly an inference rather than directly supported by evidence, use a lower confidence score.
+- If both age endpoints are null, age confidence should be 0.
+- If only one endpoint is supported, confidence should reflect the limited evidence.
+
+If the evidence is insufficient:
+
+- Use null for the affected gender field.
+- Use null for unsupported age endpoints.
+- Lower the corresponding confidence score.
+- Never invent a value just to avoid returning null.
+
+--------------------------------------------------
+OUTPUT FORMAT
+--------------------------------------------------
+
+Return ONLY valid JSON.
+
+{
+   "target_audience_gender": "male|female|both|null",
+   "target_audience_gender_confidence": 0,
+
+   "target_audience_min_age": null,
+   "target_audience_max_age": null,
+   "target_audience_age_confidence": 0,
+
+   "product_audience_gender": "male|female|both|null",
+   "product_audience_gender_confidence": 0,
+
+   "product_audience_min_age": null,
+   "product_audience_max_age": null,
+   "product_audience_age_confidence": 0,
+
+   "audience_analysis_explanation": "Short explanation distinguishing the marketing target from the product user and explaining the evidence for the gender and age estimates."
+}
+
+Keep "audience_analysis_explanation" under 50 words.
+
+The explanation should clearly distinguish:
+1. Who the marketing targets.
+2. Who the product/service is actually for.
+3. The main evidence supporting the age estimates.
+4. Any important uncertainty when an age estimate is weak.
+
+Brand name:
+{brand_name}
+
+Instagram bio:
+{bio}
+
+Business category:
+{business_category_name}
+
+Instagram posts:
+{posts}
+
+Each post may contain:
+- caption
+- hashtags
+
+Analyze the complete available evidence and return ONLY the JSON object.
 """
 
 SPONSOR_CHECK_PROMPT_NAME = "youtube_sponsor_check"
