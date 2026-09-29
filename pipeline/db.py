@@ -1,7 +1,19 @@
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, Column, Date, Float, ForeignKey, Integer, Numeric, Text, TIMESTAMP, UniqueConstraint, create_engine
-from sqlalchemy.dialects.postgresql import insert, JSONB
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker, relationship
+from sqlalchemy import (
+    TIMESTAMP,
+    Boolean,
+    Column,
+    Date,
+    Float,
+    ForeignKey,
+    Integer,
+    Numeric,
+    Text,
+    UniqueConstraint,
+    create_engine,
+)
+from sqlalchemy.dialects.postgresql import JSONB, insert
+from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 from sqlalchemy.sql import func
 
 # Source trust scores (higher = more authoritative)
