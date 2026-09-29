@@ -105,14 +105,58 @@
       color: #f1f5f9;
     }
     .score-badge {
+      appearance: none;
       font-size: .8rem;
       font-weight: 700;
+      font-family: inherit;
       color: #38bdf8;
       background: #0f172a;
       border: 1px solid #334155;
       border-radius: 999px;
       padding: .2rem .65rem;
       white-space: nowrap;
+      cursor: help;
+    }
+    .score-wrap {
+      position: relative;
+      display: inline-flex;
+      flex-shrink: 0;
+    }
+    .score-tooltip {
+      position: absolute;
+      z-index: 5;
+      top: calc(100% + .5rem);
+      right: 0;
+      display: none;
+      width: min(280px, calc(100vw - 3rem));
+      padding: .75rem;
+      background: #0b1220;
+      border: 1px solid #475569;
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+      color: #e2e8f0;
+      font-size: .8rem;
+    }
+    .score-wrap:hover .score-tooltip,
+    .score-wrap:focus-within .score-tooltip {
+      display: block;
+    }
+    .score-tooltip-title {
+      display: block;
+      margin-bottom: .4rem;
+      color: #94a3b8;
+      font-size: .72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .score-tooltip-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: .25rem 0;
+    }
+    .score-tooltip-row strong {
+      color: #38bdf8;
     }
     .reasons { list-style: none; }
     .reasons li {
@@ -189,6 +233,23 @@
     return Math.round((score || 0) * 100) + '%';
   }
 
+  function scoreBreakdownHtml(dimensions) {
+    var labels = [
+      ['niche_match', 'Niche match'],
+      ['sponsorship_activity', 'Sponsorship activity'],
+      ['creator_tier_fit', 'Creator tier fit'],
+      ['semantic_similarity', 'Semantic similarity'],
+      ['platform_match', 'Platform match']
+    ];
+
+    return labels.map(function(item) {
+      var dimension = dimensions && dimensions[item[0]];
+      var score = dimension && dimension.score;
+      var value = typeof score === 'number' ? pct(score) : 'N/A';
+      return '<div class="score-tooltip-row"><span>' + item[1] + '</span><strong>' + value + '</strong></div>';
+    }).join('');
+  }
+
   // Holds the last-loaded full match list so the niche filter can re-render
   // instantly from memory instead of re-fetching on every selection change.
   var currentMatches = [];
@@ -248,7 +309,13 @@
       card.innerHTML =
         '<div class="card-head">' +
           '<span class="brand-name">' + m.brand_name.replace(/</g, '&lt;') + '</span>' +
-          '<span class="score-badge">' + pct(m.total_score) + ' match</span>' +
+          '<span class="score-wrap">' +
+            '<button class="score-badge" type="button" aria-label="Match score details" aria-describedby="score-tooltip-' + m.brand_raw_id + '">' + pct(m.total_score) + ' match</button>' +
+            '<span class="score-tooltip" role="tooltip" id="score-tooltip-' + m.brand_raw_id + '">' +
+              '<span class="score-tooltip-title">Score breakdown</span>' +
+              scoreBreakdownHtml(m.dimensions) +
+            '</span>' +
+          '</span>' +
         '</div>' +
         '<ul class="reasons">' + reasonsHtml + '</ul>';
 
