@@ -55,21 +55,24 @@ Run with:
 import logging
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from pipeline.db import BrandRaw, SessionLocal
-from pipeline.enrichment_re.content_creator_re import enrich_content_creator_re
-from pipeline.enrichment_re.score_post_sponsorship import score_post_sponsorship
-from pipeline.enrichment_re.brand_wikidata_lookup import enrich_brand_wikidata_lookup
-from pipeline.enrichment_re.brand_instagram_profile import enrich_brand_instagram_profile
-from pipeline.enrichment.wikidata_socials import enrich_wikidata_socials
-from pipeline.enrichment.shopify_detect import enrich_shopify
-from pipeline.enrichment.tranco import enrich_tranco
-from pipeline.enrichment.youtube_sponsorship import enrich_youtube_sponsorships
-from pipeline.enrichment.meta_ads import enrich_meta_ads
+from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 from pipeline.enrichment.instagram_posts import enrich_instagram_posts
 from pipeline.enrichment.instagram_users import enrich_instagram_users
-from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
+from pipeline.enrichment.meta_ads import enrich_meta_ads
+from pipeline.enrichment.shopify_detect import enrich_shopify
+from pipeline.enrichment.tranco import enrich_tranco
+from pipeline.enrichment.wikidata_socials import enrich_wikidata_socials
+from pipeline.enrichment.youtube_sponsorship import enrich_youtube_sponsorships
+from pipeline.enrichment_re.brand_instagram_profile import (
+    enrich_brand_instagram_profile,
+)
+from pipeline.enrichment_re.brand_wikidata_lookup import enrich_brand_wikidata_lookup
+from pipeline.enrichment_re.content_creator_re import enrich_content_creator_re
+from pipeline.enrichment_re.score_post_sponsorship import score_post_sponsorship
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s")
 logger = logging.getLogger(__name__)

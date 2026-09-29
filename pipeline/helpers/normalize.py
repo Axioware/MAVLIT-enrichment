@@ -1,4 +1,5 @@
 import re
+
 from rapidfuzz import fuzz, process
 
 # Legal entity suffixes to strip from brand names

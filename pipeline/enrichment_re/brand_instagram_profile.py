@@ -84,8 +84,10 @@ from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.normalize import normalize
 from pipeline.helpers.prompts import (
-    LINK_CLASSIFY_PROMPT_NAME, LINK_CLASSIFY_DEFAULT_PROMPT,
-    WEBSITE_PICK_PROMPT_NAME, WEBSITE_PICK_DEFAULT_PROMPT,
+    LINK_CLASSIFY_DEFAULT_PROMPT,
+    LINK_CLASSIFY_PROMPT_NAME,
+    WEBSITE_PICK_DEFAULT_PROMPT,
+    WEBSITE_PICK_PROMPT_NAME,
 )
 from pipeline.helpers.social import normalize_handle
 

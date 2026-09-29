@@ -4,8 +4,8 @@
 
 import argparse
 import logging
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pgvector.sqlalchemy import Vector

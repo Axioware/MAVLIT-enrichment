@@ -41,6 +41,7 @@ if __package__ in (None, ""):
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from sqlalchemy import or_, text
@@ -59,10 +60,6 @@ from pipeline.db import (
     engine,
     insert_brand,
 )
-from pipeline.helpers.db import upsert_rows
-from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
-from pipeline.helpers.prompts import BRAND_CHECK_PROMPT_NAME, BRAND_CHECK_DEFAULT_PROMPT
-from pipeline.helpers.social import normalize_handle
 from pipeline.enrichment.instagram_posts import _real_coauthors, _usernames_only
 from pipeline.enrichment.instagram_users import (
     _build_post_row,
@@ -74,6 +71,10 @@ from pipeline.enrichment.instagram_users import (
     _profile_from_posts,
     _scrape_posts,
 )
+from pipeline.helpers.db import upsert_rows
+from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.helpers.prompts import BRAND_CHECK_DEFAULT_PROMPT, BRAND_CHECK_PROMPT_NAME
+from pipeline.helpers.social import normalize_handle
 
 logger = logging.getLogger(__name__)
 

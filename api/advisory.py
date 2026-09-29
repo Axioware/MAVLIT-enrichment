@@ -3,8 +3,12 @@ from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
 from api.schemas import (
-    ContractAdviceRequest, ContractAdviceResponse, contract_review_to_response,
-    RateIntelligenceRequest, RateIntelligenceResponse, rate_estimate_to_response,
+    ContractAdviceRequest,
+    ContractAdviceResponse,
+    RateIntelligenceRequest,
+    RateIntelligenceResponse,
+    contract_review_to_response,
+    rate_estimate_to_response,
 )
 from pipeline.contract_advice import review_contract
 from pipeline.db import CreatorProfile, get_db

@@ -25,14 +25,21 @@ Run with:
 import logging
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from pipeline.db import (
-    Base, BrandInstagramUser, BrandRaw, InstagramPost, InstagramUser,
-    SessionLocal, TestBrandsWithInstagramPosts, engine,
+    Base,
+    BrandInstagramUser,
+    BrandRaw,
+    InstagramPost,
+    InstagramUser,
+    SessionLocal,
+    TestBrandsWithInstagramPosts,
+    engine,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s")

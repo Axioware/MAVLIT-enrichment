@@ -33,6 +33,7 @@ Install with: crontab -e, then paste the line above (mkdir -p logs first).
 import logging
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from pipeline.db import BrandProfile, SessionLocal

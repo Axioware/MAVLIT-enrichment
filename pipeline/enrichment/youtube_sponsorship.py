@@ -40,14 +40,32 @@ import httpx
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from config import YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2, YOUTUBE_API_KEY_3, YOUTUBE_API_KEY_4, YOUTUBE_API_KEY_5, YOUTUBE_API_KEY_6, YOUTUBE_API_KEY_7, YOUTUBE_API_KEY_8, YOUTUBE_API_KEY_9, YOUTUBE_API_KEY_10, YOUTUBE_API_KEY_11, YOUTUBE_API_KEY_12, OPENAI_KEY, ENABLE_LLM
+from config import (
+    ENABLE_LLM,
+    OPENAI_KEY,
+    YOUTUBE_API_KEY,
+    YOUTUBE_API_KEY_1,
+    YOUTUBE_API_KEY_2,
+    YOUTUBE_API_KEY_3,
+    YOUTUBE_API_KEY_4,
+    YOUTUBE_API_KEY_5,
+    YOUTUBE_API_KEY_6,
+    YOUTUBE_API_KEY_7,
+    YOUTUBE_API_KEY_8,
+    YOUTUBE_API_KEY_9,
+    YOUTUBE_API_KEY_10,
+    YOUTUBE_API_KEY_11,
+    YOUTUBE_API_KEY_12,
+)
 from pipeline.db import BrandRaw, Prompt, YoutubeSponsorship
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.gpt_llm import call_gpt_json, call_gpt_text, fill_template
 from pipeline.helpers.prompts import (
-    GENDER_PROMPT_NAME, GENDER_DEFAULT_PROMPT,
-    SPONSOR_CHECK_PROMPT_NAME, SPONSOR_CHECK_DEFAULT_PROMPT,
+    GENDER_DEFAULT_PROMPT,
+    GENDER_PROMPT_NAME,
+    SPONSOR_CHECK_DEFAULT_PROMPT,
+    SPONSOR_CHECK_PROMPT_NAME,
 )
 
 logger = logging.getLogger(__name__)

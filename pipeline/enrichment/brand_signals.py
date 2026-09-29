@@ -54,7 +54,11 @@ from pipeline.db import (
     TestCreatorBrandPartnershipPost,
     YoutubeSponsorship,
 )
-from pipeline.enrichment.initial_brand_scoring import _score_instagram, _score_meta_ads, _score_youtube
+from pipeline.enrichment.initial_brand_scoring import (
+    _score_instagram,
+    _score_meta_ads,
+    _score_youtube,
+)
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.gpt_llm import embed_text
 

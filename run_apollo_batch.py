@@ -32,10 +32,12 @@ Or in the foreground:
 import logging
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from sqlalchemy import text
-from pipeline.db import SessionLocal, BrandRaw
+
+from pipeline.db import BrandRaw, SessionLocal
 from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 
 logging.basicConfig(

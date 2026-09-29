@@ -89,7 +89,7 @@ from sqlalchemy.orm import Session
 from config import APOLLO_API_KEY, ENABLE_APOLLO_PHONE_REVEAL, OPENAI_KEY
 from pipeline.db import BrandContact, BrandProfile, BrandRaw, InitialBrandScore, Prompt
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
-from pipeline.helpers.prompts import APOLLO_RANK_PROMPT_NAME, APOLLO_RANK_DEFAULT_PROMPT
+from pipeline.helpers.prompts import APOLLO_RANK_DEFAULT_PROMPT, APOLLO_RANK_PROMPT_NAME
 
 logger = logging.getLogger(__name__)
 

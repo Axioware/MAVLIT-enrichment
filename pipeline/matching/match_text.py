@@ -15,15 +15,15 @@ from sqlalchemy import func
 
 from pipeline.db import (
     BrandContact,
+    BrandInstagramUser,
     BrandNiche,
     BrandProfile,
     BrandRaw,
-    BrandInstagramUser,
+    ContentCreatorRE,
     CreatorNiche,
     CreatorProfile,
     InstagramPost,
     InstagramUser,
-    ContentCreatorRE,
     TestCreatorBrandPartnershipPost,
     YoutubeSponsorship,
 )

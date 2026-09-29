@@ -56,31 +56,38 @@ import argparse
 import logging
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from sqlalchemy import func
 
-from pipeline.db import BrandContact, BrandProfile, BrandRaw, InitialBrandScore, SessionLocal
-from pipeline.enrichment.shopify_detect import enrich_shopify
-from pipeline.enrichment.wikidata_socials import enrich_wikidata_socials
-from pipeline.enrichment.tranco import enrich_tranco
+from pipeline.db import (
+    BrandContact,
+    BrandProfile,
+    BrandRaw,
+    InitialBrandScore,
+    SessionLocal,
+)
+
 # Imported as a module (not "from ... import enrich_youtube_sponsorships")
 # because drain_youtube_sponsorships() below also reads
 # youtube_sponsorship.quota_fully_exhausted, a flag that mutates at runtime
 # — a `from...import` of just the function wouldn't see later changes to
 # that module attribute.
 from pipeline.enrichment import youtube_sponsorship
-from pipeline.enrichment.youtube_sponsorship import enrich_youtube_sponsorships
-from pipeline.enrichment.instagram_posts import enrich_instagram_posts
-from pipeline.enrichment.instagram_users import enrich_instagram_users
-from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 from pipeline.enrichment.apollo_contacts import run_apollo_contacts
 from pipeline.enrichment.brand_signals import run_brand_signals
+from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
+from pipeline.enrichment.instagram_posts import enrich_instagram_posts
+from pipeline.enrichment.instagram_users import enrich_instagram_users
+from pipeline.enrichment.shopify_detect import enrich_shopify
+from pipeline.enrichment.tranco import enrich_tranco
+from pipeline.enrichment.wikidata_socials import enrich_wikidata_socials
+from pipeline.enrichment.youtube_sponsorship import enrich_youtube_sponsorships
 from run_reverse_engineering import (
-    run_per_brand,
     run_instagram_users_per_brand,
+    run_per_brand,
 )
-
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s")
 logger = logging.getLogger(__name__)

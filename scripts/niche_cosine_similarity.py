@@ -15,7 +15,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import DATABASE_URL
 
-
 OUTPUT_PATH = PROJECT_ROOT / "niche_cosine_similarity.csv"
 CSV_COLUMNS = ("source_niche", "target_niche", "cosine_similarity")
 MIN_SIMILARITY = 0.55

@@ -29,8 +29,8 @@ import time
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from pipeline.db import BrandRaw
 from pipeline.helpers.normalize import normalize

@@ -60,7 +60,10 @@ from config import OPENAI_KEY
 from pipeline.db import BrandNiche, BrandRaw, Prompt, normalize_niche
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.normalize import normalize
-from pipeline.helpers.prompts import BRAND_NICHE_TAGS_PROMPT_NAME, BRAND_NICHE_TAGS_DEFAULT_PROMPT
+from pipeline.helpers.prompts import (
+    BRAND_NICHE_TAGS_DEFAULT_PROMPT,
+    BRAND_NICHE_TAGS_PROMPT_NAME,
+)
 from pipeline.helpers.social import normalize_social_url
 
 logger = logging.getLogger(__name__)

@@ -36,10 +36,13 @@ Run:
 import logging
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from sqlalchemy import text
-from pipeline.db import SessionLocal, BrandRaw
+
+from pipeline.db import BrandRaw, SessionLocal
+
 # Imported as a module (not "from ... import enrich_youtube_sponsorships")
 # because quota_fully_exhausted mutates at runtime — a plain `from`-import
 # of the name would freeze the value at import time and never see updates.

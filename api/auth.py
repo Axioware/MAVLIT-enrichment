@@ -1,13 +1,15 @@
 import logging
 from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from jose import JWTError, jwt
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
+from api.schemas import CreatorProfileResponse, profile_to_response
 from config import IS_PRODUCTION, JWT_SECRET
 from pipeline.db import CreatorProfile, get_db
 from pipeline.helpers.passwords import verify_password
-from api.schemas import CreatorProfileResponse, profile_to_response
 
 logger = logging.getLogger(__name__)
 

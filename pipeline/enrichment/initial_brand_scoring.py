@@ -72,8 +72,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from pipeline.db import (
-    BrandRaw,
     BrandInstagramUser,
+    BrandRaw,
     InitialBrandScore,
     InstagramPost,
     InstagramUser,

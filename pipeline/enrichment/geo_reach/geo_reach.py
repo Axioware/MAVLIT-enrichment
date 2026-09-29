@@ -78,7 +78,13 @@ from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
 from config import OPENAI_KEY
-from pipeline.db import BrandRaw, ContentCreatorRE, InstagramPost, SessionLocal, TestCreatorBrandPartnershipPost
+from pipeline.db import (
+    BrandRaw,
+    ContentCreatorRE,
+    InstagramPost,
+    SessionLocal,
+    TestCreatorBrandPartnershipPost,
+)
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 
 logger = logging.getLogger(__name__)

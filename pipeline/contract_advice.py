@@ -11,7 +11,10 @@ from sqlalchemy.orm import Session
 
 from pipeline.db import ContractReview, CreatorProfile, Prompt
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
-from pipeline.helpers.prompts import CONTRACT_ADVICE_DEFAULT_PROMPT, CONTRACT_ADVICE_PROMPT_NAME
+from pipeline.helpers.prompts import (
+    CONTRACT_ADVICE_DEFAULT_PROMPT,
+    CONTRACT_ADVICE_PROMPT_NAME,
+)
 
 logger = logging.getLogger(__name__)
 

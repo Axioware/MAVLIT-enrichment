@@ -15,7 +15,6 @@ from sqlalchemy import text
 from pipeline.db import BrandRaw, SessionLocal
 from pipeline.enrichment.instagram_posts import enrich_instagram_posts
 
-
 BRAND_QUERY = text("""
     WITH best_per_brand AS (
       SELECT DISTINCT ON (tcbp.brand_raw_id)

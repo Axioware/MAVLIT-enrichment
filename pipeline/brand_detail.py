@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from pipeline.db import BrandContact, BrandNiche, BrandProfile, BrandRaw
 from pipeline.enrichment.initial_brand_scoring import _score_instagram, _score_youtube
 
+
 # Buckets over the 0-25 point scale _score_youtube/_score_instagram already
 # use (same scale compute_sponsorship_activity's yt/ig components are built
 # from) — not a new set of thresholds.

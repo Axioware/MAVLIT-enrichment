@@ -13,6 +13,7 @@ if __package__ in (None, ""):
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from sqlalchemy import func, or_

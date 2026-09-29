@@ -22,7 +22,6 @@ load_dotenv(PROJECT_ROOT / ".env")
 from config import DATABASE_URL
 from pipeline.helpers.gpt_llm import embed_text
 
-
 # --- Edit this test MAVLIT user profile before running -----------------
 MAVLIT_USER_NICHE = "Beauty"
 MAVLIT_USER_DESCRIPTION = "Strength training and gym motivation content for everyday athletes."

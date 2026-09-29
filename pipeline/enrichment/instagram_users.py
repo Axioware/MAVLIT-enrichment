@@ -45,14 +45,23 @@ import time
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, OPENAI_KEY
-from pipeline.db import BrandInstagramUser, InstagramCreatorCommenter, InstagramPost, InstagramUser, Prompt, normalize_niche
+from pipeline.db import (
+    BrandInstagramUser,
+    InstagramCreatorCommenter,
+    InstagramPost,
+    InstagramUser,
+    Prompt,
+    normalize_niche,
+)
 from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import (
-    DEMOGRAPHICS_PROMPT_NAME, DEMOGRAPHICS_DEFAULT_PROMPT,
-    CREATOR_NICHE_PROMPT_NAME, CREATOR_NICHE_DEFAULT_PROMPT,
+    CREATOR_NICHE_DEFAULT_PROMPT,
+    CREATOR_NICHE_PROMPT_NAME,
+    DEMOGRAPHICS_DEFAULT_PROMPT,
+    DEMOGRAPHICS_PROMPT_NAME,
 )
 
 logger = logging.getLogger(__name__)

@@ -4,12 +4,21 @@
 
 import argparse
 import logging
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, Integer, MetaData, Table, Text, bindparam, create_engine, text
+from sqlalchemy import (
+    Column,
+    Integer,
+    MetaData,
+    Table,
+    Text,
+    bindparam,
+    create_engine,
+    text,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))

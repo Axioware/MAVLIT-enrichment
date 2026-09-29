@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 from pipeline.db import CreatorProfile, Prompt
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.gpt_llm import call_gpt_json, embed_text, fill_template
-from pipeline.helpers.prompts import TAGS_PROMPT_NAME, TAGS_DEFAULT_PROMPT
+from pipeline.helpers.prompts import TAGS_DEFAULT_PROMPT, TAGS_PROMPT_NAME
 
 logger = logging.getLogger(__name__)
 

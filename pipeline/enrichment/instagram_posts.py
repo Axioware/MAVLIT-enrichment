@@ -20,9 +20,10 @@ from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import (
-    FULL_PROMPT_NAME, FULL_DEFAULT_PROMPT,
-    INSTAGRAM_POST_SPONSORSHIP_PROMPT_NAME,
+    FULL_DEFAULT_PROMPT,
+    FULL_PROMPT_NAME,
     INSTAGRAM_POST_SPONSORSHIP_DEFAULT_PROMPT,
+    INSTAGRAM_POST_SPONSORSHIP_PROMPT_NAME,
 )
 from pipeline.helpers.social import normalize_handle
 

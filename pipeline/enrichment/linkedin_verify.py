@@ -58,7 +58,10 @@ from config import APIFY_TOKEN, OPENAI_KEY
 from pipeline.db import BrandContact, Prompt
 from pipeline.helpers.apify import run_apify_actor
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
-from pipeline.helpers.prompts import LINKEDIN_COMPANY_MATCH_PROMPT_NAME, LINKEDIN_COMPANY_MATCH_DEFAULT_PROMPT
+from pipeline.helpers.prompts import (
+    LINKEDIN_COMPANY_MATCH_DEFAULT_PROMPT,
+    LINKEDIN_COMPANY_MATCH_PROMPT_NAME,
+)
 
 logger = logging.getLogger(__name__)
 

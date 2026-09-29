@@ -1,8 +1,9 @@
+import logging
 import random
 import time
+
 import httpx
 from fake_useragent import UserAgent
-import logging
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 _ua = UserAgent()

@@ -2,7 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
-from api.schemas import ManualPitchRequest, PitchListResponse, PitchRequest, PitchResponse, PitchUpdateRequest, pitch_to_response
+from api.schemas import (
+    ManualPitchRequest,
+    PitchListResponse,
+    PitchRequest,
+    PitchResponse,
+    PitchUpdateRequest,
+    pitch_to_response,
+)
 from pipeline.db import BrandRaw, CreatorProfile, Pitch, get_db
 from pipeline.pitching import generate_pitch
 
