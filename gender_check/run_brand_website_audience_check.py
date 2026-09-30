@@ -1,7 +1,7 @@
 """Classify audience demographics for qualified brands using website evidence.
 
 Run from the project root:
-    python -m gender_check.run_brand_website_audience_check
+    python -m gender_check.run_brand_website_audience_check --limit 1
 
 Use --dry-run to list qualifying brands without scraping or calling the LLM.
 """
