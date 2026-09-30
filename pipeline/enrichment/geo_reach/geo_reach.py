@@ -566,6 +566,10 @@ def enrich_geo_reach(
 
     query = db.query(BrandRaw).filter(
         BrandRaw.geo_reach_score.is_(None),
+        (
+            BrandRaw.geo_reach_country_codes.is_(None)
+            | (BrandRaw.geo_reach_country_codes == [])
+        ),
         BrandRaw.website.isnot(None),
         BrandRaw.website != "",
     )
