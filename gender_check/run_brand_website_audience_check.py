@@ -2,6 +2,7 @@
 
 Run from the project root:
     python -m gender_check.run_brand_website_audience_check --limit 1
+    python -m gender_check.run_brand_website_audience_check --brand-id 2151
 
 Use --dry-run to list qualifying brands without scraping or calling the LLM.
 """
@@ -26,6 +27,7 @@ from pipeline.enrichment.geo_reach.geo_reach import (
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 
 MAX_INSTAGRAM_POSTS_FOR_LLM = 10
+LLM_MODEL = "gpt-5"
 MAX_WEBSITE_PAGES = 5
 AUDIENCE_STOP_CONFIDENCE = 90
 PAGE_TEXT_LIMIT = 6000
@@ -431,6 +433,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Classify brand audiences from brand websites.")
     parser.add_argument("--dry-run", action="store_true", help="List matching brands without scraping or calling the LLM.")
     parser.add_argument("--limit", type=int, help="Maximum number of qualifying brands to process.")
+    parser.add_argument(
+        "--brand-id",
+        type=int,
+        action="append",
+        dest="brand_ids",
+        help="Process one brand_raw ID. Repeat this option to process multiple IDs.",
+    )
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be at least 1")
@@ -438,6 +447,15 @@ def main() -> int:
     db = SessionLocal()
     try:
         brands = db.execute(BRAND_QUERY).mappings().all()
+        if args.brand_ids:
+            requested_ids = set(args.brand_ids)
+            brands = [brand for brand in brands if brand["brand_raw_id"] in requested_ids]
+            missing_ids = requested_ids - {brand["brand_raw_id"] for brand in brands}
+            if missing_ids:
+                logger.warning(
+                    "Requested brand_raw_id(s) did not match the script's candidate conditions: %s",
+                    sorted(missing_ids),
+                )
         if not brands:
             logger.info("The brand query returned no rows.")
             return 0
@@ -526,6 +544,7 @@ def main() -> int:
                         current_page_text=page_text,
                     ),
                     context=f"brand website audience page brand_raw_id={brand['brand_raw_id']} url={page_url}",
+                    model=LLM_MODEL,
                 )
                 page_metrics = _metrics(result)
                 metrics = _merge_metrics(metrics, page_metrics)
@@ -572,6 +591,7 @@ def main() -> int:
                         final=True,
                     ),
                     context=f"brand website audience final brand_raw_id={brand['brand_raw_id']}",
+                    model=LLM_MODEL,
                 )
                 metrics = _merge_metrics(metrics, _metrics(final_result))
 

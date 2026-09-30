@@ -3,7 +3,7 @@
 # Optional: add --dry-run to list qualifying brands without calling the LLM,
 # or --limit 10 to process at most 10 brands.
 # Classification results are saved to brands_raw and printed as JSON lines.
-# python -m gender_check.run_brand_gender_check --limit 1
+# python -m gender_check.run_brand_gender_check --brand-id 2151
 
 import argparse
 import json
@@ -21,6 +21,7 @@ from pipeline.helpers.prompts import (
 )
 
 MIN_INSTAGRAM_POSTS = 10
+LLM_MODEL = "gpt-5"
 
 BRAND_QUERY = text("""
     WITH best_per_brand AS (
@@ -217,6 +218,13 @@ def main() -> int:
         type=int,
         help="Maximum number of qualifying brands to send to the LLM.",
     )
+    parser.add_argument(
+        "--brand-id",
+        type=int,
+        action="append",
+        dest="brand_ids",
+        help="Process one brand_raw ID. Repeat this option to process multiple IDs.",
+    )
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be at least 1")
@@ -226,6 +234,15 @@ def main() -> int:
         _ensure_gender_columns(db)
         prompt_template = _get_brand_audience_prompt(db)
         brands = db.execute(BRAND_QUERY).mappings().all()
+        if args.brand_ids:
+            requested_ids = set(args.brand_ids)
+            brands = [brand for brand in brands if brand["brand_raw_id"] in requested_ids]
+            missing_ids = requested_ids - {brand["brand_raw_id"] for brand in brands}
+            if missing_ids:
+                logger.warning(
+                    "Requested brand_raw_id(s) did not match the script's candidate conditions: %s",
+                    sorted(missing_ids),
+                )
         if not brands:
             logger.info("The brand query returned no rows.")
             return 0
@@ -292,6 +309,7 @@ def main() -> int:
             result = call_gpt_json(
                 prompt,
                 context=f"brand gender check brand_raw_id={brand['brand_raw_id']}",
+                model=LLM_MODEL,
             )
             gender_metrics = _gender_metrics_result(result)
             updated = (

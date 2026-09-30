@@ -33,9 +33,14 @@ def fill_template(template: str, **kwargs) -> str:
     return re.sub(r'\{(\w+)\}', lambda m: kwargs.get(m.group(1), m.group(0)), template)
 
 
-def call_gpt_json(prompt: str, context: str = "", timeout: float = _TIMEOUT) -> dict:
+def call_gpt_json(
+    prompt: str,
+    context: str = "",
+    timeout: float = _TIMEOUT,
+    model: str = _MODEL,
+) -> dict:
     """
-    Send prompt to OpenAI (gpt-5-mini) and parse the JSON response.
+    Send a prompt to the selected OpenAI model and parse the JSON response.
     Returns {} on any failure so callers can apply their own fallback.
 
     timeout overrides the default 60s — pass a larger value for prompts
@@ -51,7 +56,7 @@ def call_gpt_json(prompt: str, context: str = "", timeout: float = _TIMEOUT) -> 
             f"{_BASE_URL}/chat/completions",
             headers=_headers(),
             json={
-                "model": _MODEL,
+                "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "response_format": {"type": "json_object"},
             },
