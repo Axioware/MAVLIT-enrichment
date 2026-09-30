@@ -64,8 +64,9 @@ geo_reach_country_codes (e.g. ["US"], ["US", "CA"], or ["GLOBAL"]).
 The brand's own Instagram bio (instagram_posts.biography, most recent row)
 is passed to the LLM alongside the page text as extra context.
 
-Safe to re-run — rows with geo_reach_checked=True are skipped. Only brands
-with a website are eligible.
+Safe to re-run — rows with a non-null geo_reach_score are skipped. Only
+brands with a website are eligible. Rows where scraping cannot establish a
+score remain eligible for a later retry.
 """
 
 import argparse
@@ -533,7 +534,6 @@ def _score_brand_geo_reach(db: Session, brand: BrandRaw) -> None:
     brand.geo_reach_locations = locations
     brand.geo_reach_country_codes = country_codes
     brand.geo_reach_pages_scraped = pages
-    brand.geo_reach_checked = True
     db.commit()
 
     logger.info(
@@ -565,7 +565,7 @@ def enrich_geo_reach(
         return 0
 
     query = db.query(BrandRaw).filter(
-        BrandRaw.geo_reach_checked.is_(False),
+        BrandRaw.geo_reach_score.is_(None),
         BrandRaw.website.isnot(None),
         BrandRaw.website != "",
     )

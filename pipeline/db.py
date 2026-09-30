@@ -139,7 +139,6 @@ class BrandRaw(Base):
     # Memory #2: per-page crawl log (url, status, locations_found) — which
     # pages were already scraped, so a re-run never re-fetches the same page.
     geo_reach_pages_scraped  = Column(JSONB)
-    geo_reach_checked        = Column(Boolean, nullable=False, server_default="false", default=False)
 
     def __str__(self) -> str:
         return self.name or f"Brand #{self.id}"
