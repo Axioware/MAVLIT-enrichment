@@ -25,7 +25,7 @@ from pipeline.enrichment.geo_reach.geo_reach import (
 )
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 
-MIN_INSTAGRAM_POSTS = 10
+MAX_INSTAGRAM_POSTS_FOR_LLM = 10
 MAX_WEBSITE_PAGES = 5
 AUDIENCE_STOP_CONFIDENCE = 90
 PAGE_TEXT_LIMIT = 6000
@@ -456,13 +456,12 @@ def main() -> int:
         eligible = [
             (brand, posts_by_brand[brand["brand_raw_id"]])
             for brand in brands
-            if len(posts_by_brand[brand["brand_raw_id"]]) > MIN_INSTAGRAM_POSTS
         ]
         if args.limit is not None:
             eligible = eligible[:args.limit]
         logger.info(
-            "%d candidate brand(s); %d have more than %d Instagram post rows.",
-            len(brands), len(eligible), MIN_INSTAGRAM_POSTS,
+            "%d candidate brand(s); %d brand(s) selected for processing.",
+            len(brands), len(eligible),
         )
 
         for brand, brand_posts in eligible:
@@ -478,7 +477,10 @@ def main() -> int:
                 (post.business_category_name for post in brand_posts if post.business_category_name),
                 "Not available",
             )
-            evidence = [{"caption": post.caption, "hashtags": post.hashtags} for post in brand_posts]
+            evidence = [
+                {"caption": post.caption, "hashtags": post.hashtags}
+                for post in brand_posts[:MAX_INSTAGRAM_POSTS_FOR_LLM]
+            ]
             origin = _normalize_origin(brand["website"])
             queue = deque([origin])
             queued = {_url_key(origin)}
