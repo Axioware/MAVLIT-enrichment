@@ -40,7 +40,7 @@ BRAND_QUERY = text("""
       JOIN brands_raw br
         ON br.id = tcbp.brand_raw_id
       WHERE ccr.id BETWEEN 1 AND 208
-        AND ccr.niche = 'Beauty'
+        AND ccr.niche IN ('Beauty', 'Music', 'Fitness', 'Health')
         AND tcbp.sponsorship_confidence >= 90
         AND br.refferls = false
         AND br.target_audience_gender IS NULL
