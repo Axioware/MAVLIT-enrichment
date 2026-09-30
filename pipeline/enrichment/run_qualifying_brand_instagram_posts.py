@@ -29,7 +29,7 @@ from pipeline.helpers.social import normalize_handle
 POSTS_PER_BRAND = 5
 logger = logging.getLogger(__name__)
 
-# This selects the same population as the user's count query, at brand level.
+# Select brands matching the user's less-than-five-post query, at brand level.
 QUALIFYING_BRANDS_QUERY = text("""
     WITH best_per_brand AS (
       SELECT DISTINCT ON (tcbp.brand_raw_id)
@@ -51,19 +51,19 @@ QUALIFYING_BRANDS_QUERY = text("""
         tcbp.sponsorship_confidence DESC NULLS LAST,
         tcbp.post_timestamp DESC NULLS LAST
     ),
-    brands_with_posts AS (
-      SELECT brand_raw_id
+    instagram_post_counts AS (
+      SELECT brand_raw_id, COUNT(*) AS instagram_post_count
       FROM instagram_posts
       GROUP BY brand_raw_id
-      HAVING COUNT(*) > 4
     )
     SELECT b.brand_raw_id
     FROM best_per_brand b
-    JOIN brands_with_posts ip ON ip.brand_raw_id = b.brand_raw_id
+    LEFT JOIN instagram_post_counts ip ON ip.brand_raw_id = b.brand_raw_id
     WHERE b.niche IN ('Music', 'Beauty', 'Fitness', 'Health')
       AND b.has_official_website = true
       AND b.description IS NOT NULL
       AND TRIM(b.description) <> ''
+      AND COALESCE(ip.instagram_post_count, 0) < 5
     ORDER BY b.niche, b.brand_raw_id
 """)
 
