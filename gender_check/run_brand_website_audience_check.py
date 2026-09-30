@@ -83,6 +83,11 @@ BRAND_QUERY = text("""
         )
         AND tcbp.post_timestamp >= '2026-01-01'
         AND tcbp.post_timestamp < '2027-01-01'
+        AND (
+          SELECT COUNT(*)
+          FROM instagram_posts ip
+          WHERE ip.brand_raw_id = br.id
+        ) >= 5
       ORDER BY
         tcbp.brand_raw_id,
         tcbp.sponsorship_confidence DESC NULLS LAST,

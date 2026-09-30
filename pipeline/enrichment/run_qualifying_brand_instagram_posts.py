@@ -1,4 +1,5 @@
-"""Fetch and store five recent Instagram posts for qualifying brands.
+"""delete after run
+fetch and store five recent Instagram posts for qualifying brands.
 
 Run from the project root:
     python -m pipeline.enrichment.run_qualifying_brand_instagram_posts --dry-run
