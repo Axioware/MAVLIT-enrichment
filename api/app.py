@@ -219,6 +219,8 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS product_audience_min_age INTEGER",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS product_audience_max_age INTEGER",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS product_audience_age_confidence INTEGER",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS latest_product TEXT",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS latest_product_confidence INTEGER",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS audience_analysis_explanation TEXT",
         # Full unique index on wikidata_id — PostgreSQL treats NULLs as distinct,
         # so multiple NULL rows are permitted even with a UNIQUE index.

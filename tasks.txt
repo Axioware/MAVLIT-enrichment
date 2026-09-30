@@ -1,2 +1,5 @@
 in V1 mavlit user gender match with brands target audience gender
 V2 mavlit user follower audience gender match with brands target audience gender 
+
+
+2 hard filter by re creator gender or brands gender

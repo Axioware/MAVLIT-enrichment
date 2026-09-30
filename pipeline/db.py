@@ -69,6 +69,8 @@ class BrandRaw(Base):
     product_audience_min_age = Column(Integer)
     product_audience_max_age = Column(Integer)
     product_audience_age_confidence = Column(Integer)
+    latest_product = Column(Text)
+    latest_product_confidence = Column(Integer)
     audience_analysis_explanation = Column(Text)
     # Official website (P856) resolved at seed time
     website           = Column(Text)

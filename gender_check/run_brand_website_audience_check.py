@@ -135,6 +135,17 @@ Use evidence in this priority order:
 3. Instagram bio
 4. Instagram captions and hashtags
 
+Latest product
+
+Identify one product that appears to be the brand's newest or latest product launch,
+using explicit launch/new-arrival/recent-release evidence on the website first, then
+Instagram evidence. Return the product's name only when the evidence supports it.
+Do not guess from generic product listings or assume the newest item is the latest
+launch. If no latest product can be identified, return null and confidence 0.
+Give latest_product_confidence as a whole-number score from 0 to 100 for the
+evidence that the named item is the latest product. If latest_product is null,
+latest_product_confidence must be 0.
+
 On the website, prioritize evidence from product, shop, and collection pages. Gender- or age-specific sections can be linked by paths such as /collections/mens, /collections/womens, /shop/men, /collections/beard-care, /collections/makeup, or /collections/mens-grooming. Use both the page URL/category and its actual contents; do not infer a demographic from a path alone.
 
 Do NOT determine demographics from:
@@ -225,7 +236,7 @@ INSTAGRAM BUSINESS CATEGORY:
 RECENT INSTAGRAM POSTS:
 {posts}
 
-Return ONLY valid JSON with exactly these keys. Use JSON null (without quotes) for unknown gender or age values, and integer numbers (without quotes) for ages and confidence scores. Do not include comments, markdown, or extra keys.
+Return ONLY valid JSON with exactly these keys. Use JSON null (without quotes) for unknown gender, age, or latest product values, and integer numbers (without quotes) for ages and confidence scores. Do not include comments, markdown, or extra keys.
 
 {
   "target_audience_gender": null,
@@ -238,6 +249,8 @@ Return ONLY valid JSON with exactly these keys. Use JSON null (without quotes) f
   "product_audience_min_age": null,
   "product_audience_max_age": null,
   "product_audience_age_confidence": 0,
+  "latest_product": null,
+  "latest_product_confidence": 0,
   "audience_analysis_explanation": ""
 }
 """
@@ -320,6 +333,9 @@ def _metrics(result: dict) -> dict:
         target_gender, product_gender, target_min, target_max, product_min, product_max,
     ))
     explanation = result.get("audience_analysis_explanation")
+    latest_product = result.get("latest_product")
+    latest_product = latest_product.strip() if isinstance(latest_product, str) and latest_product.strip() else None
+    latest_product_conf = _bounded_number(result.get("latest_product_confidence"))
 
     return {
         "target_audience_gender": target_gender,
@@ -332,6 +348,8 @@ def _metrics(result: dict) -> dict:
         "product_audience_min_age": product_min,
         "product_audience_max_age": product_max,
         "product_audience_age_confidence": round(product_age_conf) if (product_min is not None or product_max is not None) and product_age_conf is not None else 0,
+        "latest_product": latest_product,
+        "latest_product_confidence": round(latest_product_conf) if latest_product and latest_product_conf is not None else 0,
         "audience_analysis_explanation": explanation.strip() if isinstance(explanation, str) and explanation.strip() else (
             "No valid audience estimates were returned." if not any_estimate else "No explanation provided."
         ),
@@ -369,6 +387,12 @@ def _merge_metrics(previous: dict | None, current: dict) -> dict:
 
     if current.get("audience_analysis_explanation"):
         merged["audience_analysis_explanation"] = current["audience_analysis_explanation"]
+    if current.get("latest_product") is not None and (
+        merged.get("latest_product") is None
+        or current.get("latest_product_confidence", 0) >= merged.get("latest_product_confidence", 0)
+    ):
+        merged["latest_product"] = current["latest_product"]
+        merged["latest_product_confidence"] = current["latest_product_confidence"]
     return merged
 
 
@@ -384,6 +408,15 @@ def _has_confident_estimates(metrics: dict) -> bool:
         and (metrics.get("product_audience_min_age") is not None or metrics.get("product_audience_max_age") is not None)
         and metrics.get("product_audience_age_confidence", 0) >= AUDIENCE_STOP_CONFIDENCE
     )
+
+
+def _ensure_latest_product_columns(db) -> None:
+    db.execute(text("""
+        ALTER TABLE brands_raw
+            ADD COLUMN IF NOT EXISTS latest_product TEXT,
+            ADD COLUMN IF NOT EXISTS latest_product_confidence INTEGER
+    """))
+    db.commit()
 
 
 def _audience_prompt(
@@ -446,6 +479,7 @@ def main() -> int:
 
     db = SessionLocal()
     try:
+        _ensure_latest_product_columns(db)
         brands = db.execute(BRAND_QUERY).mappings().all()
         if args.brand_ids:
             requested_ids = set(args.brand_ids)
