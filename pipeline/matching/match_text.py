@@ -352,7 +352,9 @@ def _target_gender_reason(creator: CreatorProfile, brand: BrandRaw, db) -> str |
     line = f"{brand.name}'s target audience is {target_label}."
 
     creator_gender = (creator.gender or "").strip().lower()
-    if db is None or creator_gender not in ("male", "female") or brand_gender in (creator_gender, "both"):
+    if creator_gender in ("male", "female") and brand_gender == "both":
+        return f"{brand.name}'s target audience gender is same as yours."
+    if db is None or creator_gender not in ("male", "female") or brand_gender == creator_gender:
         return line
 
     partners = _same_gender_partner_niches(creator_gender, brand, db)
