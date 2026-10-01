@@ -170,6 +170,15 @@ Examples:
 | b | Only min age set | {brand} targets an audience aged {min}+. |
 | c | Only max age set | {brand} targets an audience aged up to {max}. |
 
+If the user's age (`creator_profiles.age`) falls inside the brand's range, the line ends with **"which is within your age."** instead of a full stop:
+
+| User age | Brand range | Tagline |
+|---|---|---|
+| 30 | 25-55 | Cozyla targets an audience aged 25-55 which is within your age. |
+| 20 | 25-55 | Cozyla targets an audience aged 25-55. |
+| 30 | 18+ | ADAM Audio targets an audience aged 18+ which is within your age. |
+| not set | 25-55 | Cozyla targets an audience aged 25-55. |
+
 ---
 
 ## 14. Product audience gender

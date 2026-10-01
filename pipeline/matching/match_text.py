@@ -390,11 +390,22 @@ def _brand_audience_reasons(creator: CreatorProfile, brand: BrandRaw, db=None) -
 
     min_age, max_age = brand.target_audience_min_age, brand.target_audience_max_age
     if min_age is not None and max_age is not None:
-        reasons.append((69.2, f"{brand.name} targets an audience aged {min_age}-{max_age}."))
+        age_range = f"{min_age}-{max_age}"
     elif min_age is not None:
-        reasons.append((69.2, f"{brand.name} targets an audience aged {min_age}+."))
+        age_range = f"{min_age}+"
     elif max_age is not None:
-        reasons.append((69.2, f"{brand.name} targets an audience aged up to {max_age}."))
+        age_range = f"up to {max_age}"
+    else:
+        age_range = None
+    if age_range:
+        creator_age = creator.age
+        within_age = (
+            creator_age is not None
+            and (min_age is None or creator_age >= min_age)
+            and (max_age is None or creator_age <= max_age)
+        )
+        suffix = " which is within your age." if within_age else "."
+        reasons.append((69.2, f"{brand.name} targets an audience aged {age_range}{suffix}"))
 
     product_gender = _PRODUCT_GENDER_LABELS.get((brand.product_audience_gender or "").strip().lower())
     if product_gender:
