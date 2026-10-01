@@ -368,9 +368,9 @@ def _target_gender_reason(creator: CreatorProfile, brand: BrandRaw, db) -> str |
     )
 
 
-def _brand_audience_reasons(creator: CreatorProfile, brand: BrandRaw, db=None) -> list[tuple[int, str]]:
+def _brand_audience_reasons(creator: CreatorProfile, brand: BrandRaw, db=None) -> list[tuple[float, str]]:
     """Pitch lines from brands_raw's audience/product columns — each one only when its column is filled."""
-    reasons: list[tuple[int, str]] = []
+    reasons: list[tuple[float, str]] = []
 
     latest_product = (brand.latest_product or "").strip()
     if latest_product:
@@ -378,19 +378,19 @@ def _brand_audience_reasons(creator: CreatorProfile, brand: BrandRaw, db=None) -
 
     target_gender_reason = _target_gender_reason(creator, brand, db)
     if target_gender_reason:
-        reasons.append((28, target_gender_reason))
+        reasons.append((69.3, target_gender_reason))
 
     min_age, max_age = brand.target_audience_min_age, brand.target_audience_max_age
     if min_age is not None and max_age is not None:
-        reasons.append((27, f"{brand.name} targets an audience aged {min_age}-{max_age}."))
+        reasons.append((69.2, f"{brand.name} targets an audience aged {min_age}-{max_age}."))
     elif min_age is not None:
-        reasons.append((27, f"{brand.name} targets an audience aged {min_age}+."))
+        reasons.append((69.2, f"{brand.name} targets an audience aged {min_age}+."))
     elif max_age is not None:
-        reasons.append((27, f"{brand.name} targets an audience aged up to {max_age}."))
+        reasons.append((69.2, f"{brand.name} targets an audience aged up to {max_age}."))
 
     product_gender = _AUDIENCE_GENDER_LABELS.get((brand.product_audience_gender or "").strip().lower())
     if product_gender:
-        reasons.append((26, f"{brand.name}'s products are made for {product_gender}."))
+        reasons.append((69.1, f"{brand.name}'s products are made for {product_gender}."))
 
     return reasons
 
@@ -509,7 +509,7 @@ def generate_match_reasons(
     Returns every applicable reason unless `max_reasons` is given — the
     matches page shows the top 5 and expands to the rest on click.
     """
-    reasons: list[tuple[int, str]] = []
+    reasons: list[tuple[float, str]] = []
     bridge_reason = _brand_niche_bridge_reason(creator, brand, db)
     if bridge_reason:
         reasons.append((10_000, bridge_reason))
