@@ -272,15 +272,17 @@
       line-height: 1.5;
     }
     .post-text strong { color: #f1f5f9; }
+    .creator-link { color: #f1f5f9; font-weight: 700; text-decoration: none; }
+    .creator-link:hover { color: #38bdf8; text-decoration: underline; }
+    .post-sep { margin: 0 .35rem; color: #475569; }
+    .post-date { color: #94a3b8; white-space: nowrap; }
     .post-link {
       color: #38bdf8;
-      font-size: .85rem;
       font-weight: 600;
       text-decoration: none;
-      word-break: break-all;
+      white-space: nowrap;
     }
     .post-link:hover { text-decoration: underline; }
-    .post-date { margin-top: .25rem; font-size: .75rem; color: #94a3b8; }
   </style>
 </head>
 <body>
@@ -401,20 +403,25 @@
       return;
     }
     body.innerHTML = posts.map(function(p) {
-      var creators = p.creators || [];
-      var creatorsHtml = creators.map(function(c) {
-        return '<strong>@' + escapeHtml(c) + '</strong>';
-      }).join(', ');
-      var creatorLabel = creators.length > 1 ? 'creators ' : 'a creator ';
-      return '<div class="post-row">' +
-        '<div class="post-text">' +
-          '<strong>' + escapeHtml(brandName) + '</strong> collab with ' +
-          (creatorsHtml ? creatorLabel + creatorsHtml : 'a creator') +
-          ' on post url: <a class="post-link" href="' + escapeHtml(p.post_url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(p.post_url) + '</a>' +
-        '</div>' +
-        '<div class="post-date">' + escapeHtml(formatPostDate(p.post_date)) + '</div>' +
-      '</div>';
+      var sep = '<span class="post-sep">&middot;</span>';
+      return '<div class="post-row"><div class="post-text">' +
+        '<strong>' + escapeHtml(brandName) + '</strong> partnered with ' + creatorsSentenceHtml(p.creators || []) +
+        sep + '<span class="post-date">' + escapeHtml(formatPostDate(p.post_date)) + '</span>' +
+        sep + '<a class="post-link" href="' + escapeHtml(p.post_url) + '" target="_blank" rel="noopener noreferrer">View post &#8599;</a>' +
+      '</div></div>';
     }).join('');
+  }
+
+  // "@a", "@a and @b", or "@a, @b and N other(s)" — each @handle links to the creator's Instagram profile.
+  function creatorsSentenceHtml(creators) {
+    if (!creators.length) return 'a creator';
+    var links = creators.slice(0, 2).map(function(c) {
+      return '<a class="creator-link" href="https://instagram.com/' + encodeURIComponent(c) + '" target="_blank" rel="noopener noreferrer">@' + escapeHtml(c) + '</a>';
+    });
+    if (creators.length === 1) return links[0];
+    if (creators.length === 2) return links[0] + ' and ' + links[1];
+    var others = creators.length - 2;
+    return links[0] + ', ' + links[1] + ' and ' + others + (others === 1 ? ' other' : ' others');
   }
 
   function openPostsModal(brandId, brandName) {
