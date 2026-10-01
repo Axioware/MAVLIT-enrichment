@@ -167,6 +167,22 @@
     }
     .reasons li:first-child { border-top: none; }
 
+    .card.expandable .card-head .brand-name { cursor: pointer; }
+    .card.expandable .card-head .brand-name:hover { color: #38bdf8; }
+    .reasons-toggle {
+      appearance: none;
+      margin-top: .5rem;
+      padding: 0;
+      background: none;
+      border: none;
+      color: #38bdf8;
+      font-family: inherit;
+      font-size: .8rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .reasons-toggle:hover { text-decoration: underline; }
+
     .empty-msg, .error-msg {
       font-size: .9rem;
       color: #94a3b8;
@@ -254,6 +270,24 @@
   // instantly from memory instead of re-fetching on every selection change.
   var currentMatches = [];
 
+  // The API returns every applicable reason; cards show the top
+  // REASONS_PREVIEW and expand to the full list when the brand is clicked.
+  // Expanded brand ids survive re-renders (niche filter / refresh).
+  var REASONS_PREVIEW = 5;
+  var expandedBrands = {};
+
+  function reasonsListHtml(reasons, expanded) {
+    var shown = expanded ? reasons : reasons.slice(0, REASONS_PREVIEW);
+    return shown.map(function(r) {
+      return '<li>' + r.replace(/</g, '&lt;') + '</li>';
+    }).join('');
+  }
+
+  function toggleReasons(brandId) {
+    expandedBrands[brandId] = !expandedBrands[brandId];
+    applyFilterAndRender();
+  }
+
   // Niche options come ONLY from the brands actually matched to this
   // creator (currentMatches), not the full site-wide niche vocabulary —
   // so the dropdown never offers a niche that would filter to zero results.
@@ -300,11 +334,16 @@
 
     matches.forEach(function(m) {
       var card = document.createElement('div');
-      card.className = 'card';
+      var reasons = m.reasons || [];
+      var expandable = reasons.length > REASONS_PREVIEW;
+      var expanded = expandable && !!expandedBrands[m.brand_raw_id];
+      card.className = expandable ? 'card expandable' : 'card';
 
-      var reasonsHtml = (m.reasons || []).map(function(r) {
-        return '<li>' + r.replace(/</g, '&lt;') + '</li>';
-      }).join('');
+      var toggleHtml = expandable
+        ? '<button class="reasons-toggle" type="button" aria-expanded="' + expanded + '">' +
+            (expanded ? 'Show less' : 'Show all ' + reasons.length + ' reasons') +
+          '</button>'
+        : '';
 
       card.innerHTML =
         '<div class="card-head">' +
@@ -317,7 +356,14 @@
             '</span>' +
           '</span>' +
         '</div>' +
-        '<ul class="reasons">' + reasonsHtml + '</ul>';
+        '<ul class="reasons">' + reasonsListHtml(reasons, expanded) + '</ul>' +
+        toggleHtml;
+
+      if (expandable) {
+        var toggle = function() { toggleReasons(m.brand_raw_id); };
+        card.querySelector('.brand-name').addEventListener('click', toggle);
+        card.querySelector('.reasons-toggle').addEventListener('click', toggle);
+      }
 
       list.appendChild(card);
     });
