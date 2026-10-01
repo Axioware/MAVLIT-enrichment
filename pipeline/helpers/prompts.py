@@ -625,6 +625,13 @@ Instagram posts:
 Each post may contain:
 - caption
 - hashtags
+- coauthor_producers: Instagram usernames of creators who co-authored the post with the brand
+- mentions: Instagram usernames @-mentioned in the post
+- sponsors: Instagram usernames listed in the post's paid-partnership label
+- tagged_users: Instagram usernames tagged in the post
+
+Reverse engineering partner creators (creators with a confirmed paid partnership post for this brand; each has creator_username and creator_name):
+{re_creators}
 
 Analyze the complete available evidence and return ONLY the JSON object.
 """

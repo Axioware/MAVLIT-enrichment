@@ -17,7 +17,12 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from sqlalchemy import text
 
-from pipeline.db import BrandRaw, InstagramPost, SessionLocal
+from pipeline.db import (
+    BrandRaw,
+    InstagramPost,
+    SessionLocal,
+    TestCreatorBrandPartnershipPost,
+)
 from pipeline.enrichment.geo_reach.geo_reach import (
     _clean_page_text,
     _fetch_page,
@@ -241,6 +246,9 @@ INSTAGRAM BUSINESS CATEGORY:
 RECENT INSTAGRAM POSTS:
 {posts}
 
+REVERSE ENGINEERING PARTNER CREATORS (creators with a confirmed paid partnership post for this brand):
+{re_creators}
+
 Return ONLY valid JSON with exactly these keys. Use JSON null (without quotes) for unknown gender, age, or latest product values, and integer numbers (without quotes) for ages and confidence scores. Do not include comments, markdown, or extra keys.
 
 {
@@ -430,6 +438,7 @@ def _audience_prompt(
     business_category: str,
     posts: list[dict],
     page_history: list[str],
+    re_creators: list[dict],
     current_page_url: str = "",
     current_page_text: str = "",
     final: bool = False,
@@ -464,7 +473,35 @@ def _audience_prompt(
         bio=bio,
         business_category_name=business_category,
         posts=json.dumps(posts, ensure_ascii=True, default=str),
+        re_creators=json.dumps(re_creators, ensure_ascii=True) if re_creators else "None",
     )
+
+
+def _reverse_engineering_creators(db, brand_raw_id: int) -> list[dict]:
+    """
+    Distinct creators linked to the brand through reverse-engineering
+    partnership posts (test_creator_brand_partnership_posts) with
+    sponsorship_confidence >= 90.
+    """
+    rows = (
+        db.query(
+            TestCreatorBrandPartnershipPost.creator_username,
+            TestCreatorBrandPartnershipPost.creator_name,
+        )
+        .filter(
+            TestCreatorBrandPartnershipPost.brand_raw_id == brand_raw_id,
+            TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
+        )
+        .all()
+    )
+    creators: dict[str, dict] = {}
+    for username, name in rows:
+        if not username or not username.strip():
+            continue
+        key = username.strip().lower()
+        if key not in creators or (name and not creators[key]["creator_name"]):
+            creators[key] = {"creator_username": username.strip(), "creator_name": name}
+    return list(creators.values())
 
 
 def main() -> int:
@@ -535,9 +572,17 @@ def main() -> int:
                 "Not available",
             )
             evidence = [
-                {"caption": post.caption, "hashtags": post.hashtags}
+                {
+                    "caption": post.caption,
+                    "hashtags": post.hashtags,
+                    "coauthor_producers": post.coauthor_producers or [],
+                    "mentions": post.mentions or [],
+                    "sponsors": post.sponsors or [],
+                    "tagged_users": post.tagged_users or [],
+                }
                 for post in brand_posts[:MAX_INSTAGRAM_POSTS_FOR_LLM]
             ]
+            re_creators = _reverse_engineering_creators(db, brand["brand_raw_id"])
             origin = _normalize_origin(brand["website"])
             queue = deque([origin])
             queued = {_url_key(origin)}
@@ -579,6 +624,7 @@ def main() -> int:
                         business_category,
                         evidence,
                         page_history,
+                        re_creators,
                         current_page_url=page_url,
                         current_page_text=page_text,
                     ),
@@ -627,6 +673,7 @@ def main() -> int:
                         business_category,
                         evidence,
                         page_history,
+                        re_creators,
                         final=True,
                     ),
                     context=f"brand website audience final brand_raw_id={brand['brand_raw_id']}",

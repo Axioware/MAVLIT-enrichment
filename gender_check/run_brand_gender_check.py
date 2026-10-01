@@ -13,7 +13,13 @@ from collections import defaultdict
 
 from sqlalchemy import text
 
-from pipeline.db import BrandRaw, InstagramPost, Prompt, SessionLocal
+from pipeline.db import (
+    BrandRaw,
+    InstagramPost,
+    Prompt,
+    SessionLocal,
+    TestCreatorBrandPartnershipPost,
+)
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import (
     BRAND_AUDIENCE_ANALYSIS_DEFAULT_PROMPT,
@@ -98,7 +104,38 @@ def _post_evidence(post: InstagramPost) -> dict:
     return {
         "caption": post.caption,
         "hashtags": post.hashtags,
+        "coauthor_producers": post.coauthor_producers or [],
+        "mentions": post.mentions or [],
+        "sponsors": post.sponsors or [],
+        "tagged_users": post.tagged_users or [],
     }
+
+
+def _reverse_engineering_creators(db, brand_raw_id: int) -> list[dict]:
+    """
+    Distinct creators linked to the brand through reverse-engineering
+    partnership posts (test_creator_brand_partnership_posts) with
+    sponsorship_confidence >= 90.
+    """
+    rows = (
+        db.query(
+            TestCreatorBrandPartnershipPost.creator_username,
+            TestCreatorBrandPartnershipPost.creator_name,
+        )
+        .filter(
+            TestCreatorBrandPartnershipPost.brand_raw_id == brand_raw_id,
+            TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
+        )
+        .all()
+    )
+    creators: dict[str, dict] = {}
+    for username, name in rows:
+        if not username or not username.strip():
+            continue
+        key = username.strip().lower()
+        if key not in creators or (name and not creators[key]["creator_name"]):
+            creators[key] = {"creator_username": username.strip(), "creator_name": name}
+    return list(creators.values())
 
 
 def _get_brand_audience_prompt(db) -> str:
@@ -299,12 +336,14 @@ def main() -> int:
                 "Not available",
             )
             post_evidence = [_post_evidence(post) for post in brand_posts]
+            re_creators = _reverse_engineering_creators(db, brand["brand_raw_id"])
             prompt = fill_template(
                 prompt_template,
                 brand_name=brand["brand_name"] or "Unknown",
                 bio=bio,
                 business_category_name=business_category_name,
                 posts=json.dumps(post_evidence, ensure_ascii=True, default=str),
+                re_creators=json.dumps(re_creators, ensure_ascii=True) if re_creators else "None",
             )
             result = call_gpt_json(
                 prompt,
