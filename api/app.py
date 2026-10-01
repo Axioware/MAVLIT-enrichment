@@ -1854,3 +1854,120 @@ def refresh_my_matches(
         return MatchesResponse(matches=matches, total=total, cached=False, computed_at=datetime.now(timezone.utc).isoformat())
     finally:
         db.close()
+
+
+class PartnershipPost(BaseModel):
+    source:                 str   # "instagram" (instagram_posts) or "reverse_engineering" (test_creator_brand_partnership_posts)
+    post_url:               str
+    post_date:              str | None = None   # YYYY-MM-DD
+    sponsorship_confidence: int
+    creators:               list[str]
+
+
+class BrandPartnershipPostsResponse(BaseModel):
+    brand_raw_id: int
+    brand_name:   str | None = None
+    posts:        list[PartnershipPost]
+
+
+_PARTNERSHIP_MIN_CONFIDENCE = 90           # test_creator_brand_partnership_posts (reverse engineering)
+_INSTAGRAM_PARTNERSHIP_MIN_CONFIDENCE = 98 # instagram_posts (direct brand scrape)
+
+
+def _post_date(timestamp: str | None) -> str | None:
+    """YYYY-MM-DD from an ISO-8601 post timestamp (None if missing/unparseable)."""
+    try:
+        return datetime.strptime((timestamp or "")[:10], "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        return None
+
+
+def _instagram_post_creators(post: InstagramPost) -> list[str]:
+    creators: list[str] = []
+    for field in ("coauthor_producers", "tagged_users", "sponsors", "mentions"):
+        value = getattr(post, field)
+        values = value if isinstance(value, list) else [value] if isinstance(value, str) else []
+        for item in values:
+            username = str(item).strip().lstrip("@")
+            if username and username.lower() not in {c.lower() for c in creators}:
+                creators.append(username)
+    return creators
+
+
+@app.get("/matches/me/brands/{brand_raw_id}/posts", response_model=BrandPartnershipPostsResponse)
+def get_brand_partnership_posts(
+    brand_raw_id: int,
+    current_user: CreatorProfile = Depends(get_completed_user),
+):
+    """
+    A matched brand's confirmed creator partnership posts, newest first:
+      - instagram_posts (direct brand-scrape flow): sponsorship confidence
+        >= 98, paid_partnership true, and at least one creator in
+        tagged_users / coauthor_producers / mentions / sponsors
+      - test_creator_brand_partnership_posts (reverse-engineering flow):
+        sponsorship confidence >= 90
+    Duplicate post URLs are kept once.
+    """
+    db = SessionLocal()
+    try:
+        brand = db.query(BrandRaw).filter(BrandRaw.id == brand_raw_id).first()
+        if brand is None:
+            raise HTTPException(status_code=404, detail="Brand not found")
+
+        # (full timestamp, post) — sorted on the full timestamp so same-day
+        # posts keep their order, then only the date is returned.
+        posts: list[tuple[str, PartnershipPost]] = []
+        seen_urls: set[str] = set()
+
+        instagram_rows = (
+            db.query(InstagramPost)
+            .filter(
+                InstagramPost.brand_raw_id == brand_raw_id,
+                InstagramPost.sponsorship_confidence >= _INSTAGRAM_PARTNERSHIP_MIN_CONFIDENCE,
+                InstagramPost.paid_partnership.is_(True),
+                InstagramPost.post_url.isnot(None),
+            )
+            .all()
+        )
+        for row in instagram_rows:
+            creators = _instagram_post_creators(row)
+            if not creators or row.post_url in seen_urls:
+                continue
+            seen_urls.add(row.post_url)
+            posts.append((row.timestamp or "", PartnershipPost(
+                source="instagram",
+                post_url=row.post_url,
+                post_date=_post_date(row.timestamp),
+                sponsorship_confidence=row.sponsorship_confidence,
+                creators=creators,
+            )))
+
+        re_rows = (
+            db.query(TestCreatorBrandPartnershipPost)
+            .filter(
+                TestCreatorBrandPartnershipPost.brand_raw_id == brand_raw_id,
+                TestCreatorBrandPartnershipPost.sponsorship_confidence >= _PARTNERSHIP_MIN_CONFIDENCE,
+            )
+            .all()
+        )
+        for row in re_rows:
+            if row.post_url in seen_urls:
+                continue
+            seen_urls.add(row.post_url)
+            posts.append((row.post_timestamp or "", PartnershipPost(
+                source="reverse_engineering",
+                post_url=row.post_url,
+                post_date=_post_date(row.post_timestamp),
+                sponsorship_confidence=row.sponsorship_confidence,
+                creators=[row.creator_username] if row.creator_username else [],
+            )))
+
+        # ISO-8601 timestamps sort chronologically as strings; posts with no time go last.
+        posts.sort(key=lambda item: item[0], reverse=True)
+        return BrandPartnershipPostsResponse(
+            brand_raw_id=brand.id,
+            brand_name=brand.name,
+            posts=[post for _, post in posts],
+        )
+    finally:
+        db.close()

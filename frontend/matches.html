@@ -167,8 +167,16 @@
     }
     .reasons li:first-child { border-top: none; }
 
-    .card.expandable .card-head .brand-name { cursor: pointer; }
-    .card.expandable .card-head .brand-name:hover { color: #38bdf8; }
+    button.brand-name {
+      appearance: none;
+      padding: 0;
+      background: none;
+      border: none;
+      font-family: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    button.brand-name:hover { color: #38bdf8; text-decoration: underline; }
     .reasons-toggle {
       appearance: none;
       margin-top: .5rem;
@@ -207,6 +215,72 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 
     #resultsSection { display: none; }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      background: rgb(2 6 23 / 70%);
+    }
+    .modal-overlay[hidden] { display: none; }
+    .modal {
+      width: min(560px, 100%);
+      max-height: min(80vh, 640px);
+      display: flex;
+      flex-direction: column;
+      background: #1e293b;
+      border: 1px solid #475569;
+      border-radius: 12px;
+      box-shadow: 0 16px 48px rgb(0 0 0 / 45%);
+    }
+    .modal-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid #334155;
+    }
+    .modal-title { font-size: 1.05rem; font-weight: 700; color: #f1f5f9; }
+    .modal-subtitle { font-size: .78rem; color: #64748b; margin-top: .2rem; }
+    .modal-close {
+      appearance: none;
+      background: none;
+      border: none;
+      color: #94a3b8;
+      font-size: 1.4rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .modal-close:hover { color: #f1f5f9; }
+    .modal-body { padding: .5rem 1.25rem 1rem; overflow-y: auto; }
+    .modal-body .loading-wrap { padding: 2rem 0; }
+    .modal-body .empty-msg, .modal-body .error-msg { padding: 2rem 0; }
+
+    .post-row {
+      padding: .75rem 0;
+      border-top: 1px solid #334155;
+    }
+    .post-row:first-child { border-top: none; }
+    .post-text {
+      font-size: .85rem;
+      color: #cbd5e1;
+      line-height: 1.5;
+    }
+    .post-text strong { color: #f1f5f9; }
+    .post-link {
+      color: #38bdf8;
+      font-size: .85rem;
+      font-weight: 600;
+      text-decoration: none;
+      word-break: break-all;
+    }
+    .post-link:hover { text-decoration: underline; }
+    .post-date { margin-top: .25rem; font-size: .75rem; color: #94a3b8; }
   </style>
 </head>
 <body>
@@ -236,6 +310,19 @@
       </div>
 
       <div id="matchList"></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="postsModal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="postsModalTitle">
+      <div class="modal-head">
+        <div>
+          <div class="modal-title" id="postsModalTitle"></div>
+          <div class="modal-subtitle">Creator partnership posts</div>
+        </div>
+        <button class="modal-close" type="button" aria-label="Close" onclick="closePostsModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="postsModalBody"></div>
     </div>
   </div>
 
@@ -271,7 +358,7 @@
   var currentMatches = [];
 
   // The API returns every applicable reason; cards show the top
-  // REASONS_PREVIEW and expand to the full list when the brand is clicked.
+  // REASONS_PREVIEW and expand to the full list via "Show all N reasons".
   // Expanded brand ids survive re-renders (niche filter / refresh).
   var REASONS_PREVIEW = 5;
   var expandedBrands = {};
@@ -287,6 +374,88 @@
     expandedBrands[brandId] = !expandedBrands[brandId];
     applyFilterAndRender();
   }
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // post_date is YYYY-MM-DD; format in UTC so it never shifts a day.
+  function formatPostDate(value) {
+    if (!value) return 'Unknown date';
+    var date = new Date(value + 'T00:00:00Z');
+    return isNaN(date.getTime()) ? value : date.toLocaleDateString(undefined, {
+      year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC'
+    });
+  }
+
+  // Clicking a brand opens a modal with its confirmed partnership posts.
+  // Responses are cached per brand for the life of the page.
+  var postsCache = {};
+  var openPostsBrandId = null;
+
+  function renderPosts(posts, brandName) {
+    var body = document.getElementById('postsModalBody');
+    if (!posts.length) {
+      body.innerHTML = '<p class="empty-msg">No confirmed creator partnership posts for this brand yet.</p>';
+      return;
+    }
+    body.innerHTML = posts.map(function(p) {
+      var creators = p.creators || [];
+      var creatorsHtml = creators.map(function(c) {
+        return '<strong>@' + escapeHtml(c) + '</strong>';
+      }).join(', ');
+      var creatorLabel = creators.length > 1 ? 'creators ' : 'a creator ';
+      return '<div class="post-row">' +
+        '<div class="post-text">' +
+          '<strong>' + escapeHtml(brandName) + '</strong> collab with ' +
+          (creatorsHtml ? creatorLabel + creatorsHtml : 'a creator') +
+          ' on post url: <a class="post-link" href="' + escapeHtml(p.post_url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(p.post_url) + '</a>' +
+        '</div>' +
+        '<div class="post-date">' + escapeHtml(formatPostDate(p.post_date)) + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function openPostsModal(brandId, brandName) {
+    openPostsBrandId = brandId;
+    document.getElementById('postsModalTitle').textContent = brandName;
+    document.getElementById('postsModal').hidden = false;
+    document.body.style.overflow = 'hidden';
+
+    if (postsCache[brandId]) {
+      renderPosts(postsCache[brandId], brandName);
+      return;
+    }
+    document.getElementById('postsModalBody').innerHTML = '<div class="loading-wrap"><div class="spinner"></div></div>';
+    fetch('/matches/me/brands/' + encodeURIComponent(brandId) + '/posts', { credentials: 'include' })
+      .then(function(r) {
+        if (!r.ok) return errorFromResponse(r, 'Failed to load posts');
+        return r.json();
+      })
+      .then(function(data) {
+        postsCache[brandId] = data.posts || [];
+        if (openPostsBrandId === brandId) renderPosts(postsCache[brandId], brandName);
+      })
+      .catch(function(err) {
+        if (openPostsBrandId !== brandId) return;
+        document.getElementById('postsModalBody').innerHTML =
+          '<p class="error-msg">' + escapeHtml(err.message || 'Failed to load posts') + '</p>';
+      });
+  }
+
+  function closePostsModal() {
+    openPostsBrandId = null;
+    document.getElementById('postsModal').hidden = true;
+    document.body.style.overflow = '';
+  }
+
+  document.getElementById('postsModal').addEventListener('click', function(e) {
+    if (e.target === this) closePostsModal();
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && openPostsBrandId !== null) closePostsModal();
+  });
 
   // Niche options come ONLY from the brands actually matched to this
   // creator (currentMatches), not the full site-wide niche vocabulary —
@@ -347,7 +516,7 @@
 
       card.innerHTML =
         '<div class="card-head">' +
-          '<span class="brand-name">' + m.brand_name.replace(/</g, '&lt;') + '</span>' +
+          '<button class="brand-name" type="button" title="View partnership posts">' + m.brand_name.replace(/</g, '&lt;') + '</button>' +
           '<span class="score-wrap">' +
             '<button class="score-badge" type="button" aria-label="Match score details" aria-describedby="score-tooltip-' + m.brand_raw_id + '">' + pct(m.total_score) + ' match</button>' +
             '<span class="score-tooltip" role="tooltip" id="score-tooltip-' + m.brand_raw_id + '">' +
@@ -359,10 +528,13 @@
         '<ul class="reasons">' + reasonsListHtml(reasons, expanded) + '</ul>' +
         toggleHtml;
 
+      card.querySelector('.brand-name').addEventListener('click', function() {
+        openPostsModal(m.brand_raw_id, m.brand_name);
+      });
       if (expandable) {
-        var toggle = function() { toggleReasons(m.brand_raw_id); };
-        card.querySelector('.brand-name').addEventListener('click', toggle);
-        card.querySelector('.reasons-toggle').addEventListener('click', toggle);
+        card.querySelector('.reasons-toggle').addEventListener('click', function() {
+          toggleReasons(m.brand_raw_id);
+        });
       }
 
       list.appendChild(card);
