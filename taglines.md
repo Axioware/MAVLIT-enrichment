@@ -141,7 +141,7 @@ Placeholders: `{brand}` = brand name, `{similarity}` = `80-90%` or `90-100%`, `{
 
 | Option | Condition | Tagline |
 |---|---|---|
-| a | User is male or female, and the brand's gender is `both` | {brand}'s target audience gender is same as yours. |
+| a | User is male or female, and the brand's gender is `both` | {brand}'s target audience gender ({male / female}, the user's gender) which is same as yours. |
 | b | The brand's gender is `male` or `female` and matches the user's gender, **or** the user has no male/female gender (none / company account), **or** no creator of the user's gender was found | {brand}'s target audience is {men / women / both men and women}. |
 | c | The brand's gender (`male` / `female`) does **not** match the user's, but at least one brand creator (Instagram collaborator or RE creator, sponsorship confidence ≥ 90) has the user's gender | {brand}'s target audience is {women / men}, but it has already backed {a male creator / N male creators} in {niche}, so the door is open for creators like you. |
 
@@ -151,11 +151,11 @@ Examples:
 
 | User | Brand target gender | Tagline |
 |---|---|---|
-| male | both | Delta Children's target audience gender is same as yours. |
+| male | both | Delta Children's target audience gender (male) which is same as yours. |
 | male | male | GHOST's target audience is men. |
 | male | female (no male creators) | Anrabess's target audience is women. |
 | male | female (has male creators) | Loops Lab's target audience is women, but it has already backed 2 male creators in Music, so the door is open for creators like you. |
-| female | both | Delta Children's target audience gender is same as yours. |
+| female | both | Delta Children's target audience gender (female) which is same as yours. |
 | none / company account | both | Delta Children's target audience is both men and women. |
 
 ---
@@ -178,7 +178,7 @@ Examples:
 
 **When:** `brands_raw.product_audience_gender` is `male`, `female` or `both`.
 
-> {brand}'s products are made for {men / women / both men and women}.
+> {brand}'s products are made for {male / female / both male and female}.
 
 ---
 

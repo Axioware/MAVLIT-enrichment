@@ -300,6 +300,12 @@ _AUDIENCE_GENDER_LABELS = {
     "both": "both men and women",
 }
 
+_PRODUCT_GENDER_LABELS = {
+    "male": "male",
+    "female": "female",
+    "both": "both male and female",
+}
+
 
 def _same_gender_partner_niches(gender: str, brand: BrandRaw, db) -> dict[str, str | None]:
     """
@@ -353,7 +359,7 @@ def _target_gender_reason(creator: CreatorProfile, brand: BrandRaw, db) -> str |
 
     creator_gender = (creator.gender or "").strip().lower()
     if creator_gender in ("male", "female") and brand_gender == "both":
-        return f"{brand.name}'s target audience gender is same as yours."
+        return f"{brand.name}'s target audience gender ({creator_gender}) which is same as yours."
     if db is None or creator_gender not in ("male", "female") or brand_gender == creator_gender:
         return line
 
@@ -390,7 +396,7 @@ def _brand_audience_reasons(creator: CreatorProfile, brand: BrandRaw, db=None) -
     elif max_age is not None:
         reasons.append((69.2, f"{brand.name} targets an audience aged up to {max_age}."))
 
-    product_gender = _AUDIENCE_GENDER_LABELS.get((brand.product_audience_gender or "").strip().lower())
+    product_gender = _PRODUCT_GENDER_LABELS.get((brand.product_audience_gender or "").strip().lower())
     if product_gender:
         reasons.append((69.1, f"{brand.name}'s products are made for {product_gender}."))
 
