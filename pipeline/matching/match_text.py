@@ -9,7 +9,8 @@ Returns one recent-sponsorship reason selected from the three sponsorship
 conditions, with the highest-scoring applicable condition taking precedence.
 """
 
-from datetime import datetime, timedelta, timezone
+from collections import Counter
+from datetime import datetime, timezone
 
 from sqlalchemy import func
 
@@ -27,8 +28,6 @@ from pipeline.db import (
     TestCreatorBrandPartnershipPost,
     YoutubeSponsorship,
 )
-
-_MAX_REASONS = 5
 
 
 def _similarity_match_label(similarity: float) -> str:
@@ -295,6 +294,106 @@ def _additional_priority_reasons(creator: CreatorProfile, brand: BrandRaw, db) -
     return reasons
 
 
+_AUDIENCE_GENDER_LABELS = {
+    "male": "men",
+    "female": "women",
+    "both": "both men and women",
+}
+
+
+def _same_gender_partner_niches(gender: str, brand: BrandRaw, db) -> dict[str, str | None]:
+    """
+    {username: niche} for the brand's creators whose gender matches `gender`,
+    using the same evidence as matcher.py's gender hard filter: non-commenter
+    collaborators on a sponsorship_confidence >= 90 brand post, or
+    contentcreatorRE creators on a sponsorship_confidence >= 90 test
+    partnership post.
+    """
+    collaborators = (
+        db.query(InstagramUser.username, InstagramUser.niche)
+        .join(BrandInstagramUser, BrandInstagramUser.instagram_user_id == InstagramUser.id)
+        .join(InstagramPost, InstagramPost.post_id == InstagramUser.post_id)
+        .filter(
+            BrandInstagramUser.brand_raw_id == brand.id,
+            InstagramPost.brand_raw_id == brand.id,
+            InstagramPost.sponsorship_confidence >= 90,
+            InstagramUser.user_type != "commenter",
+            func.lower(func.trim(InstagramUser.gender)) == gender,
+        )
+        .all()
+    )
+    re_creators = (
+        db.query(InstagramUser.username, InstagramUser.niche)
+        .join(
+            TestCreatorBrandPartnershipPost,
+            func.lower(TestCreatorBrandPartnershipPost.creator_username) == func.lower(InstagramUser.username),
+        )
+        .filter(
+            TestCreatorBrandPartnershipPost.brand_raw_id == brand.id,
+            TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
+            InstagramUser.user_type == "contentcreatorRE",
+            func.lower(func.trim(InstagramUser.gender)) == gender,
+        )
+        .all()
+    )
+    niches: dict[str, str | None] = {}
+    for username, niche in [*collaborators, *re_creators]:
+        key = username.strip().lower()
+        if not niches.get(key):
+            niches[key] = niche.strip() if niche and niche.strip() else None
+    return niches
+
+
+def _target_gender_reason(creator: CreatorProfile, brand: BrandRaw, db) -> str | None:
+    brand_gender = (brand.target_audience_gender or "").strip().lower()
+    target_label = _AUDIENCE_GENDER_LABELS.get(brand_gender)
+    if not target_label:
+        return None
+    line = f"{brand.name}'s target audience is {target_label}."
+
+    creator_gender = (creator.gender or "").strip().lower()
+    if db is None or creator_gender not in ("male", "female") or brand_gender in (creator_gender, "both"):
+        return line
+
+    partners = _same_gender_partner_niches(creator_gender, brand, db)
+    if not partners:
+        return line
+
+    niche_counts = Counter(niche for niche in partners.values() if niche)
+    niche_text = f" in {niche_counts.most_common(1)[0][0]}" if niche_counts else ""
+    creators_text = f"a {creator_gender} creator" if len(partners) == 1 else f"{len(partners)} {creator_gender} creators"
+    return (
+        f"{brand.name}'s target audience is {target_label}, but it has already backed "
+        f"{creators_text}{niche_text}, so the door is open for creators like you."
+    )
+
+
+def _brand_audience_reasons(creator: CreatorProfile, brand: BrandRaw, db=None) -> list[tuple[int, str]]:
+    """Pitch lines from brands_raw's audience/product columns — each one only when its column is filled."""
+    reasons: list[tuple[int, str]] = []
+
+    latest_product = (brand.latest_product or "").strip()
+    if latest_product:
+        reasons.append((29, f"{brand.name}'s latest product is {latest_product}, a timely hook for your pitch."))
+
+    target_gender_reason = _target_gender_reason(creator, brand, db)
+    if target_gender_reason:
+        reasons.append((28, target_gender_reason))
+
+    min_age, max_age = brand.target_audience_min_age, brand.target_audience_max_age
+    if min_age is not None and max_age is not None:
+        reasons.append((27, f"{brand.name} targets an audience aged {min_age}-{max_age}."))
+    elif min_age is not None:
+        reasons.append((27, f"{brand.name} targets an audience aged {min_age}+."))
+    elif max_age is not None:
+        reasons.append((27, f"{brand.name} targets an audience aged up to {max_age}."))
+
+    product_gender = _AUDIENCE_GENDER_LABELS.get((brand.product_audience_gender or "").strip().lower())
+    if product_gender:
+        reasons.append((26, f"{brand.name}'s products are made for {product_gender}."))
+
+    return reasons
+
 
 def _similar_partner_usernames(creator: CreatorProfile, brand: BrandRaw, db) -> dict[str, float]:
     if creator.embedding is None:
@@ -400,13 +499,15 @@ def generate_match_reasons(
     brand: BrandRaw,
     profile: BrandProfile | None,
     dimensions: dict,
-    max_reasons: int = _MAX_REASONS,
+    max_reasons: int | None = None,
     db=None,
 ) -> list[str]:
     """
     Returns one winner for each exclusive group and each applicable separate
     signal, ordered by descending requested score.
     `dimensions` is the score_match()["dimensions"] dict for this pair.
+    Returns every applicable reason unless `max_reasons` is given — the
+    matches page shows the top 5 and expands to the rest on click.
     """
     reasons: list[tuple[int, str]] = []
     bridge_reason = _brand_niche_bridge_reason(creator, brand, db)
@@ -418,5 +519,6 @@ def generate_match_reasons(
         recent_score = max(score for score, text in recent_candidates if text == recent_reason)
         reasons.append((recent_score, recent_reason))
     reasons.extend(_additional_priority_reasons(creator, brand, db))
+    reasons.extend(_brand_audience_reasons(creator, brand, db))
     reasons.sort(key=lambda reason: reason[0], reverse=True)
     return [text for _, text in reasons[:max_reasons]]

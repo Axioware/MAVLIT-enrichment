@@ -50,6 +50,19 @@ Runs on every page load; designed to be cheap:
            This is a hard yes/no check, separate from and stricter than the
            fuzzy niche_match scoring dimension in Step C, which still runs
            on whatever niche overlap exists for ranking.
+
+           Gender filter, gated on the creator's gender being male or
+           female (skipped otherwise). The brand must pass ANY of:
+             - brands_raw.target_audience_gender is the creator's gender
+               or "both"
+             - at least one confirmed Instagram collaborator (non-
+               commenter) of the creator's gender, on a post with
+               sponsorship_confidence >= 90
+             - at least one reverse-engineered creator (instagram_users,
+               user_type "contentcreatorRE") of the creator's gender, on a
+               test partnership post with sponsorship_confidence >= 90
+           e.g. a male creator never sees a female-audience brand unless
+           that brand has sponsored at least one male creator.
   Step B — Semantic shortlist: a single indexed pgvector cosine-distance
            query against the creator's embedding narrows the (already
            hard-filtered) pool to the top _SHORTLIST_SIZE candidates —
@@ -78,7 +91,6 @@ from pipeline.db import (
     BrandProfile,
     BrandRaw,
     ContentCreatorRE,
-    CreatorNiche,
     CreatorProfile,
     InstagramPost,
     InstagramUser,
@@ -92,7 +104,7 @@ logger = logging.getLogger(__name__)
 _SHORTLIST_SIZE = 100
 _ACTIVITY_FLOOR = 0   # brands with a CONFIRMED score at or below this are dropped; unscored (NULL) brands are kept
 _FOLLOWER_TOLERANCE = 2   # +/-200% buffer beyond the brand's confirmed collaborator follower range
-_CREATOR_SIMILARITY_FLOOR = 0.60
+
 
 
 def get_matches(
@@ -154,13 +166,16 @@ def get_matches(
     # YouTube follower-range fit, gated on primary_platform == "youtube" —
     # same shape as the Instagram check above, against youtube_lowest/
     # youtube_highest (already a min/max over every confirmed collaborator).
-    if creator.primary_platform and creator.primary_platform.strip().lower() == "youtube":
-        if creator.youtube_followers is not None:
-            query = query.filter(
-                BrandProfile.youtube_lowest.isnot(None), BrandProfile.youtube_highest.isnot(None),
-                creator.youtube_followers >= BrandProfile.youtube_lowest * (1 - _FOLLOWER_TOLERANCE),
-                creator.youtube_followers <= BrandProfile.youtube_highest * (1 + _FOLLOWER_TOLERANCE),
-            )
+    if (
+        creator.primary_platform
+        and creator.primary_platform.strip().lower() == "youtube"
+        and creator.youtube_followers is not None
+    ):
+        query = query.filter(
+            BrandProfile.youtube_lowest.isnot(None), BrandProfile.youtube_highest.isnot(None),
+            creator.youtube_followers >= BrandProfile.youtube_lowest * (1 - _FOLLOWER_TOLERANCE),
+            creator.youtube_followers <= BrandProfile.youtube_highest * (1 + _FOLLOWER_TOLERANCE),
+        )
 
     # Keep brands eligible regardless of partner-creator embedding similarity.
     # This was acting as a hard exclusion and could remove perfectly relevant
@@ -211,6 +226,42 @@ def get_matches(
 
         query = query.filter(or_(*match_clauses))
 
+    # Gender hard filter — only applied when the creator's gender is male or
+    # female. A brand passes if ANY of:
+    #   - brands_raw.target_audience_gender is the creator's gender or "both"
+    #   - at least one of the brand's Instagram collaborators (non-commenter)
+    #     has the creator's gender, via a sponsorship_confidence >= 90 post
+    #   - at least one reverse-engineered creator (instagram_users row with
+    #     user_type "contentcreatorRE") has the creator's gender, via a
+    #     sponsorship_confidence >= 90 test partnership post
+    creator_gender = (creator.gender or "").strip().lower()
+    if creator_gender in ("male", "female"):
+        audience_gender_match = func.lower(func.trim(BrandRaw.target_audience_gender)).in_((creator_gender, "both"))
+        collaborator_gender_match = BrandRaw.id.in_(
+            db.query(BrandInstagramUser.brand_raw_id)
+            .join(InstagramUser, InstagramUser.id == BrandInstagramUser.instagram_user_id)
+            .join(InstagramPost, InstagramPost.post_id == InstagramUser.post_id)
+            .filter(
+                InstagramUser.user_type != "commenter",
+                func.lower(func.trim(InstagramUser.gender)) == creator_gender,
+                InstagramPost.brand_raw_id == BrandInstagramUser.brand_raw_id,
+                InstagramPost.sponsorship_confidence >= 90,
+            )
+        )
+        re_creator_gender_match = BrandRaw.id.in_(
+            db.query(TestCreatorBrandPartnershipPost.brand_raw_id)
+            .join(
+                InstagramUser,
+                func.lower(InstagramUser.username) == func.lower(TestCreatorBrandPartnershipPost.creator_username),
+            )
+            .filter(
+                InstagramUser.user_type == "contentcreatorRE",
+                func.lower(func.trim(InstagramUser.gender)) == creator_gender,
+                TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
+            )
+        )
+        query = query.filter(or_(audience_gender_match, collaborator_gender_match, re_creator_gender_match))
+
     total = query.count()
 
     # Step B — semantic shortlist (single indexed pgvector query)
@@ -236,7 +287,7 @@ def get_matches(
         })
 
     results.sort(key=lambda r: r["total_score"], reverse=True)
-    logger.info("length========", len(results))
+    logger.info("length======== %d", len(results))
     print("length========", len(results))
 
     logger.info(
