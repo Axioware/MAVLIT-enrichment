@@ -1,15 +1,18 @@
 """TEMPORARY backfill script — delete after use.
 
-For each content_creator_re creator: scrape their latest 40 posts (Apify) and
-fill instagram_users.post_collaborators (tagged users, mentions, co-authors,
-sponsors) on the creator's posts that are already stored there.
+For each content_creator_re creator: scrape their latest 40 posts (Apify), then
+  1. fill instagram_users.post_collaborators (tagged users, mentions,
+     co-authors, sponsors) on the creator's posts that are already stored there;
+  2. run the same brand check as content_creator_re.py on every scraped post
+     (brand_check LLM prompt) - confirmed brands get a brands_raw row if new,
+     their referral flag, a test_creator_brand_partnership_posts evidence row,
+     and a brand_instagram_users link to the creator.
 
-Unlike content_creator_re.py this does NOTHING else:
-  - no LLM calls (no demographics, no brand check)
-  - no brand / partnership / brand-link changes
-  - no commenter scraping
-  - no new instagram_users rows (posts not already stored are only counted)
-  - no is_scraped changes
+Unlike content_creator_re.py it does NOT:
+  - scrape or store commenters
+  - re-classify demographics
+  - insert new instagram_users rows (posts not already stored are only counted)
+  - change is_scraped
 
 Defaults to the 22 Music creators that have a sponsorship_confidence >= 90
 partnership with a refferls=false brand.
@@ -26,8 +29,25 @@ import time
 
 from sqlalchemy import func, text
 
-from pipeline.db import ContentCreatorRE, InstagramUser, SessionLocal
-from pipeline.enrichment.instagram_users import _post_collaborators_str, _scrape_posts
+from pipeline.db import (
+    ContentCreatorRE,
+    InstagramUser,
+    SessionLocal,
+    TestCreatorBrandPartnershipPost,
+)
+from pipeline.enrichment.instagram_users import (
+    _link_to_brand,
+    _post_collaborators_str,
+    _profile_from_posts,
+    _scrape_posts,
+)
+from pipeline.enrichment_re.content_creator_re import (
+    _check_post_for_brands,
+    _ensure_partnership_evidence_table,
+    _get_or_create_brand_id,
+    _mark_brand_referral,
+    _record_llm_partnership_post,
+)
 from pipeline.helpers.social import normalize_handle
 
 MUSIC_CREATOR_IDS = [
@@ -42,7 +62,8 @@ logger = logging.getLogger(__name__)
 def backfill_creator(db, creator: ContentCreatorRE, dry_run: bool) -> dict:
     username = normalize_handle(creator.username or "")
     stats = {"id": creator.id, "username": username, "scraped": 0, "updated": 0,
-             "with_collaborators": 0, "not_stored": 0, "status": "ok"}
+             "with_collaborators": 0, "not_stored": 0, "brands": 0, "new_brands": [],
+             "status": "ok"}
     if not username:
         stats["status"] = "no username"
         return stats
@@ -57,6 +78,7 @@ def backfill_creator(db, creator: ContentCreatorRE, dry_run: bool) -> dict:
         .all()
     )
     rows_by_post_id = {row.post_id: row for row in stored}
+    brands_before = _partner_brand_ids(db, creator.id)
     db.commit()  # don't hold locks during the slow Apify scrape
 
     if dry_run:
@@ -83,7 +105,51 @@ def backfill_creator(db, creator: ContentCreatorRE, dry_run: bool) -> dict:
         if collaborators:
             stats["with_collaborators"] += 1
     db.commit()
+
+    # Brand check - same steps as content_creator_re.py, minus commenters.
+    full_name = _profile_from_posts(raw_posts).get("fullName")
+    confirmed_brand_ids: set[int] = set()
+    for item in raw_posts:
+        db.commit()  # release locks before the LLM call
+        brand_matches = _check_post_for_brands(db, username, full_name, item)
+        if brand_matches:
+            time.sleep(0.3)
+        for brand_match in brand_matches:
+            brand_username = brand_match["username"]
+            brand_id = _get_or_create_brand_id(db, brand_username)
+            if not brand_id:
+                continue
+            _mark_brand_referral(db, brand_id, brand_match.get("has_referral_code", False))
+            _record_llm_partnership_post(
+                db,
+                brand_id=brand_id,
+                brand_username=brand_username,
+                creator_row_id=creator.id,
+                creator_username=username,
+                creator_name=full_name,
+                item=item,
+            )
+            confirmed_brand_ids.add(brand_id)
+
+    for brand_id in confirmed_brand_ids:
+        _link_to_brand(db, brand_id, username)
+    db.commit()
+
+    stats["brands"] = len(confirmed_brand_ids)
+    stats["new_brands"] = sorted(_partner_brand_ids(db, creator.id) - brands_before)
+    db.commit()
     return stats
+
+
+def _partner_brand_ids(db, creator_id: int) -> set[int]:
+    """brands_raw ids this creator already has partnership evidence for."""
+    return {
+        brand_id for (brand_id,) in
+        db.query(TestCreatorBrandPartnershipPost.brand_raw_id)
+        .filter(TestCreatorBrandPartnershipPost.content_creator_re_id == creator_id)
+        .distinct()
+        .all()
+    }
 
 
 def main() -> int:
@@ -99,6 +165,7 @@ def main() -> int:
     args = parser.parse_args()
     creator_ids = args.creator_ids or MUSIC_CREATOR_IDS
 
+    _ensure_partnership_evidence_table()
     db = SessionLocal()
     try:
         db.execute(text("ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS post_collaborators TEXT"))
@@ -124,12 +191,15 @@ def main() -> int:
                 logger.exception("Creator id=%s failed", creator.id)
                 db.rollback()
                 stats = {"id": creator.id, "username": creator.username, "scraped": 0, "updated": 0,
-                         "with_collaborators": 0, "not_stored": 0, "status": "error"}
+                         "with_collaborators": 0, "not_stored": 0, "brands": 0, "new_brands": [],
+                         "status": "error"}
             results.append(stats)
             logger.info(
-                "[%d/%d] id=%s @%s: scraped=%d updated=%d with_collaborators=%d not_stored=%d (%s)",
+                "[%d/%d] id=%s @%s: scraped=%d updated=%d with_collaborators=%d not_stored=%d "
+                "brands=%d new_brands=%s (%s)",
                 index, len(creators), stats["id"], stats["username"], stats["scraped"],
-                stats["updated"], stats["with_collaborators"], stats["not_stored"], stats["status"],
+                stats["updated"], stats["with_collaborators"], stats["not_stored"],
+                stats["brands"], stats["new_brands"], stats["status"],
             )
             if not args.dry_run:
                 time.sleep(1)
@@ -137,8 +207,11 @@ def main() -> int:
         print("\n===== POST_COLLABORATORS BACKFILL =====")
         for s in results:
             print(f"id={s['id']:>4} @{s['username']}: updated {s['updated']} post(s), "
-                  f"{s['with_collaborators']} with collaborators, {s['not_stored']} not stored ({s['status']})")
+                  f"{s['with_collaborators']} with collaborators, {s['not_stored']} not stored, "
+                  f"{s['brands']} brand(s) confirmed, new brand ids {s['new_brands']} ({s['status']})")
+        all_new = sorted({b for s in results for b in s["new_brands"]})
         print(f"TOTAL updated: {sum(s['updated'] for s in results)} post(s)")
+        print(f"TOTAL new partner brands: {len(all_new)} {all_new}")
         return 0
     finally:
         db.close()
