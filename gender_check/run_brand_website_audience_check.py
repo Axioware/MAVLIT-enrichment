@@ -15,6 +15,7 @@ import json
 import logging
 import math
 from collections import defaultdict, deque
+from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
@@ -148,23 +149,48 @@ Examples:
 
 IMPORTANT RULES
 
-Use evidence in this priority order:
+Use evidence in this priority order.
 
-1. Website text (highest priority)
-2. Brand description
-3. Instagram bio
-4. Instagram captions and hashtags
+For TARGET audience (gender and age) - who the brand features and speaks to in its marketing:
+
+1. Instagram captions and hashtags, including the partner creators in each post (highest priority)
+2. Instagram bio
+3. Website text
+4. Brand description
+
+For PRODUCT audience (gender and age):
+
+1. Instagram captions and hashtags (highest priority)
+2. Instagram bio
+3. Website text
+4. Brand description
 
 Latest product
 
-Identify one product that appears to be the brand's newest or latest product launch,
-using explicit launch/new-arrival/recent-release evidence on the website first, then
-Instagram evidence. Return the product's name only when the evidence supports it.
-Do not guess from generic product listings or assume the newest item is the latest
-launch. If no latest product can be identified, return null and confidence 0.
-Give latest_product_confidence as a whole-number score from 0 to 100 for the
-evidence that the named item is the latest product. If latest_product is null,
-latest_product_confidence must be 0.
+Today's date is {today}. Each Instagram post includes its timestamp.
+
+Return a latest_product ONLY if one product meets BOTH conditions:
+
+1. Recently launched: there is explicit launch evidence such as "new", "introducing",
+   "just launched", "just dropped", "now available", "new arrival" or a launch campaign,
+   and that evidence is recent (within roughly the last 6 months of today's date,
+   judged from the post timestamps).
+2. Actively marketed: the brand promotes it repeatedly - it appears in at least 2 of the
+   Instagram posts, or in at least 1 Instagram post AND as a featured item on the website
+   (homepage hero, banner, "new" section).
+
+Do NOT return:
+- a product that is only listed in a catalog, shop page or menu without launch evidence
+- a product mentioned once in passing
+- a product launched long ago, even if it is still promoted
+- a guess based on which item looks newest
+
+If no product meets both conditions, return null and confidence 0. It is better to return
+null than a weak guess.
+
+Give latest_product_confidence as a whole-number score from 0 to 100 for how strongly the
+evidence shows the product is both recently launched and actively marketed. If
+latest_product is null, latest_product_confidence must be 0.
 
 On the website, prioritize evidence from product, shop, and collection pages. Gender- or age-specific sections can be linked by paths such as /collections/mens, /collections/womens, /shop/men, /collections/beard-care, /collections/makeup, or /collections/mens-grooming. Use both the page URL/category and its actual contents; do not infer a demographic from a path alone.
 
@@ -196,8 +222,14 @@ The creators a brand partners with show who its marketing is aimed at. Use them 
 
 Judge each creator's gender from their username, display name and the post caption. Skip creators whose gender you cannot tell, and accounts that are brands or businesses rather than people.
 
-- Return "both" for target_audience_gender only if you found BOTH male and female partner creators.
-- If 80% or more of the partner creators whose gender you can tell are one gender, return that gender, not "both" (e.g. 4 female + 1 male = 80% female -> "female"; 3 female + 2 male -> "both").
+- Return "both" for target_audience_gender only if you found BOTH male and female partner creators AND the split is balanced: between 50/50 and 70/30.
+- If MORE than 70% of the partner creators whose gender you can tell are one gender, return that gender, not "both". Examples:
+  - 5 female + 5 male (50/50) -> "both"
+  - 7 female + 3 male (70/30) -> "both"
+  - 3 female + 1 male (75/25) -> "female"
+  - 4 female + 1 male (80/20) -> "female"
+  - 2 female + 0 male -> "female"
+- Apply the same ratio rule to any other evidence of who the marketing features, such as the people shown or addressed in Instagram captions or on the website: if one gender makes up more than 70% of it, return that gender, not "both".
 - This matters most for niches that look like they target both genders, such as baby, parenting and family brands: words like "parents" or "families" on the website are not enough for "both" on their own.
 
 Age Classification
@@ -495,6 +527,7 @@ def _audience_prompt(
         business_category_name=business_category,
         posts=json.dumps(posts, ensure_ascii=True, default=str),
         re_creators=json.dumps(re_creators, ensure_ascii=True) if re_creators else "None",
+        today=datetime.now(timezone.utc).date().isoformat(),
     )
 
 
@@ -601,6 +634,7 @@ def main() -> int:
             )
             evidence = [
                 {
+                    "timestamp": post.timestamp,
                     "caption": post.caption,
                     "hashtags": post.hashtags,
                     "coauthor_producers": post.coauthor_producers or [],
@@ -707,7 +741,14 @@ def main() -> int:
                     context=f"brand website audience final brand_raw_id={brand['brand_raw_id']}",
                     model=LLM_MODEL,
                 )
-                metrics = _merge_metrics(metrics, _metrics(final_result))
+                final_metrics = _metrics(final_result)
+                metrics = _merge_metrics(metrics, final_metrics)
+                # The final pass has seen every page, so it decides the latest
+                # product — including clearing it to null when no product is
+                # both recently launched and actively marketed.
+                if final_result:
+                    metrics["latest_product"] = final_metrics["latest_product"]
+                    metrics["latest_product_confidence"] = final_metrics["latest_product_confidence"]
 
             if metrics is None:
                 logger.warning("No audience estimates returned for brand_raw_id=%s; skipping save.", brand["brand_raw_id"])
