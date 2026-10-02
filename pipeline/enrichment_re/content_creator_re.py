@@ -362,6 +362,12 @@ def enrich_content_creator_re(
 
         logger.info("Content creator RE: scraping @%s", username)
 
+        # End any open read transaction before slow Apify/LLM work — locks held
+        # across it block every ALTER TABLE (API startup migrations, other
+        # scripts) and everything queued behind them. Loaded ORM objects stay
+        # usable (expire_on_commit=False).
+        db.commit()
+
         #  Scrape top 5 posts (addParentData gets profile info too)
         raw_posts = _scrape_posts(username, n=40)
         if raw_posts is None:
@@ -413,6 +419,7 @@ def enrich_content_creator_re(
         confirmed_brand_ids: set[int] = set()
         branded_posts: list[tuple[dict, set[int]]] = []
         for item in raw_posts:
+            db.commit()  # release brands_raw locks from the previous post before the LLM call
             brand_matches = _check_post_for_brands(db, username, profile.get("fullName"), item)
             if brand_matches:
                 time.sleep(0.3)
@@ -473,6 +480,7 @@ def enrich_content_creator_re(
             for commenter in new_commenters:
                 logger.info("Content creator RE:   commenter @%s", commenter)
 
+                db.commit()  # release locks before the slow Apify scrape
                 c_posts = _scrape_posts(commenter, n=1)
                 if c_posts is None:
                     logger.warning(

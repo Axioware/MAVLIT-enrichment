@@ -296,6 +296,11 @@ def main() -> int:
         posts_by_brand = defaultdict(list)
         for post in posts:
             posts_by_brand[post.brand_raw_id].append(post)
+        # End the read transaction now: brands_raw/instagram_posts locks held
+        # across the slow scraping/LLM work below block every ALTER TABLE
+        # (API startup migrations, other scripts) and everything queued behind
+        # them. Loaded objects stay usable (expire_on_commit=False).
+        db.commit()
 
         eligible = [
             (brand, posts_by_brand[brand["brand_raw_id"]])
@@ -337,6 +342,7 @@ def main() -> int:
             )
             post_evidence = [_post_evidence(post) for post in brand_posts]
             re_creators = _reverse_engineering_creators(db, brand["brand_raw_id"])
+            db.commit()  # don't hold locks during the slow scraping/LLM calls below
             prompt = fill_template(
                 prompt_template,
                 brand_name=brand["brand_name"] or "Unknown",
