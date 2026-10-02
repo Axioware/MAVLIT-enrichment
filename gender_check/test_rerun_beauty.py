@@ -17,6 +17,7 @@ Run from the project root:
 """
 
 import argparse
+import logging
 import sys
 
 from sqlalchemy import text
@@ -69,6 +70,17 @@ BEAUTY_BRAND_IDS_QUERY = text("""
     ORDER BY name
 """)
 
+TARGET_AUDIENCE_QUERY = text("""
+    SELECT
+      target_audience_gender AS gender,
+      target_audience_gender_confidence AS confidence,
+      audience_analysis_explanation AS explanation
+    FROM brands_raw
+    WHERE id = :brand_id
+""")
+
+logger = logging.getLogger(__name__)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="TEMP: re-run the website audience check for Beauty-niche brands.")
@@ -92,14 +104,48 @@ def main() -> int:
     for row in rows:
         print(f"  {row['brand_raw_id']:>5}  {row['name']}")
 
-    # Hand off to the real script with --force so already-analysed brands are re-run.
-    forwarded = ["--force"]
-    for row in rows:
-        forwarded += ["--brand-id", str(row["brand_raw_id"])]
     if args.dry_run:
-        forwarded.append("--dry-run")
-    sys.argv = [website_check.__file__, *forwarded]
-    return website_check.main()
+        sys.argv = [website_check.__file__, "--force", "--dry-run"]
+        for row in rows:
+            sys.argv += ["--brand-id", str(row["brand_raw_id"])]
+        return website_check.main()
+
+    # One brand at a time so the previous -> now line is logged as soon as
+    # each brand finishes. --force re-runs brands that already have results.
+    summary = []
+    for index, row in enumerate(rows, start=1):
+        brand_id = row["brand_raw_id"]
+        before = _target_audience(brand_id)
+        sys.argv = [website_check.__file__, "--force", "--brand-id", str(brand_id)]
+        website_check.main()
+        after = _target_audience(brand_id)
+
+        line = _compare_line(row["name"], brand_id, before, after)
+        summary.append(line)
+        logger.info("[%d/%d] %s", index, len(rows), line)
+
+    print("\n===== TARGET AUDIENCE: PREVIOUS -> NOW =====")
+    for line in summary:
+        print(line)
+    return 0
+
+
+def _target_audience(brand_id: int) -> dict:
+    db = SessionLocal()
+    try:
+        return dict(db.execute(TARGET_AUDIENCE_QUERY, {"brand_id": brand_id}).mappings().one())
+    finally:
+        db.close()
+
+
+def _compare_line(name: str, brand_id: int, before: dict, after: dict) -> str:
+    previous = f"{before['gender'] or 'none'} ({before['confidence'] or 0})"
+    # Unchanged explanation means the brand was skipped (e.g. its website did not load).
+    if after["explanation"] == before["explanation"]:
+        return f"{name} ({brand_id}): previous target audience {previous}, now NOT RE-ANALYSED (skipped)"
+    now = f"{after['gender'] or 'none'} ({after['confidence'] or 0})"
+    changed = "CHANGED" if (before["gender"] or "") != (after["gender"] or "") else "same"
+    return f"{name} ({brand_id}): previous target audience {previous}, now {now}  [{changed}]"
 
 
 if __name__ == "__main__":
