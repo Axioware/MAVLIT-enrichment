@@ -3,8 +3,11 @@
 Run from the project root:
     python -m gender_check.run_brand_website_audience_check --limit 1
     python -m gender_check.run_brand_website_audience_check --brand-id 2151
+    python -m gender_check.run_brand_website_audience_check --brand-id 2151 --force
 
 Use --dry-run to list qualifying brands without scraping or calling the LLM.
+Use --force (only with --brand-id) to re-analyse brands that already have
+audience results; their existing values are overwritten.
 """
 
 import argparse
@@ -49,7 +52,20 @@ _AUDIENCE_LINK_TERMS = (
     "junior", "age", "customer", "audience", "about", "our-story",
 )
 
-BRAND_QUERY = text("""
+_UNANALYSED_FILTER = """
+        AND br.target_audience_gender IS NULL
+        AND br.target_audience_gender_confidence IS NULL
+        AND br.target_audience_min_age IS NULL
+        AND br.target_audience_max_age IS NULL
+        AND br.target_audience_age_confidence IS NULL
+        AND br.product_audience_gender IS NULL
+        AND br.product_audience_gender_confidence IS NULL
+        AND br.product_audience_min_age IS NULL
+        AND br.product_audience_max_age IS NULL
+        AND br.product_audience_age_confidence IS NULL
+        AND br.audience_analysis_explanation IS NULL"""
+
+_BRAND_QUERY_SQL = """
     WITH best_per_brand AS (
       SELECT DISTINCT ON (tcbp.brand_raw_id)
         ccr.username AS creator_username,
@@ -70,18 +86,7 @@ BRAND_QUERY = text("""
       WHERE ccr.id BETWEEN 1 AND 208
         AND ccr.niche IN ('Beauty', 'Music', 'Fitness', 'Health')
         AND tcbp.sponsorship_confidence >= 90
-        AND br.refferls = false
-        AND br.target_audience_gender IS NULL
-        AND br.target_audience_gender_confidence IS NULL
-        AND br.target_audience_min_age IS NULL
-        AND br.target_audience_max_age IS NULL
-        AND br.target_audience_age_confidence IS NULL
-        AND br.product_audience_gender IS NULL
-        AND br.product_audience_gender_confidence IS NULL
-        AND br.product_audience_min_age IS NULL
-        AND br.product_audience_max_age IS NULL
-        AND br.product_audience_age_confidence IS NULL
-        AND br.audience_analysis_explanation IS NULL
+        AND br.refferls = false{unanalysed_filter}
         AND (
           br.geo_reach_score BETWEEN 0 AND 40
           OR br.geo_reach_score IS NULL
@@ -112,7 +117,12 @@ BRAND_QUERY = text("""
       AND website IS NOT NULL
       AND description IS NOT NULL
     ORDER BY brand_name
-""")
+"""
+
+# Default: only brands with no audience results yet. --force drops that
+# condition so already-analysed brands can be re-run.
+BRAND_QUERY = text(_BRAND_QUERY_SQL.replace("{unanalysed_filter}", _UNANALYSED_FILTER))
+FORCE_BRAND_QUERY = text(_BRAND_QUERY_SQL.replace("{unanalysed_filter}", ""))
 
 AUDIENCE_PROMPT = """
 You are analyzing a brand to determine its audience demographics.
@@ -127,7 +137,7 @@ Do not assume that the buyer and the product user are the same person.
 
 Examples:
 - Baby products:
-  - target_audience = female or both (parents/caregivers seeing the marketing)
+  - target_audience = decide from the partner creators (see "Partner creators" below)
   - product_audience = both (babies)
 - Men's grooming:
   - target_audience = male
@@ -163,7 +173,6 @@ Do NOT determine demographics from:
 - Founder gender
 - Models appearing in photos
 - Stereotypes about industries
-- Assumptions about creators who partnered with the brand
 
 Gender Classification
 
@@ -178,6 +187,18 @@ Use "both" only when there is positive evidence the brand actively serves both g
 If evidence is weak, conflicting, or absent:
 - return null
 - lower confidence
+
+Partner creators (target audience gender)
+
+The creators a brand partners with show who its marketing is aimed at. Use them as evidence for target_audience_gender:
+- the creators in each Instagram post's coauthor_producers, sponsors, tagged_users and mentions
+- the REVERSE ENGINEERING PARTNER CREATORS list
+
+Judge each creator's gender from their username, display name and the post caption. Skip creators whose gender you cannot tell, and accounts that are brands or businesses rather than people.
+
+- Return "both" for target_audience_gender only if you found BOTH male and female partner creators.
+- If 80% or more of the partner creators whose gender you can tell are one gender, return that gender, not "both" (e.g. 4 female + 1 male = 80% female -> "female"; 3 female + 2 male -> "both").
+- This matters most for niches that look like they target both genders, such as baby, parenting and family brands: words like "parents" or "families" on the website are not enough for "both" on their own.
 
 Age Classification
 
@@ -515,14 +536,21 @@ def main() -> int:
         dest="brand_ids",
         help="Process one brand_raw ID. Repeat this option to process multiple IDs.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="With --brand-id: re-analyse the brand even if it already has audience results (overwrites them).",
+    )
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be at least 1")
+    if args.force and not args.brand_ids:
+        parser.error("--force requires --brand-id (it re-analyses brands that already have results)")
 
     db = SessionLocal()
     try:
         _ensure_latest_product_columns(db)
-        brands = db.execute(BRAND_QUERY).mappings().all()
+        brands = db.execute(FORCE_BRAND_QUERY if args.force else BRAND_QUERY).mappings().all()
         if args.brand_ids:
             requested_ids = set(args.brand_ids)
             brands = [brand for brand in brands if brand["brand_raw_id"] in requested_ids]
