@@ -191,10 +191,11 @@ def _classify_niche(username: str, posts: list[dict]) -> tuple[str | None, str |
         fill_template(
             NICHE_PROMPT,
             username=username,
-            full_name=profile.get("fullName") or "unknown",
-            bio=(profile.get("biography") or "none")[:600],
-            is_business=profile.get("isBusinessAccount"),
-            followers=profile.get("followersCount"),
+            # fill_template only accepts strings — str() every value.
+            full_name=str(profile.get("fullName") or "unknown"),
+            bio=str(profile.get("biography") or "none")[:600],
+            is_business=str(profile.get("isBusinessAccount")),
+            followers=str(profile.get("followersCount") if profile.get("followersCount") is not None else "unknown"),
             posts=json.dumps(evidence, ensure_ascii=True),
         ),
         context=f"collaborator niche @{username}",
@@ -226,6 +227,43 @@ def _mark_rows_checked(db: Session, row_ids: list[int]) -> None:
         db.commit()
 
 
+def _process_username(db: Session, username: str, summary: dict, tag: str) -> bool:
+    """
+    Classify one username and save it if it's a creator (or a brand caught by
+    the profile check). Returns False when it should be retried next run.
+    """
+    kind = _classify_username(username)
+    if kind is None:
+        logger.warning("%s: username check failed — will retry next run", tag)
+        return False
+    if kind == "brand":
+        summary["brand_by_username"] += 1
+        logger.info("%s: brand (username check) — skipped", tag)
+        return True
+
+    posts = _scrape_posts(username, n=POSTS_PER_CREATOR)
+    if posts is None:
+        logger.warning("%s: Apify scrape failed — will retry next run", tag)
+        return False
+    if not posts:
+        logger.info("%s: no posts (private/deleted) — skipped", tag)
+        return True
+
+    kind, niche = _classify_niche(username, posts)
+    if kind is None:
+        logger.warning("%s: niche check failed — will retry next run", tag)
+        return False
+    if kind == "brand":
+        niche = BRAND_NICHE
+        summary["brand_by_profile"] += 1
+
+    _save_creator(db, username, niche)
+    summary["saved"][niche] = summary["saved"].get(niche, 0) + 1
+    logger.info("%s: saved as %s", tag, niche)
+    time.sleep(0.5)
+    return True
+
+
 def run(db: Session, limit: int, dry_run: bool = False) -> dict:
     _ensure_columns(db)
     usernames, rows = _collect_work(db, limit)
@@ -244,38 +282,15 @@ def run(db: Session, limit: int, dry_run: bool = False) -> dict:
 
     failed: set[str] = set()
     for index, username in enumerate(usernames, start=1):
-        kind = _classify_username(username)
-        if kind is None:
-            logger.warning("[%d/%d] @%s: username check failed — will retry next run", index, len(usernames), username)
+        tag = f"[{index}/{len(usernames)}] @{username}"
+        try:
+            ok = _process_username(db, username, summary, tag)
+        except Exception:
+            logger.exception("%s: unexpected error — will retry next run", tag)
+            db.rollback()
+            ok = False
+        if not ok:
             failed.add(username.lower())
-            continue
-        if kind == "brand":
-            summary["brand_by_username"] += 1
-            logger.info("[%d/%d] @%s: brand (username check) — skipped", index, len(usernames), username)
-            continue
-
-        posts = _scrape_posts(username, n=POSTS_PER_CREATOR)
-        if posts is None:
-            logger.warning("[%d/%d] @%s: Apify scrape failed — will retry next run", index, len(usernames), username)
-            failed.add(username.lower())
-            continue
-        if not posts:
-            logger.info("[%d/%d] @%s: no posts (private/deleted) — skipped", index, len(usernames), username)
-            continue
-
-        kind, niche = _classify_niche(username, posts)
-        if kind is None:
-            logger.warning("[%d/%d] @%s: niche check failed — will retry next run", index, len(usernames), username)
-            failed.add(username.lower())
-            continue
-        if kind == "brand":
-            niche = BRAND_NICHE
-            summary["brand_by_profile"] += 1
-
-        _save_creator(db, username, niche)
-        summary["saved"][niche] = summary["saved"].get(niche, 0) + 1
-        logger.info("[%d/%d] @%s: saved as %s", index, len(usernames), username, niche)
-        time.sleep(0.5)
 
     # A row is done only if none of its usernames failed this run.
     done_rows = [
