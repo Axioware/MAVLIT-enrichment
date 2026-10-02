@@ -62,7 +62,7 @@ BEAUTY_BRAND_IDS_QUERY = text("""
     )
     SELECT brand_raw_id, name
     FROM best_per_brand
-    WHERE niche = 'Beauty'
+    WHERE niche = 'Fitness'
       AND has_official_website = true
       AND website IS NOT NULL
       AND description IS NOT NULL
