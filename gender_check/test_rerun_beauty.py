@@ -1,19 +1,19 @@
 """TEMPORARY test script — delete after use.
 
 Re-runs run_brand_website_audience_check (with --force, so existing results are
-overwritten) for every brand whose partner creator niche is Beauty AND whose
-current target_audience_gender is "both".
+overwritten) for every brand whose partner creator niche is Beauty, Music,
+Health or Fitness AND whose current target_audience_gender is "both".
 
-A brand counts as Beauty when its best partnership row (the same DISTINCT ON
-pick the main script uses: highest sponsorship confidence, then newest post)
-comes from a Beauty creator. All the main script's other conditions still apply
+A brand's niche is the niche of its best partnership row (the same DISTINCT ON
+pick the main script uses: highest sponsorship confidence, then newest post).
+All the main script's other conditions still apply
 (creators 1-208, confidence >= 90, no referrals, geo_reach 0-40 or NULL, 2026
 posts, 5+ Instagram posts, website + description).
 
 Run from the project root:
     python -m gender_check.test_rerun_beauty --dry-run     # list brands only
     python -m gender_check.test_rerun_beauty --limit 5     # first 5 brands
-    python -m gender_check.test_rerun_beauty               # all Beauty brands
+    python -m gender_check.test_rerun_beauty               # all matching brands
 """
 
 import argparse
@@ -25,7 +25,7 @@ from sqlalchemy import text
 from gender_check import run_brand_website_audience_check as website_check
 from pipeline.db import SessionLocal
 
-BEAUTY_BRAND_IDS_QUERY = text("""
+BRAND_IDS_QUERY = text("""
     WITH best_per_brand AS (
       SELECT DISTINCT ON (tcbp.brand_raw_id)
         tcbp.brand_raw_id,
@@ -60,14 +60,14 @@ BEAUTY_BRAND_IDS_QUERY = text("""
         tcbp.sponsorship_confidence DESC NULLS LAST,
         tcbp.post_timestamp DESC NULLS LAST
     )
-    SELECT brand_raw_id, name
+    SELECT brand_raw_id, name, niche
     FROM best_per_brand
-    WHERE niche = 'Fitness'
+    WHERE niche IN ('Beauty', 'Music', 'Health', 'Fitness')
       AND has_official_website = true
       AND website IS NOT NULL
       AND description IS NOT NULL
       AND lower(target_audience_gender) = 'both'
-    ORDER BY name
+    ORDER BY niche, name
 """)
 
 TARGET_AUDIENCE_QUERY = text("""
@@ -83,26 +83,34 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="TEMP: re-run the website audience check for Beauty-niche brands.")
-    parser.add_argument("--dry-run", action="store_true", help="List the Beauty brands without scraping or calling the LLM.")
-    parser.add_argument("--limit", type=int, help="Only process the first N Beauty brands.")
+    parser = argparse.ArgumentParser(
+        description="TEMP: re-run the website audience check for Beauty/Music/Health/Fitness brands with target 'both'."
+    )
+    parser.add_argument("--dry-run", action="store_true", help="List the brands without scraping or calling the LLM.")
+    parser.add_argument("--limit", type=int, help="Only process the first N brands.")
     args = parser.parse_args()
 
     db = SessionLocal()
     try:
-        rows = db.execute(BEAUTY_BRAND_IDS_QUERY).mappings().all()
+        rows = db.execute(BRAND_IDS_QUERY).mappings().all()
     finally:
         db.close()
 
     if args.limit is not None:
         rows = rows[:args.limit]
     if not rows:
-        print("No Beauty-niche brands with target audience \"both\" matched.")
+        print("No Beauty/Music/Health/Fitness brands with target audience \"both\" matched.")
         return 0
 
-    print(f"{len(rows)} Beauty-niche brand(s) with target audience \"both\":")
+    by_niche: dict[str, int] = {}
     for row in rows:
-        print(f"  {row['brand_raw_id']:>5}  {row['name']}")
+        by_niche[row["niche"]] = by_niche.get(row["niche"], 0) + 1
+    print(
+        f"{len(rows)} brand(s) with target audience \"both\" ("
+        + ", ".join(f"{niche}: {count}" for niche, count in sorted(by_niche.items())) + "):"
+    )
+    for row in rows:
+        print(f"  {row['brand_raw_id']:>5}  {row['niche']:8}  {row['name']}")
 
     if args.dry_run:
         sys.argv = [website_check.__file__, "--force", "--dry-run"]
@@ -120,7 +128,7 @@ def main() -> int:
         website_check.main()
         after = _target_audience(brand_id)
 
-        line = _compare_line(row["name"], brand_id, before, after)
+        line = _compare_line(f"[{row['niche']}] {row['name']}", brand_id, before, after)
         summary.append(line)
         logger.info("[%d/%d] %s", index, len(rows), line)
 
