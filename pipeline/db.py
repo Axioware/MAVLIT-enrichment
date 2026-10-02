@@ -344,6 +344,12 @@ class InstagramUser(Base):
     # (not used by the regular brand-triggered flow above).
     is_content_creator_re = Column(Boolean, nullable=False, server_default="false", default=False)
 
+    # Comma-separated usernames this post collaborates with — its tagged
+    # users, mentions, co-authors and sponsors (deduped, post owner
+    # excluded). Creators only (coauthor_producer/tagged_user/mention/
+    # contentcreatorRE); NULL for commenters.
+    post_collaborators  = Column(Text)
+
     # No longer written (all its fields now live in flat columns above,
     # same reasoning as top_posts/captions) — kept for legacy rows only.
     raw_profile         = Column(JSONB)

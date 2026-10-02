@@ -13,6 +13,7 @@ def upsert_rows(
     rows: list[dict],
     conflict_columns: list[str] | None,
     index_where: ColumnElement | None = None,
+    update_columns: list[str] | None = None,
 ) -> int:
     """
     Bulk-insert rows into model's table, ignoring conflicts on conflict_columns.
@@ -33,15 +34,29 @@ def upsert_rows(
     recent post can already exist under a different username's creator row,
     which a username-only target doesn't catch and crashes on instead of
     skipping).
+
+    Pass update_columns (requires conflict_columns) to refresh just those
+    columns on an existing conflicting row instead of skipping it — e.g.
+    backfilling a newly added column when a post is re-scraped. Every other
+    column of the existing row is left untouched.
     """
     if not rows:
         return 0
+    if update_columns and conflict_columns:
+        # ON CONFLICT DO UPDATE fails if one statement hits the same row
+        # twice, so keep only the last row per conflict key.
+        rows = list({tuple(row.get(c) for c in conflict_columns): row for row in rows}.values())
     insert_stmt = pg_insert(model).values(rows)
-    stmt = (
-        insert_stmt.on_conflict_do_nothing(index_elements=conflict_columns, index_where=index_where)
-        if conflict_columns else
-        insert_stmt.on_conflict_do_nothing()
-    )
+    if update_columns and conflict_columns:
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=conflict_columns,
+            index_where=index_where,
+            set_={column: insert_stmt.excluded[column] for column in update_columns},
+        )
+    elif conflict_columns:
+        stmt = insert_stmt.on_conflict_do_nothing(index_elements=conflict_columns, index_where=index_where)
+    else:
+        stmt = insert_stmt.on_conflict_do_nothing()
     result = db.execute(stmt)
     db.commit()
     return result.rowcount

@@ -42,6 +42,7 @@ Prompts (editable via /admin > Prompts):
 import logging
 import time
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, OPENAI_KEY
@@ -53,6 +54,7 @@ from pipeline.db import (
     Prompt,
     normalize_niche,
 )
+from pipeline.enrichment.instagram_posts import _real_coauthors, _usernames_only
 from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.db import upsert_rows
@@ -407,9 +409,37 @@ def _build_post_row(
         "post_timestamp":      item.get("timestamp"),
         "top_comments":        _top_comments_str(item),
         "is_content_creator_re": is_content_creator_re,
+        # Tagged users / mentions / co-authors / sponsors of this post —
+        # creators only, NULL for commenters.
+        "post_collaborators":  _post_collaborators_str(item, username) if user_type != "commenter" else None,
         # No longer written — all its fields now live in flat columns above.
         "raw_profile":         None,
     }
+
+
+def _post_collaborators_str(item: dict, owner_username: str) -> str | None:
+    """
+    Comma-separated, deduped usernames from the post's taggedUsers,
+    mentions, coauthorProducers and sponsors, excluding the post's owner.
+    None when the post has none.
+    """
+    owner = (owner_username or "").strip().lstrip("@").lower()
+    sources = (
+        _usernames_only(item.get("taggedUsers")),
+        _usernames_only(item.get("mentions")),
+        _usernames_only(_real_coauthors(item, owner_username)),
+        _usernames_only(item.get("sponsors")),
+    )
+    usernames: list[str] = []
+    seen: set[str] = set()
+    for source in sources:
+        for username in source or []:
+            cleaned = username.strip().lstrip("@")
+            key = cleaned.lower()
+            if cleaned and key != owner and key not in seen:
+                seen.add(key)
+                usernames.append(cleaned)
+    return ", ".join(usernames) or None
 
 
 def _top_comments_str(item: dict) -> str | None:
@@ -525,6 +555,10 @@ def enrich_instagram_users(
         logger.warning("APIFY_TOKEN not set — skipping Instagram user enrichment")
         return 0
 
+    # Standalone runs may predate the API's startup migration for this column.
+    db.execute(text("ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS post_collaborators TEXT"))
+    db.commit()
+
     query = db.query(InstagramPost).filter(InstagramPost.sponsorship_confidence >= 90)
     if row_id is not None:
         query = query.filter(InstagramPost.id == row_id)
@@ -608,7 +642,8 @@ def enrich_instagram_users(
                     for item in raw_posts
                     if item.get("id")
                 ]
-                upsert_rows(db, InstagramUser, creator_rows, ["post_id"])
+                # Re-scraped posts already exist — refresh post_collaborators on them.
+                upsert_rows(db, InstagramUser, creator_rows, ["post_id"], update_columns=["post_collaborators"])
                 _link_to_brand(db, post.brand_raw_id, username)
 
                 logger.info(

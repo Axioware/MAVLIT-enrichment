@@ -97,6 +97,7 @@ def _ensure_partnership_evidence_table() -> None:
         conn.execute(text("ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS tagged_users JSONB"))
         conn.execute(text("ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS coauthor_producers JSONB"))
         conn.execute(text("ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS sponsorship_confidence INTEGER"))
+        conn.execute(text("ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS post_collaborators TEXT"))
         conn.commit()
 
 
@@ -305,9 +306,13 @@ def _record_llm_partnership_post(
     db.commit()
 
 
-def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int]]:
+def enrich_content_creator_re(
+    db: Session, limit: int = 1, creator_ids: list[int] | None = None,
+) -> tuple[int, set[int]]:
     """
     Process up to `limit` content_creator_re rows where is_scraped=False.
+    Pass creator_ids to re-run exactly those rows instead, whether or not
+    they were already scraped (limit is ignored then).
     Returns (rows_processed, brand_raw_ids) — the second element is the
     union of every brands_raw.id confirmed/linked across all processed rows
     in this call (new bare rows this discovered, or existing brands a
@@ -321,12 +326,20 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int
 
     _ensure_partnership_evidence_table()
 
-    rows: list[ContentCreatorRE] = (
-        db.query(ContentCreatorRE)
-        .filter(ContentCreatorRE.is_scraped == False)
-        .limit(limit)
-        .all()
-    )
+    if creator_ids:
+        rows: list[ContentCreatorRE] = (
+            db.query(ContentCreatorRE)
+            .filter(ContentCreatorRE.id.in_(creator_ids))
+            .order_by(ContentCreatorRE.id)
+            .all()
+        )
+    else:
+        rows = (
+            db.query(ContentCreatorRE)
+            .filter(ContentCreatorRE.is_scraped == False)
+            .limit(limit)
+            .all()
+        )
 
     if not rows:
         logger.info("Content creator RE: no pending rows")
@@ -385,7 +398,8 @@ def enrich_content_creator_re(db: Session, limit: int = 1) -> tuple[int, set[int
             for item in raw_posts
             if item.get("id")
         ]
-        upsert_rows(db, InstagramUser, creator_rows, ["post_id"])
+        # Re-scraped posts already exist — refresh post_collaborators on them.
+        upsert_rows(db, InstagramUser, creator_rows, ["post_id"], update_columns=["post_collaborators"])
 
         logger.info(
             "Content creator RE: @%s stored — gender=%s country=%s age=%s niche=%s followers=%s",
@@ -574,11 +588,18 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s")
     parser = argparse.ArgumentParser(description="Run content_creator_re reverse-engineering enrichment.")
     parser.add_argument("--limit", type=int, default=1, help="Pending content_creator_re rows to process this run.")
+    parser.add_argument(
+        "--creator-id",
+        type=int,
+        action="append",
+        dest="creator_ids",
+        help="Re-run this content_creator_re id even if already scraped. Repeat for several ids (--limit is ignored).",
+    )
     args = parser.parse_args()
 
     db = SessionLocal()
     try:
-        processed, brand_ids = enrich_content_creator_re(db, limit=args.limit)
+        processed, brand_ids = enrich_content_creator_re(db, limit=args.limit, creator_ids=args.creator_ids)
         print(
             f"content_creator_re processed={processed}; "
             f"confirmed_brand_ids={sorted(brand_ids)}; "
