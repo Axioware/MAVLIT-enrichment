@@ -1,7 +1,8 @@
 """TEMPORARY test script — delete after use.
 
 Re-runs run_brand_website_audience_check (with --force, so existing results are
-overwritten) for every brand whose partner creator niche is Beauty.
+overwritten) for every brand whose partner creator niche is Beauty AND whose
+current target_audience_gender is "both".
 
 A brand counts as Beauty when its best partnership row (the same DISTINCT ON
 pick the main script uses: highest sponsorship confidence, then newest post)
@@ -31,7 +32,8 @@ BEAUTY_BRAND_IDS_QUERY = text("""
         br.name,
         br.has_official_website,
         br.website,
-        br.description
+        br.description,
+        br.target_audience_gender
       FROM content_creator_re ccr
       JOIN test_creator_brand_partnership_posts tcbp
         ON tcbp.content_creator_re_id = ccr.id
@@ -63,6 +65,7 @@ BEAUTY_BRAND_IDS_QUERY = text("""
       AND has_official_website = true
       AND website IS NOT NULL
       AND description IS NOT NULL
+      AND lower(target_audience_gender) = 'both'
     ORDER BY name
 """)
 
@@ -82,10 +85,10 @@ def main() -> int:
     if args.limit is not None:
         rows = rows[:args.limit]
     if not rows:
-        print("No Beauty-niche brands matched.")
+        print("No Beauty-niche brands with target audience \"both\" matched.")
         return 0
 
-    print(f"{len(rows)} Beauty-niche brand(s):")
+    print(f"{len(rows)} Beauty-niche brand(s) with target audience \"both\":")
     for row in rows:
         print(f"  {row['brand_raw_id']:>5}  {row['name']}")
 
