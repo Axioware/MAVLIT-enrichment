@@ -5,7 +5,8 @@ Discover new creators for content_creator_re from the usernames stored in
 instagram_users.post_collaborators (the tagged users / mentions / co-authors
 / sponsors of each scraped creator post).
 
-For up to --limit usernames per run:
+For up to --limit usernames per run (no --limit = all remaining usernames,
+worked through in batches of 50 so progress is saved as it goes):
 
   1. Read usernames from instagram_users rows where post_collaborators is set
      and collaborators_checked = false. Usernames already in
@@ -29,6 +30,7 @@ collaborators_checked = false and it is retried on the next run.
 Run from the project root:
     python -m pipeline.enrichment_re.discover_collaborator_creators --dry-run
     python -m pipeline.enrichment_re.discover_collaborator_creators --limit 50
+    python -m pipeline.enrichment_re.discover_collaborator_creators            # all
 """
 
 import argparse
@@ -121,7 +123,9 @@ def _existing_creator_usernames(db: Session) -> set[str]:
     }
 
 
-def _collect_work(db: Session, limit: int) -> tuple[list[str], dict[int, list[str]]]:
+def _collect_work(
+    db: Session, limit: int, skip_row_ids: set[int] | None = None,
+) -> tuple[list[str], dict[int, list[str]]]:
     """
     Walk unchecked instagram_users rows in id order and collect up to `limit`
     new usernames. Returns (usernames_to_process, {row_id: [usernames]}) —
@@ -130,7 +134,8 @@ def _collect_work(db: Session, limit: int) -> tuple[list[str], dict[int, list[st
     already queued this run). A row that would push past the limit is left
     out entirely, so it stays unchecked for the next run — except the first
     row, which is always taken (so a run can go over `limit` when that single
-    row has more new usernames than the limit).
+    row has more new usernames than the limit). Rows in skip_row_ids (ones
+    that already failed earlier in this run) are ignored.
     """
     known = _existing_creator_usernames(db)
     queued: list[str] = []
@@ -155,6 +160,8 @@ def _collect_work(db: Session, limit: int) -> tuple[list[str], dict[int, list[st
             break
         for row_id, value in batch:
             last_id = row_id
+            if skip_row_ids and row_id in skip_row_ids:
+                continue
             usernames = _split_usernames(value)
             new = [u for u in dict.fromkeys(usernames) if u.lower() not in known and u.lower() not in queued_keys]
             # Rows are all-or-nothing (that's what collaborators_checked tracks),
@@ -264,14 +271,16 @@ def _process_username(db: Session, username: str, summary: dict, tag: str) -> bo
     return True
 
 
-def run(db: Session, limit: int, dry_run: bool = False) -> dict:
+def run(
+    db: Session, limit: int, dry_run: bool = False, skip_row_ids: set[int] | None = None,
+) -> dict:
     _ensure_columns(db)
-    usernames, rows = _collect_work(db, limit)
+    usernames, rows = _collect_work(db, limit, skip_row_ids)
     db.commit()  # end the read transaction before slow LLM/Apify work
     logger.info("Collected %d new username(s) from %d instagram_users row(s)", len(usernames), len(rows))
 
     summary = {"usernames": len(usernames), "brand_by_username": 0, "brand_by_profile": 0,
-               "saved": {}, "failed": 0, "rows_checked": 0}
+               "saved": {}, "failed": 0, "rows_checked": 0, "failed_row_ids": set()}
     if dry_run:
         for username in usernames:
             logger.info("DRY RUN would classify @%s", username)
@@ -300,7 +309,35 @@ def run(db: Session, limit: int, dry_run: bool = False) -> dict:
     _mark_rows_checked(db, done_rows)
     summary["failed"] = len(failed)
     summary["rows_checked"] = len(done_rows)
+    summary["failed_row_ids"] = set(rows) - set(done_rows)
     return summary
+
+
+def run_all(db: Session, batch_size: int = 50) -> dict:
+    """
+    Process every remaining username, batch_size at a time, marking rows
+    checked after each batch so a crash mid-way keeps the finished batches.
+    Rows that fail are skipped for the rest of this run (so the loop can't
+    spin on them) and stay unchecked for the next run.
+    """
+    total = {"usernames": 0, "brand_by_username": 0, "brand_by_profile": 0,
+             "saved": {}, "failed": 0, "rows_checked": 0}
+    skip_row_ids: set[int] = set()
+    batch_no = 0
+    while True:
+        batch_no += 1
+        logger.info("===== batch %d =====", batch_no)
+        summary = run(db, batch_size, skip_row_ids=skip_row_ids)
+        if not summary["usernames"]:
+            break
+        skip_row_ids |= summary["failed_row_ids"]
+        for key in ("usernames", "brand_by_username", "brand_by_profile", "failed", "rows_checked"):
+            total[key] += summary[key]
+        for niche, count in summary["saved"].items():
+            total["saved"][niche] = total["saved"].get(niche, 0) + count
+        if not OPENAI_KEY or not APIFY_TOKEN:
+            break
+    return total
 
 
 def main() -> int:
@@ -310,15 +347,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Discover new content_creator_re creators from instagram_users.post_collaborators."
     )
-    parser.add_argument("--limit", type=int, default=50, help="Max new usernames to process this run (default 50).")
+    parser.add_argument(
+        "--limit", type=int, default=None,
+        help="Max new usernames to process this run. Omit to process ALL remaining usernames (in batches of 50).",
+    )
     parser.add_argument("--dry-run", action="store_true", help="List the usernames that would be processed; no LLM/Apify/writes.")
     args = parser.parse_args()
-    if args.limit < 1:
+    if args.limit is not None and args.limit < 1:
         parser.error("--limit must be at least 1")
 
     db = SessionLocal()
     try:
-        summary = run(db, args.limit, dry_run=args.dry_run)
+        if args.limit is not None:
+            summary = run(db, args.limit, dry_run=args.dry_run)
+        elif args.dry_run:
+            summary = run(db, 10**9, dry_run=True)  # list everything, write nothing
+        else:
+            summary = run_all(db)
     finally:
         db.close()
 
