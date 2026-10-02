@@ -349,6 +349,10 @@ class InstagramUser(Base):
     # excluded). Creators only (coauthor_producer/tagged_user/mention/
     # contentcreatorRE); NULL for commenters.
     post_collaborators  = Column(Text)
+    # Set True by pipeline/enrichment_re/discover_collaborator_creators.py once
+    # every username in this row's post_collaborators has been classified, so
+    # later runs move on to new rows.
+    collaborators_checked = Column(Boolean, nullable=False, server_default="false", default=False)
 
     # No longer written (all its fields now live in flat columns above,
     # same reasoning as top_posts/captions) — kept for legacy rows only.
