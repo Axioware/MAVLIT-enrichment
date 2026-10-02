@@ -128,7 +128,9 @@ def _collect_work(db: Session, limit: int) -> tuple[list[str], dict[int, list[st
     every row in the map is fully covered, either by usernames being
     processed now or ones that need no work (already in content_creator_re /
     already queued this run). A row that would push past the limit is left
-    out entirely, so it stays unchecked for the next run.
+    out entirely, so it stays unchecked for the next run — except the first
+    row, which is always taken (so a run can go over `limit` when that single
+    row has more new usernames than the limit).
     """
     known = _existing_creator_usernames(db)
     queued: list[str] = []
@@ -155,7 +157,11 @@ def _collect_work(db: Session, limit: int) -> tuple[list[str], dict[int, list[st
             last_id = row_id
             usernames = _split_usernames(value)
             new = [u for u in dict.fromkeys(usernames) if u.lower() not in known and u.lower() not in queued_keys]
-            if new and len(queued) + len(new) > limit:
+            # Rows are all-or-nothing (that's what collaborators_checked tracks),
+            # so stop before a row that would overshoot the limit — but always
+            # take at least the first row, or a row with more usernames than
+            # --limit would block every run forever.
+            if new and queued and len(queued) + len(new) > limit:
                 return queued, rows
             for username in new:
                 queued.append(username)
