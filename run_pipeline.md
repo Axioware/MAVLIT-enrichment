@@ -325,6 +325,18 @@ enrich_content_creator_re(db, limit=1)
 db.close()
 "
 
+OR (only pending rows of one niche — case-insensitive match on content_creator_re.niche)
+
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment_re.content_creator_re import enrich_content_creator_re
+db = SessionLocal()
+enrich_content_creator_re(db, limit=1, niche='fitness')
+db.close()
+"
+
 ## brand_wikidata_lookup (reverse-lookup bare brands by instagram_handle)
 python3 -c "
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')

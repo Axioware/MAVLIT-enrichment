@@ -308,11 +308,13 @@ def _record_llm_partnership_post(
 
 def enrich_content_creator_re(
     db: Session, limit: int = 1, creator_ids: list[int] | None = None,
+    niche: str | None = None,
 ) -> tuple[int, set[int]]:
     """
     Process up to `limit` content_creator_re rows where is_scraped=False.
+    Pass niche to only pick pending rows of that niche (case-insensitive).
     Pass creator_ids to re-run exactly those rows instead, whether or not
-    they were already scraped (limit is ignored then).
+    they were already scraped (limit and niche are ignored then).
     Returns (rows_processed, brand_raw_ids) — the second element is the
     union of every brands_raw.id confirmed/linked across all processed rows
     in this call (new bare rows this discovered, or existing brands a
@@ -334,15 +336,13 @@ def enrich_content_creator_re(
             .all()
         )
     else:
-        rows = (
-            db.query(ContentCreatorRE)
-            .filter(ContentCreatorRE.is_scraped == False)
-            .limit(limit)
-            .all()
-        )
+        query = db.query(ContentCreatorRE).filter(ContentCreatorRE.is_scraped == False)
+        if niche:
+            query = query.filter(ContentCreatorRE.niche.ilike(niche.strip()))
+        rows = query.limit(limit).all()
 
     if not rows:
-        logger.info("Content creator RE: no pending rows")
+        logger.info("Content creator RE: no pending rows%s", f" for niche={niche!r}" if niche else "")
         return 0, set()
 
     logger.info("Content creator RE: processing %d row(s)", len(rows))
@@ -596,6 +596,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s")
     parser = argparse.ArgumentParser(description="Run content_creator_re reverse-engineering enrichment.")
     parser.add_argument("--limit", type=int, default=1, help="Pending content_creator_re rows to process this run.")
+    parser.add_argument("--niche", help="Only process pending rows of this niche (case-insensitive).")
     parser.add_argument(
         "--creator-id",
         type=int,
@@ -607,7 +608,9 @@ def main() -> None:
 
     db = SessionLocal()
     try:
-        processed, brand_ids = enrich_content_creator_re(db, limit=args.limit, creator_ids=args.creator_ids)
+        processed, brand_ids = enrich_content_creator_re(
+            db, limit=args.limit, creator_ids=args.creator_ids, niche=args.niche,
+        )
         print(
             f"content_creator_re processed={processed}; "
             f"confirmed_brand_ids={sorted(brand_ids)}; "
