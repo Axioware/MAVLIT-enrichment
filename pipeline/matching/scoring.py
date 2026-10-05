@@ -1,262 +1,166 @@
 """
 pipeline/matching/scoring.py
 
-Stage 3 Step C — weighted scoring across 5 dimensions, per the matching
-design doc. Each dimension is normalized to 0.0-1.0; missing data yields
-None (not 0) so it can be excluded and its weight redistributed among the
-dimensions that ARE available, rather than unfairly penalizing a brand or
-creator just because a signal hasn't been computed yet.
+Stage 3 Step C — match score built from the "why it's a match" taglines
+(pipeline/matching/match_text.py, documented in taglines.md).
 
-Weights (sum to 1.0):
-    niche_match           0.305263 — brand/linked creator niches vs MAVLIT creator niches
-    sponsorship_activity  0.252632 — live per creator-brand formula, see _score_sponsorship_activity()
-    creator_tier_fit      0.2     — typical_creator_tier vs creator_tier
-    semantic_similarity   0.147368 — cosine similarity from the Stage 3B pgvector search
-    platform_match        0.094737 — brand_match_profile.has_* vs creator's primary_platform
+Every brand starts at 55%. Each tagline group can add up to its
+GROUP_MAX_POINTS (they sum to 45, so 1 point = +1% and a brand that maxes
+every group scores 100%). Only one option per tagline group can apply; it
+earns its share of the group's points in proportion to its tagline
+priority, relative to the group's top priority (_GROUP_TOP_PRIORITY):
 
-Tranco rank, HQ country, and website traffic tier are deliberately excluded
-— per the design doc, they don't measure fit.
+    points = GROUP_MAX_POINTS[group] * priority / _GROUP_TOP_PRIORITY[group]
 
-sponsorship_activity is computed live per creator-brand pair (NOT read from
-the static brand_match_profile.sponsorship_activity_score column — that
-column is still computed by brand_signals.py's compute_sponsorship_activity
-and is only used by the Stage 3 activity-floor hard filter in matcher.py,
-which runs before this scoring step and is unaffected by this function).
-Its components (meta ads, most-recent-post recency windows, and follower
-fit) are equally weighted. Audience age and gender are not scoring dimensions.
+e.g. "ran a paid partnership within the last 3 months" (2c, priority 75 of
+100) earns 8 * 75/100 = 6 of recent_partnership's 8 points.
+
+Creator size is graded by distance too: match_text.py multiplies its
+priority by closeness to the brand's average collaborator followers (1.0
+at the average, sliding to 0 at ±25%), so e.g. option 3a at 12.5% from the
+average earns 5 * 80*0.5/80 = 2.5 of creator_size's 5 points.
+
+Taglines whose group isn't in GROUP_MAX_POINTS still show as match text
+but earn no points: Niche bridge (priority 10000, only orders the text),
+and 12. Target audience gender / 13. Target audience age / 14. Product
+audience gender.
+
+One extra signal that has no tagline of its own:
+    niche_creators  the brand's niche is one of the creator's niches AND
+                    1 of the brand's creators (Instagram collaborator or RE
+                    creator) is in one of them too -> 2/3 of its points;
+                    2+ such creators -> all of its points
+
+    total = 0.55 + sum(points) / 100      (returned as 0.55-1.0)
 """
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from pipeline.db import (
     BrandInstagramUser,
-    BrandProfile,
     BrandRaw,
+    ContentCreatorRE,
     CreatorProfile,
-    InstagramPost,
     InstagramUser,
     TestCreatorBrandPartnershipPost,
-    YoutubeSponsorship,
 )
-from pipeline.enrichment.initial_brand_scoring import _days_since
-from pipeline.matching.niche_compatibility import niche_compatibility
+from pipeline.matching.match_text import _creator_niche_names
 
-WEIGHTS: dict[str, float] = {
-    "niche_match":           0.30526315789473685,
-    "sponsorship_activity":  0.25263157894736843,
-    "creator_tier_fit":      0.2,
-    "semantic_similarity":   0.14736842105263157,
-    "platform_match":        0.09473684210526316,
+SCORE_BASE  = 0.55   # score with no applicable signals
+SCORE_RANGE = 0.45   # SCORE_BASE + SCORE_RANGE = 1.0 when every group is maxed
+
+# Most points (= % of the final score) each group can add. Sums to 45
+# (= SCORE_RANGE * 100).
+GROUP_MAX_POINTS: dict[str, float] = {
+    "recent_partnership": 8,    # 2. paid partnership in the last 6 months
+    "niche_creators":     7,    # brand niche + its creators' niche match yours
+    "similar_partners":   6,    # 5. partnered with similar / same-niche creators
+    "same_niche":         5,    # 10. brand niche = your niche
+    "creator_size":       5,    # 3. partners close to your follower size
+    "follower_range":     4,    # 6. you're inside its collaborator follower range
+    "verified_contact":   4,    # 4. MAVLIT has a verified partnerships contact
+    "tag_overlap":        2,    # 9. brand tag overlaps your sub-niche
+    "youtube_sponsor":    2,    # 7. also sponsors YouTube creators
+    "brand_tier":         1,    # 8. smaller / growing brand
+    "latest_product":     1,    # 11. has a latest product to pitch around
+}
+_MAX_POINTS = sum(GROUP_MAX_POINTS.values())
+
+# Top tagline priority in each group (taglines.md / match_text.py) — an
+# option earns GROUP_MAX_POINTS * its priority / this. Keep in sync with
+# the priorities in match_text.py.
+_GROUP_TOP_PRIORITY: dict[str, float] = {
+    "recent_partnership": 100,   # a/b/c by window: 100/95/92/90/85/82/81/75/71
+    "similar_partners":   78,    # a = 78, b = 70, c = 65
+    "same_niche":         30,
+    "creator_size":       80,    # a/b = 80, c = 50 — each × closeness to the brand's
+                                 # average followers (1.0 at the average, 0 at ±25%)
+    "follower_range":     69,
+    "verified_contact":   75,
+    "tag_overlap":        33,
+    "youtube_sponsor":    45,
+    "brand_tier":         40,    # a = 40, b = 35
+    "latest_product":     29,
 }
 
-_TIER_ORDER = ["nano", "micro", "macro", "mega"]
-
-_PLATFORM_FLAG_ATTR = {
-    "instagram": "has_instagram",
-    "youtube":   "has_youtube",
-    "facebook":  "has_facebook",
-}
+# Matching creators -> share of niche_creators' points (2 = "2 or more").
+_NICHE_CREATOR_SHARE = {1: 2 / 3, 2: 1.0}
 
 
-def _score_niche(db: Session, creator: CreatorProfile, brand: BrandRaw) -> float | None:
-    niches = []
-    seen = set()
-    for value in (creator.instagram_primary_niche, creator.youtube_primary_niche):
-        for niche in (value or "").split(","):
-            normalized = niche.strip()
-            key = normalized.casefold()
-            if normalized and key not in seen:
-                niches.append(normalized)
-                seen.add(key)
+def _niche_creator_points(db: Session, creator: CreatorProfile, brand: BrandRaw) -> float:
+    """
+    2/3 of niche_creators' points if the brand's niche AND 1 of its
+    creators' niches are among the creator's niches, all of them if 2+ of
+    its creators are. Creators are the
+    brand's non-commenter Instagram collaborators (instagram_users.niche)
+    plus its reverse-engineered creators (content_creator_re.niche).
+    """
+    niches = _creator_niche_names(creator)
+    brand_niche = (brand.niche or "").strip().lower()
+    if not niches or brand_niche not in niches:
+        return 0.0
 
-    # Keep supporting profiles created before platform-specific niches existed.
-    if not niches:
-        niches = [niche.strip() for niche in (creator.content_niche or "").split(",") if niche.strip()]
-
-    if not niches:
-        return None
-
-    brand_niches = [brand.niche] if brand.niche else []
-    brand_niches.extend(
-        niche for (niche,) in db.query(InstagramUser.niche)
+    collaborators = {
+        username.strip().lower()
+        for (username,) in db.query(InstagramUser.username)
         .join(BrandInstagramUser, BrandInstagramUser.instagram_user_id == InstagramUser.id)
         .filter(
             BrandInstagramUser.brand_raw_id == brand.id,
             InstagramUser.user_type != "commenter",
-            InstagramUser.niche.isnot(None),
+            func.lower(func.trim(InstagramUser.niche)).in_(niches),
         )
         .distinct()
-        .all()
-        if niche and niche.strip()
-    )
-
-    scores = [niche_compatibility(",".join(niches), brand_niche) for brand_niche in brand_niches]
-    scores = [score for score in scores if score is not None]
-    return max(scores) if scores else None
-
-
-# --- sponsorship_activity components ---
-
-_RECENCY_BUCKETS = [(30, 1.0), (60, 0.8), (90, 0.6), (180, 0.3), (200, 0.15)]
-
-
-def _meta_ads_component(profile: BrandProfile) -> float:
-    # Meta Ads enrichment is currently inactive, so give this component full
-    # credit instead of penalizing every match for unavailable data.
-    return 1.0
-
-
-def _bucketed_post_score(days_list: list[int]) -> float:
-    """Score is just the matched window's weight, not multiplied by how
-    many posts/videos fall in it — only how recent the MOST RECENT one is
-    matters. Checks 30/60/90/180/200-day windows in that order and returns
-    the weight of the first window the most recent item falls into."""
-    if not days_list:
-        return 0.0
-    most_recent = min(days_list)
-    for max_days, weight in _RECENCY_BUCKETS:
-        if most_recent <= max_days:
-            return weight
-    return 0.0
-
-
-def _diff_pct_score(a: float, b: float) -> float:
-    """abs-difference-over-average ratio expressed as a percentage, then
-    inverted so a smaller gap scores higher. A perfect match (diff% == 0)
-    is floored to 1 before inverting — same zero-handling convention as
-    meta_ads_recency_days — rather than dividing by zero."""
-    denom = a + b / 2
-    if denom == 0:
-        return 0.0
-    diff_pct = abs(a - b) / denom * 100
-    diff_pct = diff_pct or 1.0
-    return (1.0 / diff_pct) * 2.0
-
-
-def _score_sponsorship_activity(
-    db: Session, creator: CreatorProfile, brand: BrandRaw, profile: BrandProfile | None
-) -> float | None:
-    """
-    Live per creator-brand composite — see the module docstring for why
-    this doesn't just read brand_match_profile.sponsorship_activity_score.
-        The four remaining components are equally weighted:
-            - meta ads activity
-            - most recent YouTube sponsorship recency
-            - most recent Instagram/content_creatorRE sponsorship recency
-            - Instagram collaborator follower fit
-    Returns None only if there's no brand profile at all to compare against.
-    """
-    if profile is None:
-        return None
-
-    components = [_meta_ads_component(profile)]
-
-    yt_days = [
-        d for (published_at,) in db.query(YoutubeSponsorship.published_at)
-        .filter(YoutubeSponsorship.brand_raw_id == brand.id)
-        .all()
-        for d in [_days_since(published_at)] if d is not None
-    ]
-    components.append(_bucketed_post_score(yt_days))
-
-    ig_rows = (
-        db.query(
-            InstagramPost.timestamp, InstagramPost.paid_partnership,
-            InstagramPost.sponsors, InstagramPost.tagged_users, InstagramPost.coauthor_producers,
-        )
-        .filter(InstagramPost.brand_raw_id == brand.id)
-        .all()
-    )
-    ig_days = [
-        d for (ts, paid, sponsors, tagged, coauthor) in ig_rows
-        if (paid or sponsors or tagged or coauthor)
-        for d in [_days_since(ts)] if d is not None
-    ]
-
-    # Reverse-engineered content_creatorRE partnerships are stored in their
-    # evidence table rather than instagram_posts, so include their confirmed
-    # post timestamps in the same Instagram recency score.
-    re_ig_days = [
-        d for (post_timestamp,) in db.query(TestCreatorBrandPartnershipPost.post_timestamp)
+        if username
+    }
+    re_creators = {
+        username.strip().lower()
+        for (username,) in db.query(TestCreatorBrandPartnershipPost.creator_username)
+        .join(ContentCreatorRE, TestCreatorBrandPartnershipPost.content_creator_re_id == ContentCreatorRE.id)
         .filter(
             TestCreatorBrandPartnershipPost.brand_raw_id == brand.id,
-            TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
+            func.lower(func.trim(ContentCreatorRE.niche)).in_(niches),
         )
-        .all()
-        for d in [_days_since(post_timestamp)] if d is not None
-    ]
-    ig_days.extend(re_ig_days)
-    components.append(_bucketed_post_score(ig_days))
-
-    if profile.avg_ig_collaborator_followers is not None and creator.instagram_followers is not None:
-        components.append(_diff_pct_score(profile.avg_ig_collaborator_followers, creator.instagram_followers))
-    else:
-        components.append(0.0)
-
-    return sum(components) / len(components)
-
-
-def _score_creator_tier_fit(creator: CreatorProfile, profile: BrandProfile | None) -> float | None:
-    if profile is None or not creator.creator_tier or not profile.typical_creator_tier:
-        return None
-    try:
-        ci = _TIER_ORDER.index(creator.creator_tier)
-        bi = _TIER_ORDER.index(profile.typical_creator_tier)
-    except ValueError:
-        return None
-    return 1.0 - abs(ci - bi) / (len(_TIER_ORDER) - 1)
-
-
-def _score_semantic_similarity(cosine_distance: float | None) -> float | None:
-    if cosine_distance is None:
-        return None
-    return max(0.0, min(1.0, 1.0 - cosine_distance))
-
-
-def _score_platform_match(creator: CreatorProfile, profile: BrandProfile | None) -> float | None:
-    if profile is None or not creator.primary_platform:
-        return None
-    attr = _PLATFORM_FLAG_ATTR.get(creator.primary_platform.strip().lower())
-    if attr is None:
-        return None
-    flag = getattr(profile, attr)
-    return None if flag is None else (1.0 if flag else 0.0)
+        .distinct()
+        if username
+    }
+    matching = len(collaborators | re_creators)
+    if not matching:
+        return 0.0
+    return GROUP_MAX_POINTS["niche_creators"] * _NICHE_CREATOR_SHARE[min(matching, 2)]
 
 
 def score_match(
     db: Session,
     creator: CreatorProfile,
     brand: BrandRaw,
-    profile: BrandProfile | None,
-    cosine_distance: float | None,
+    reasons: list[tuple[float, str, str]],
 ) -> dict:
     """
-    Returns {"total_score": 0.0-1.0, "dimensions": {name: {"score": float|None, "weight": float}}}.
-    Weights of dimensions with a None score are excluded and the remainder
-    renormalized to sum to 1.0, so missing data never deflates a match's
-    score relative to one where every dimension happened to be computable.
+    `reasons` is match_text.collect_match_reasons() for this pair.
+
+    Returns {"total_score": 0.55-1.0, "dimensions": {name: {"score", "weight"}}}
+    where "base" is the fixed 55% floor and every other dimension is one
+    tagline group: score = points earned / that group's max (0.0-1.0),
+    weight = that group's share of the 55-100 range. So
+    total_score == sum(score * weight) over all dimensions.
     """
-    raw: dict[str, float | None] = {
-        "niche_match":           _score_niche(db, creator, brand),
-        "sponsorship_activity":  _score_sponsorship_activity(db, creator, brand, profile),
-        "creator_tier_fit":      _score_creator_tier_fit(creator, profile),
-        "semantic_similarity":   _score_semantic_similarity(cosine_distance),
-        "platform_match":        _score_platform_match(creator, profile),
-    }
+    earned: dict[str, float] = {key: 0.0 for key in GROUP_MAX_POINTS}
+    for priority, _text, key in reasons:
+        top = _GROUP_TOP_PRIORITY.get(key)
+        if top is None:   # niche_bridge, audience taglines — text only, no points
+            continue
+        points = GROUP_MAX_POINTS[key] * min(float(priority), top) / top
+        earned[key] = max(earned[key], points)
+    earned["niche_creators"] = _niche_creator_points(db, creator, brand)
 
-    available_weight = sum(WEIGHTS[k] for k, v in raw.items() if v is not None)
-    if available_weight > 0:
-        total = sum(raw[k] * WEIGHTS[k] for k in raw if raw[k] is not None) / available_weight
-    else:
-        total = 0.0
+    total = SCORE_BASE + SCORE_RANGE * sum(earned.values()) / _MAX_POINTS
 
-    # The weighted score is a normalized 0..1 signal, but some component
-    # formulas (notably the follower-fit subscore) can temporarily exceed 1.0
-    # before the weighted average is taken. Clamp the final total so the UI and
-    # downstream logic never display a >100% match score.
-    total = max(0.0, min(1.0, total))
+    dimensions = {"base": {"score": 1.0, "weight": SCORE_BASE}}
+    for key, max_points in GROUP_MAX_POINTS.items():
+        dimensions[key] = {
+            "score":  earned[key] / max_points,
+            "weight": SCORE_RANGE * max_points / _MAX_POINTS,
+        }
 
-    return {
-        "total_score": total,
-        "dimensions": {k: {"score": raw[k], "weight": WEIGHTS[k]} for k in raw},
-    }
+    return {"total_score": max(SCORE_BASE, min(1.0, total)), "dimensions": dimensions}

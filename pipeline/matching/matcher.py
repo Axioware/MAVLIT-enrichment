@@ -67,9 +67,12 @@ Runs on every page load; designed to be cheap:
            query against the creator's embedding narrows the (already
            hard-filtered) pool to the top _SHORTLIST_SIZE candidates —
            fast because embeddings are precomputed.
-  Step C — Weighted scoring (pipeline.matching.scoring.score_match) across
-           all 5 dimensions for each shortlisted candidate, plus the Tier-1
-           template match-text (pipeline.matching.match_text).
+  Step C — Score each shortlisted candidate from its "why it's a match"
+           taglines (pipeline.matching.match_text.collect_match_reasons):
+           every applicable tagline earns its priority as points, scaled
+           to 45-100% by pipeline.matching.scoring.score_match (see its
+           docstring). Results are sorted by that score; ties keep the
+           Step B semantic-distance order.
 
 Only brands with a brand_match_profile row are ever considered — that's
 the population Stage 1 (brand_signals.py) has already computed signals
@@ -96,7 +99,7 @@ from pipeline.db import (
     InstagramUser,
     TestCreatorBrandPartnershipPost,
 )
-from pipeline.matching.match_text import generate_match_reasons
+from pipeline.matching.match_text import collect_match_reasons, generate_match_reasons
 from pipeline.matching.scoring import score_match
 
 logger = logging.getLogger(__name__)
@@ -272,11 +275,12 @@ def get_matches(
         logger.info("Matching: creator_id=%d — no qualifying brands after hard filters", creator_id)
         return ([], total) if include_total else []
 
-    # Step C — weighted scoring + match text
+    # Step C — tagline-points scoring + match text (one shared reasons pass)
     results = []
-    for brand, profile, distance in shortlist:
-        scored = score_match(db, creator, brand, profile, distance)
-        reasons = generate_match_reasons(creator, brand, profile, scored["dimensions"], db=db)
+    for brand, profile, _distance in shortlist:
+        reason_rows = collect_match_reasons(creator, brand, profile, db)
+        scored = score_match(db, creator, brand, reason_rows)
+        reasons = generate_match_reasons(creator, brand, profile, reasons=reason_rows)
         results.append({
             "brand_raw_id": brand.id,
             "brand_name":   brand.name,

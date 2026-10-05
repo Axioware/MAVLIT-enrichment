@@ -211,25 +211,33 @@ def _brand_niche_bridge_reason(creator: CreatorProfile, brand: BrandRaw, db) -> 
     return f"Although {brand.name} is a {brand.niche} brand, it also sponsors creators in the {matched_niche} niche, the same niche as you."
 
 
-def _additional_priority_reasons(creator: CreatorProfile, brand: BrandRaw, db) -> list[tuple[int, str]]:
-    reasons: list[tuple[int, str]] = []
+_CREATOR_SIZE_TOLERANCE = 0.25   # creator size taglines need followers within ±25% of the brand's average
+
+
+def _additional_priority_reasons(creator: CreatorProfile, brand: BrandRaw, db) -> list[tuple[float, str, str]]:
+    reasons: list[tuple[float, str, str]] = []
     avg_followers = None
     profile = db.query(BrandProfile).filter(BrandProfile.brand_raw_id == brand.id).first()
     if profile:
         avg_followers = profile.avg_ig_collaborator_followers or profile.avg_yt_creator_subscribers
 
     if avg_followers and creator.follower_count:
-        within_size = abs(creator.follower_count - avg_followers) <= avg_followers * 0.25
+        # Priority scales with how close the creator is to the brand's average
+        # collaborator size: full priority at the average, sliding linearly to
+        # 0 at ±_CREATOR_SIZE_TOLERANCE (scoring.py turns priority into points).
+        distance = abs(creator.follower_count - avg_followers) / avg_followers
+        within_size = distance <= _CREATOR_SIZE_TOLERANCE
+        closeness = 1.0 - distance / _CREATOR_SIZE_TOLERANCE
         similar_partners = _similar_partner_usernames(creator, brand, db)
         similar_partner = bool(similar_partners) or _same_niche_partner(creator, brand, db)
         if within_size and similar_partner:
             if similar_partners:
                 similarity_label = _similarity_match_label(max(similar_partners.values()))
-                reasons.append((80, f"{brand.name} has partnered with creators average ({avg_followers:,} followers), creators close to your size with content {similarity_label} similar to yours."))
+                reasons.append((80 * closeness, f"{brand.name} has partnered with creators average ({avg_followers:,} followers), creators close to your size with content {similarity_label} similar to yours.", "creator_size"))
             else:
-                reasons.append((80, f"{brand.name} has partnered with creators average ({avg_followers:,} followers), creators close to your size with content type same as yours."))
+                reasons.append((80 * closeness, f"{brand.name} has partnered with creators average ({avg_followers:,} followers), creators close to your size with content type same as yours.", "creator_size"))
         elif within_size:
-            reasons.append((50, f"{brand.name} has partnered with creators average ({avg_followers:,} followers), creators close to your size."))
+            reasons.append((50 * closeness, f"{brand.name} has partnered with creators average ({avg_followers:,} followers), creators close to your size.", "creator_size"))
 
     contact = db.query(BrandContact).filter(
         BrandContact.brand_raw_id == brand.id,
@@ -238,24 +246,24 @@ def _additional_priority_reasons(creator: CreatorProfile, brand: BrandRaw, db) -
         BrandContact.still_at_brand.is_(True),
     ).first()
     if contact:
-        reasons.append((75, f"MAVLIT has a verified contact for {brand.name}'s partnerships team."))
+        reasons.append((75, f"MAVLIT has a verified contact for {brand.name}'s partnerships team.", "verified_contact"))
 
     similar = _similar_partner_usernames(creator, brand, db)
     if len(similar) >= 3:
         similarity_label = _similarity_match_label(max(similar.values()))
-        reasons.append((78, f"{len(similar)} creators with content {similarity_label} similar to yours have partnered with {brand.name}."))
+        reasons.append((78, f"{len(similar)} creators with content {similarity_label} similar to yours have partnered with {brand.name}.", "similar_partners"))
     elif _same_niche_high_confidence_partner(creator, brand, db):
-        reasons.append((70, f"{brand.name} has partnered with a creator in the {creator.content_niche} niche, the same as yours."))
+        reasons.append((70, f"{brand.name} has partnered with a creator in the {creator.content_niche} niche, the same as yours.", "similar_partners"))
     elif similar:
         similarity_label = _similarity_match_label(max(similar.values()))
-        reasons.append((65, f"{brand.name} has partnered with a creator whose content {similarity_label} matches yours."))
+        reasons.append((65, f"{brand.name} has partnered with a creator whose content {similarity_label} matches yours.", "similar_partners"))
 
     youtube = db.query(YoutubeSponsorship).filter(
         YoutubeSponsorship.brand_raw_id == brand.id,
         YoutubeSponsorship.confidence >= 0.7,
     ).first()
     if youtube:
-        reasons.append((45, f"{brand.name} also sponsors YouTube creators."))
+        reasons.append((45, f"{brand.name} also sponsors YouTube creators.", "youtube_sponsor"))
 
     platform = (creator.primary_platform or "").strip().lower()
     if platform == "youtube":
@@ -272,24 +280,24 @@ def _additional_priority_reasons(creator: CreatorProfile, brand: BrandRaw, db) -
         and creator_followers is not None
         and follower_min <= creator_followers <= follower_max
     ):
-        reasons.append((69, f"{brand.name} works with creators that has followers range same as yours."))
+        reasons.append((69, f"{brand.name} works with creators that has followers range same as yours.", "follower_range"))
 
     if brand.brand_tier == "lower-range":
-        reasons.append((40, f"{brand.name} is a smaller brand, so creators can typically reach decision-makers directly."))
+        reasons.append((40, f"{brand.name} is a smaller brand, so creators can typically reach decision-makers directly.", "brand_tier"))
     elif brand.brand_tier == "midlower-range":
-        reasons.append((35, f"{brand.name} is a growing brand where creator outreach is still realistic."))
+        reasons.append((35, f"{brand.name} is a growing brand where creator outreach is still realistic.", "brand_tier"))
 
     brand_tags = _brand_tags(brand, db)
     creator_tags = _creator_sub_niche_names(creator)
     for brand_tag in brand_tags:
         for creator_tag in creator_tags:
             if _shorter_tag_words_match(brand_tag, creator_tag):
-                reasons.append((33, f"{brand.name} focuses on {brand_tag}, which overlaps with your content ({creator_tag})."))
+                reasons.append((33, f"{brand.name} focuses on {brand_tag}, which overlaps with your content ({creator_tag}).", "tag_overlap"))
                 break
         if reasons and reasons[-1][0] == 33:
             break
     if _creator_niche_names(creator) & {str(brand.niche or "").lower()}:
-        reasons.append((30, f"{brand.name} is a {brand.niche} brand, the same niche as you."))
+        reasons.append((30, f"{brand.name} is a {brand.niche} brand, the same niche as you.", "same_niche"))
 
     return reasons
 
@@ -376,17 +384,17 @@ def _target_gender_reason(creator: CreatorProfile, brand: BrandRaw, db) -> str |
     )
 
 
-def _brand_audience_reasons(creator: CreatorProfile, brand: BrandRaw, db=None) -> list[tuple[float, str]]:
+def _brand_audience_reasons(creator: CreatorProfile, brand: BrandRaw, db=None) -> list[tuple[float, str, str]]:
     """Pitch lines from brands_raw's audience/product columns — each one only when its column is filled."""
-    reasons: list[tuple[float, str]] = []
+    reasons: list[tuple[float, str, str]] = []
 
     latest_product = (brand.latest_product or "").strip()
     if latest_product:
-        reasons.append((29, f"{brand.name}'s latest product is {latest_product}, a timely hook for your pitch."))
+        reasons.append((29, f"{brand.name}'s latest product is {latest_product}, a timely hook for your pitch.", "latest_product"))
 
     target_gender_reason = _target_gender_reason(creator, brand, db)
     if target_gender_reason:
-        reasons.append((69.3, target_gender_reason))
+        reasons.append((69.3, target_gender_reason, "target_gender"))
 
     min_age, max_age = brand.target_audience_min_age, brand.target_audience_max_age
     if min_age is not None and max_age is not None:
@@ -405,11 +413,11 @@ def _brand_audience_reasons(creator: CreatorProfile, brand: BrandRaw, db=None) -
             and (max_age is None or creator_age <= max_age)
         )
         suffix = " which is within your age." if within_age else "."
-        reasons.append((69.2, f"{brand.name} targets an audience aged {age_range}{suffix}"))
+        reasons.append((69.2, f"{brand.name} targets an audience aged {age_range}{suffix}", "target_age"))
 
     product_gender = _PRODUCT_GENDER_LABELS.get((brand.product_audience_gender or "").strip().lower())
     if product_gender:
-        reasons.append((69.1, f"{brand.name}'s products are made for {product_gender}."))
+        reasons.append((69.1, f"{brand.name}'s products are made for {product_gender}.", "product_gender"))
 
     return reasons
 
@@ -513,31 +521,51 @@ _PRIORITY_TIERS = [
 ]
 
 
+NICHE_BRIDGE_PRIORITY = 10_000
+
+
+def collect_match_reasons(
+    creator: CreatorProfile,
+    brand: BrandRaw,
+    profile: BrandProfile | None,
+    db=None,
+) -> list[tuple[float, str, str]]:
+    """
+    Every applicable tagline as (priority, text, group_key), highest
+    priority first. group_key names the tagline group in taglines.md
+    ("niche_bridge", "recent_partnership", "creator_size", ...) — only one
+    option per group is ever returned. Used both for the match text and,
+    by pipeline.matching.scoring, as the match score's points.
+    """
+    reasons: list[tuple[float, str, str]] = []
+    bridge_reason = _brand_niche_bridge_reason(creator, brand, db)
+    if bridge_reason:
+        reasons.append((NICHE_BRIDGE_PRIORITY, bridge_reason, "niche_bridge"))
+    recent_candidates = _recent_sponsorship_candidates(creator, brand, db)
+    if recent_candidates:
+        recent_score, recent_reason = max(recent_candidates, key=lambda candidate: candidate[0])
+        reasons.append((recent_score, recent_reason, "recent_partnership"))
+    reasons.extend(_additional_priority_reasons(creator, brand, db))
+    reasons.extend(_brand_audience_reasons(creator, brand, db))
+    reasons.sort(key=lambda reason: reason[0], reverse=True)
+    return reasons
+
+
 def generate_match_reasons(
     creator: CreatorProfile,
     brand: BrandRaw,
     profile: BrandProfile | None,
-    dimensions: dict,
+    dimensions: dict | None = None,
     max_reasons: int | None = None,
     db=None,
+    reasons: list[tuple[float, str, str]] | None = None,
 ) -> list[str]:
     """
-    Returns one winner for each exclusive group and each applicable separate
-    signal, ordered by descending requested score.
-    `dimensions` is the score_match()["dimensions"] dict for this pair.
-    Returns every applicable reason unless `max_reasons` is given — the
-    matches page shows the top 5 and expands to the rest on click.
+    Tagline texts ordered by descending priority. Pass `reasons` (from
+    collect_match_reasons) to reuse already-computed reasons instead of
+    re-querying. Returns every applicable reason unless `max_reasons` is
+    given — the matches page shows the top 5 and expands to the rest on click.
     """
-    reasons: list[tuple[float, str]] = []
-    bridge_reason = _brand_niche_bridge_reason(creator, brand, db)
-    if bridge_reason:
-        reasons.append((10_000, bridge_reason))
-    recent_reason = _priority_1_recent_sponsorship_similarity(creator, brand, profile, dimensions, db)
-    if recent_reason:
-        recent_candidates = _recent_sponsorship_candidates(creator, brand, db)
-        recent_score = max(score for score, text in recent_candidates if text == recent_reason)
-        reasons.append((recent_score, recent_reason))
-    reasons.extend(_additional_priority_reasons(creator, brand, db))
-    reasons.extend(_brand_audience_reasons(creator, brand, db))
-    reasons.sort(key=lambda reason: reason[0], reverse=True)
-    return [text for _, text in reasons[:max_reasons]]
+    if reasons is None:
+        reasons = collect_match_reasons(creator, brand, profile, db)
+    return [text for _, text, _ in reasons[:max_reasons]]
