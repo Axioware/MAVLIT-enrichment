@@ -3,9 +3,9 @@ pipeline/enrichment/initial_brand_scoring.py
 
 Computes a single 0-100 brand-quality score, independent of any specific
 creator — the gate that decides which brands are worth running the rest of
-the pipeline on. run_brand_scoring() only scores brands that have already
-been through every enrichment step (wikidata/shopify/tranco/meta_ads/
-youtube/instagram); brand_signals.py's Stage 1 in turn only processes
+the pipeline on. run_brand_scoring() only scores brands that have a
+website and have been through shopify_detect and tranco (youtube/instagram
+enrichment is not required first); brand_signals.py's Stage 1 in turn only processes
 brands with total_score >= 50. Scores are written to initial_brand_score
 (one row per brand, UPSERTed on re-run — safe to call repeatedly).
 
@@ -495,8 +495,6 @@ def run_brand_scoring(db: Session, limit: int = 500, brand_id: int | None = None
                 BrandRaw.has_official_website == True,
                 BrandRaw.shopify_checked    == True,
                 BrandRaw.tranco_checked     == True,
-                BrandRaw.youtube_checked    == True,
-                BrandRaw.instagram_checked  == True,
                 BrandRaw.initial_brand_scored == False,
                 BrandRaw.refferls.is_(False),
                 (
