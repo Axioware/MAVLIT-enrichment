@@ -70,9 +70,11 @@ Runs on every page load; designed to be cheap:
   Step C — Score each shortlisted candidate from its "why it's a match"
            taglines (pipeline.matching.match_text.collect_match_reasons):
            every applicable tagline earns its priority as points, scaled
-           to 45-100% by pipeline.matching.scoring.score_match (see its
-           docstring). Results are sorted by that score; ties keep the
-           Step B semantic-distance order.
+           to 55-100% by pipeline.matching.scoring.score_match (see its
+           docstring). Results are sorted by niche tier first (brand niche
+           + confident creators match yours > brand niche matches yours >
+           only its confident creators match yours > neither), then by
+           that score; ties keep the Step B semantic-distance order.
 
 Only brands with a brand_match_profile row are ever considered — that's
 the population Stage 1 (brand_signals.py) has already computed signals
@@ -286,11 +288,13 @@ def get_matches(
             "brand_name":   brand.name,
             "niche":        brand.niche,
             "total_score":  round(scored["total_score"], 4),
+            "niche_tier":   scored["niche_tier"],
             "dimensions":   scored["dimensions"],
             "reasons":      reasons,
         })
 
-    results.sort(key=lambda r: r["total_score"], reverse=True)
+    # Niche tier first (see scoring._niche_tier), then score within a tier.
+    results.sort(key=lambda r: (r["niche_tier"], r["total_score"]), reverse=True)
     logger.info("length======== %d", len(results))
     print("length========", len(results))
 

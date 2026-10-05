@@ -4,9 +4,9 @@ pipeline/matching/scoring.py
 Stage 3 Step C — match score built from the "why it's a match" taglines
 (pipeline/matching/match_text.py, documented in taglines.md).
 
-Every brand starts at 55%. Each tagline group can add up to its
-GROUP_MAX_POINTS (they sum to 45, so 1 point = +1% and a brand that maxes
-every group scores 100%). Only one option per tagline group can apply; it
+Every brand starts at 55%. Each group can add up to its GROUP_MAX_POINTS;
+earned points are scaled onto the remaining 45% (a brand that maxes every
+group scores 100%). Only one option per tagline group can apply; it
 earns its share of the group's points in proportion to its tagline
 priority, relative to the group's top priority (_GROUP_TOP_PRIORITY):
 
@@ -25,13 +25,25 @@ but earn no points: Niche bridge (priority 10000, only orders the text),
 and 12. Target audience gender / 13. Target audience age / 14. Product
 audience gender.
 
-One extra signal that has no tagline of its own:
+Two extra signals that have no tagline of their own:
     niche_creators  the brand's niche is one of the creator's niches AND
                     1 of the brand's creators (Instagram collaborator or RE
                     creator) is in one of them too -> 2/3 of its points;
                     2+ such creators -> all of its points
+    niche_tier      first of these that applies (see _niche_tier); also
+                    the primary sort key on the matches page (matcher.py
+                    sorts by niche_tier, then total_score):
+                      tier 3  brand niche = creator's niche AND the brand
+                              has a confidence >= 90 creator in that same
+                              niche                            -> 10 pts
+                      tier 2  brand niche = creator's niche     ->  5 pts
+                      tier 1  brand niche != creator's niche, but it has
+                              confidence >= 90 creators in the creator's
+                              niche                -> 2 pts each (max 10)
+                      tier 0  none of the above                 ->  0
 
-    total = 0.55 + sum(points) / 100      (returned as 0.55-1.0)
+    total = 0.55 + 0.45 * sum(points) / sum(GROUP_MAX_POINTS)
+    (returned as 0.55-1.0)
 """
 
 from sqlalchemy import func
@@ -42,6 +54,7 @@ from pipeline.db import (
     BrandRaw,
     ContentCreatorRE,
     CreatorProfile,
+    InstagramPost,
     InstagramUser,
     TestCreatorBrandPartnershipPost,
 )
@@ -50,9 +63,9 @@ from pipeline.matching.match_text import _creator_niche_names
 SCORE_BASE  = 0.55   # score with no applicable signals
 SCORE_RANGE = 0.45   # SCORE_BASE + SCORE_RANGE = 1.0 when every group is maxed
 
-# Most points (= % of the final score) each group can add. Sums to 45
-# (= SCORE_RANGE * 100).
+# Most points each group can add. Scaled onto SCORE_RANGE by their sum.
 GROUP_MAX_POINTS: dict[str, float] = {
+    "niche_tier":         10,   # brand niche vs your niche + its confident creators (see _niche_tier)
     "recent_partnership": 8,    # 2. paid partnership in the last 6 months
     "niche_creators":     7,    # brand niche + its creators' niche match yours
     "similar_partners":   6,    # 5. partnered with similar / same-niche creators
@@ -86,6 +99,11 @@ _GROUP_TOP_PRIORITY: dict[str, float] = {
 
 # Matching creators -> share of niche_creators' points (2 = "2 or more").
 _NICHE_CREATOR_SHARE = {1: 2 / 3, 2: 1.0}
+
+# niche_tier points: tier 3 / tier 2 fixed, tier 1 per matching creator.
+_NICHE_TIER_POINTS = {3: 10.0, 2: 5.0}
+_NICHE_TIER_POINTS_PER_CREATOR = 2.0
+_CONFIDENT_SPONSORSHIP = 90
 
 
 def _niche_creator_points(db: Session, creator: CreatorProfile, brand: BrandRaw) -> float:
@@ -130,6 +148,65 @@ def _niche_creator_points(db: Session, creator: CreatorProfile, brand: BrandRaw)
     return GROUP_MAX_POINTS["niche_creators"] * _NICHE_CREATOR_SHARE[min(matching, 2)]
 
 
+def _confident_creator_niches(db: Session, brand: BrandRaw) -> set[tuple[str, str]]:
+    """
+    (username, niche) pairs, lowercased, for the brand's creators on a
+    sponsorship_confidence >= 90 post: non-commenter Instagram collaborators
+    on the brand's own posts (instagram_users.niche) and reverse-engineered
+    creators on its test partnership posts (content_creator_re.niche).
+    """
+    collaborators = (
+        db.query(InstagramUser.username, InstagramUser.niche)
+        .join(BrandInstagramUser, BrandInstagramUser.instagram_user_id == InstagramUser.id)
+        .join(InstagramPost, InstagramPost.post_id == InstagramUser.post_id)
+        .filter(
+            BrandInstagramUser.brand_raw_id == brand.id,
+            InstagramPost.brand_raw_id == brand.id,
+            InstagramPost.sponsorship_confidence >= _CONFIDENT_SPONSORSHIP,
+            InstagramUser.user_type != "commenter",
+            InstagramUser.niche.isnot(None),
+        )
+        .distinct()
+        .all()
+    )
+    re_creators = (
+        db.query(TestCreatorBrandPartnershipPost.creator_username, ContentCreatorRE.niche)
+        .join(ContentCreatorRE, TestCreatorBrandPartnershipPost.content_creator_re_id == ContentCreatorRE.id)
+        .filter(
+            TestCreatorBrandPartnershipPost.brand_raw_id == brand.id,
+            TestCreatorBrandPartnershipPost.sponsorship_confidence >= _CONFIDENT_SPONSORSHIP,
+            ContentCreatorRE.niche.isnot(None),
+        )
+        .distinct()
+        .all()
+    )
+    return {
+        (username.strip().lower(), niche.strip().lower())
+        for username, niche in [*collaborators, *re_creators]
+        if username and username.strip() and niche and niche.strip()
+    }
+
+
+def _niche_tier(db: Session, creator: CreatorProfile, brand: BrandRaw) -> tuple[int, float]:
+    """(tier, points) — the first condition that applies, see module docstring."""
+    niches = _creator_niche_names(creator)
+    if not niches:
+        return 0, 0.0
+    brand_niche = (brand.niche or "").strip().lower()
+    creators = _confident_creator_niches(db, brand)
+
+    if brand_niche and brand_niche in niches:
+        if any(niche == brand_niche for _, niche in creators):
+            return 3, _NICHE_TIER_POINTS[3]
+        return 2, _NICHE_TIER_POINTS[2]
+
+    matching = {username for username, niche in creators if niche in niches}
+    if matching:
+        points = min(_NICHE_TIER_POINTS_PER_CREATOR * len(matching), GROUP_MAX_POINTS["niche_tier"])
+        return 1, points
+    return 0, 0.0
+
+
 def score_match(
     db: Session,
     creator: CreatorProfile,
@@ -139,7 +216,8 @@ def score_match(
     """
     `reasons` is match_text.collect_match_reasons() for this pair.
 
-    Returns {"total_score": 0.55-1.0, "dimensions": {name: {"score", "weight"}}}
+    Returns {"total_score": 0.55-1.0, "niche_tier": 0-3,
+             "dimensions": {name: {"score", "weight"}}}
     where "base" is the fixed 55% floor and every other dimension is one
     tagline group: score = points earned / that group's max (0.0-1.0),
     weight = that group's share of the 55-100 range. So
@@ -153,6 +231,7 @@ def score_match(
         points = GROUP_MAX_POINTS[key] * min(float(priority), top) / top
         earned[key] = max(earned[key], points)
     earned["niche_creators"] = _niche_creator_points(db, creator, brand)
+    niche_tier, earned["niche_tier"] = _niche_tier(db, creator, brand)
 
     total = SCORE_BASE + SCORE_RANGE * sum(earned.values()) / _MAX_POINTS
 
@@ -163,4 +242,8 @@ def score_match(
             "weight": SCORE_RANGE * max_points / _MAX_POINTS,
         }
 
-    return {"total_score": max(SCORE_BASE, min(1.0, total)), "dimensions": dimensions}
+    return {
+        "total_score": max(SCORE_BASE, min(1.0, total)),
+        "niche_tier":  niche_tier,
+        "dimensions":  dimensions,
+    }
