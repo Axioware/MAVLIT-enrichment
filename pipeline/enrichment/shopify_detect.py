@@ -41,6 +41,11 @@ description (brands_raw AND its brands_niches mirror) is always
 overwritten with freshly scraped text on every run, regardless of any
 existing value.
 
+Pages are fetched with a direct GET; if a site blocks or errors on that
+(403/429/5xx, timeout, SSL...), the same URL is retried through Jina AI
+Reader (r.jina.ai), which renders it in a headless browser on Jina's side
+and returns the page HTML. Set JINA_API_KEY in .env for higher rate limits.
+
 Sets shopify_checked=True for every processed brand.
 Only runs for brands that have a website (has_official_website=True).
 """
@@ -56,7 +61,7 @@ from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from config import OPENAI_KEY
+from config import JINA_API_KEY, OPENAI_KEY
 from pipeline.db import BrandNiche, BrandRaw, Prompt, normalize_niche
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.normalize import normalize
@@ -83,6 +88,11 @@ _WOOCOMMERCE_MARKERS = (
 )
 _TIMEOUT = 12
 
+# Jina AI Reader fallback for pages the direct fetch can't open (see _fetch_page)
+_JINA_READER_URL      = "https://r.jina.ai/"
+_JINA_TIMEOUT         = 30
+_NO_FALLBACK_STATUSES = frozenset({404, 410})
+
 # Paths that appear in social share/utility URLs — not profile pages
 _SKIP_PATHS = frozenset([
     "share", "sharer", "sharer.php", "intent", "login", "signup",
@@ -92,16 +102,62 @@ _SKIP_PATHS = frozenset([
 ])
 
 
+def _fetch_page_via_jina(url: str) -> str | None:
+    """
+    Fetch url through Jina AI Reader, which loads it in a headless browser
+    on Jina's servers (JS rendered, different IP) and returns the rendered
+    page HTML — so the Shopify/WooCommerce markers, <a href> socials and
+    <meta> descriptions parsed below all still work unchanged. Returns None
+    if Jina fails or reports the target page itself returned an error.
+    """
+    headers = {
+        "Accept":          "application/json",
+        "X-Return-Format": "html",
+        "X-Timeout":       str(_JINA_TIMEOUT),
+    }
+    if JINA_API_KEY:
+        headers["Authorization"] = f"Bearer {JINA_API_KEY}"
+    try:
+        resp = httpx.get(_JINA_READER_URL + url, headers=headers, timeout=_JINA_TIMEOUT + 15)
+        resp.raise_for_status()
+        data = resp.json().get("data") or {}
+    except Exception as exc:
+        logger.debug("Jina Reader fetch failed for %s: %s", url, exc)
+        return None
+
+    target_status = data.get("httpStatus")
+    if isinstance(target_status, int) and target_status >= 400:
+        logger.debug("Jina Reader: %s returned HTTP %d", url, target_status)
+        return None
+    return data.get("html") or None
+
+
 def _fetch_page(url: str) -> str | None:
+    """
+    Direct GET first; if that's blocked or errors (403/429/5xx, timeout,
+    SSL, connection reset...), retry through Jina Reader. A 404/410 means
+    the page genuinely doesn't exist (common for the _ABOUT_PATHS guesses),
+    so those don't fall back — Jina would just get the same 404.
+    """
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     try:
         resp = httpx.get(url, headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True)
         resp.raise_for_status()
         return resp.text
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in _NO_FALLBACK_STATUSES:
+            logger.debug("Page fetch failed for %s: %s", url, exc)
+            return None
+        reason = f"HTTP {exc.response.status_code}"
     except Exception as exc:
-        logger.debug("Page fetch failed for %s: %s", url, exc)
-        return None
+        reason = type(exc).__name__
+
+    logger.info("Direct fetch failed for %s (%s) — retrying via Jina Reader", url, reason)
+    html = _fetch_page_via_jina(url)
+    if html:
+        logger.info("Jina Reader fetched %s (%d chars)", url, len(html))
+    return html
 
 
 def _extract_socials(html: str) -> dict[str, str]:

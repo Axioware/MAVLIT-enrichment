@@ -34,6 +34,11 @@ YOUTUBE_API_KEY_11 = os.getenv("YOUTUBE_API_KEY_11", "")
 YOUTUBE_API_KEY_12 = os.getenv("YOUTUBE_API_KEY_12", "")
 APIFY_TOKEN       = os.getenv("APIFY_TOKEN", "")
 
+# Jina AI Reader (https://r.jina.ai) — fallback page fetcher used by
+# pipeline/enrichment/shopify_detect.py when a direct fetch is blocked or
+# errors. Optional: works without a key on the free tier (~20 req/min).
+JINA_API_KEY = os.getenv("JINA_API_KEY", "")
+
 # Hunter.io Email Verifier — pipeline/enrichment/hunter_verify.py, checks
 # deliverability of emails Apollo already found and saved in brand_contacts.
 HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
