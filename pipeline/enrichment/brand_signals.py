@@ -61,6 +61,7 @@ from pipeline.enrichment.initial_brand_scoring import (
 )
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.gpt_llm import embed_text
+from pipeline.helpers.social import normalize_handle
 
 logger = logging.getLogger(__name__)
 
@@ -385,7 +386,14 @@ def build_brand_embedding_text(brand: BrandRaw, profile: "BrandProfile | None") 
     fabricates a value for missing data (e.g. omits the activity bucket
     entirely until sponsorship_activity_score has actually been computed).
     """
-    parts = [brand.name]
+    # Bare brands (e.g. from content_creator_re) can have name NULL — fall
+    # back to the domain or Instagram handle, or omit the name entirely.
+    name = (
+        brand.name
+        or brand.domain
+        or (normalize_handle(brand.instagram_handle) if brand.instagram_handle else None)
+    )
+    parts = [name] if name else []
 
     if brand.niche:
         parts.append(f"in the {brand.niche} space")
