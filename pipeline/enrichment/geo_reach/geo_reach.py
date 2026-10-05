@@ -80,6 +80,7 @@ import re
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from config import OPENAI_KEY
@@ -572,6 +573,9 @@ def enrich_geo_reach(
         BrandRaw.geo_reach_score.is_(None),
         (
             BrandRaw.geo_reach_country_codes.is_(None)
+            # JSONB 'null' (what the ORM writes when the column is set to
+            # None) is not SQL NULL — treat it as "no result yet" too.
+            | (func.jsonb_typeof(BrandRaw.geo_reach_country_codes) == "null")
             | (BrandRaw.geo_reach_country_codes == [])
         ),
         BrandRaw.website.isnot(None),
