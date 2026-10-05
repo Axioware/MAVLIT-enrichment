@@ -31,7 +31,9 @@ Resolution order, first hit wins:
        - "website"  -> the URL and the LLM-derived/confirmed name.
        - "linktree" -> scrape that link-in-bio page's outbound links and
          classify each one the same way until one comes back "website"
-         (carrying its own derived name along with it).
+         (carrying its own derived name along with it). The page is
+         fetched directly; if that's blocked/errors, or loads but has no
+         outbound links (JS-rendered), it's retried via Jina AI Reader.
   3. If nothing resolved from the profile (no external URL, private
      account, or every link classified "social"/"marketplace"/"unknown"),
      fall back to a search against a local SearXNG instance (config.
@@ -82,6 +84,7 @@ from config import APIFY_TOKEN, SEARXNG_URL
 from pipeline.db import BrandRaw, Prompt
 from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.helpers.http import fetch_page_via_jina, fetch_page_with_jina_fallback
 from pipeline.helpers.normalize import normalize
 from pipeline.helpers.prompts import (
     LINK_CLASSIFY_DEFAULT_PROMPT,
@@ -320,19 +323,32 @@ def _scrape_outbound_links(url: str) -> list[str]:
     domain, capped). Server-rendered <a href> tags first, then JSON-LD
     "sameAs" URLs (_extract_jsonld_sameas_links) as a fallback for pages
     whose real links only exist after client-side JS rendering.
+
+    Fetched directly, falling back to Jina Reader if the host blocks or
+    errors (see fetch_page_with_jina_fallback). If a direct fetch succeeds
+    but yields no outbound links at all, the page is assumed to build its
+    links client-side and is re-fetched once through Jina, which renders JS.
     """
-    try:
-        resp = httpx.get(url, headers=_PAGE_HEADERS, timeout=_PAGE_TIMEOUT, follow_redirects=True)
-        resp.raise_for_status()
-    except Exception as exc:
-        logger.debug("Linktree page fetch failed for %s: %s", url, exc)
+    page = fetch_page_with_jina_fallback(url, _PAGE_HEADERS, _PAGE_TIMEOUT)
+    if page is None:
+        logger.debug("Linktree page fetch failed for %s", url)
         return []
 
-    soup = BeautifulSoup(resp.text, "html.parser")
-    page_domain = _extract_domain(str(resp.url))
+    links = _outbound_links_from_html(page.html, page.url)
+    if links or page.via_jina:
+        return links
+
+    logger.info("Linktree page %s has no outbound links in plain HTML — retrying via Jina Reader (JS rendered)", url)
+    rendered = fetch_page_via_jina(url)
+    return _outbound_links_from_html(rendered.html, rendered.url) if rendered else []
+
+
+def _outbound_links_from_html(html: str, page_url: str) -> list[str]:
+    soup = BeautifulSoup(html, "html.parser")
+    page_domain = _extract_domain(page_url)
 
     candidate_hrefs = [a["href"].strip() for a in soup.find_all("a", href=True)]
-    candidate_hrefs += _extract_jsonld_sameas_links(resp.text)
+    candidate_hrefs += _extract_jsonld_sameas_links(html)
 
     seen: set[str] = set()
     links: list[str] = []

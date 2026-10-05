@@ -64,6 +64,11 @@ geo_reach_country_codes (e.g. ["US"], ["US", "CA"], or ["GLOBAL"]).
 The brand's own Instagram bio (instagram_posts.biography, most recent row)
 is passed to the LLM alongside the page text as extra context.
 
+Pages are fetched with a direct GET; if a site blocks or errors on that
+(403/429/5xx, timeout, SSL...), the same URL is retried through Jina AI
+Reader (r.jina.ai), which renders it in a headless browser on Jina's side
+and returns the page HTML. Set JINA_API_KEY in .env for higher rate limits.
+
 Safe to re-run — rows with a non-null geo_reach_score are skipped. Only
 brands with a website are eligible. Rows where scraping cannot establish a
 score remain eligible for a later retry.
@@ -74,7 +79,6 @@ import logging
 import re
 from urllib.parse import urljoin, urlparse
 
-import httpx
 from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
@@ -87,6 +91,7 @@ from pipeline.db import (
     TestCreatorBrandPartnershipPost,
 )
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.helpers.http import fetch_html_with_jina_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -283,13 +288,12 @@ def _normalize_origin(website: str) -> str:
 
 
 def _fetch_page(url: str) -> str | None:
-    try:
-        resp = httpx.get(url, headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True)
-        resp.raise_for_status()
-        return resp.text
-    except Exception as exc:
-        logger.debug("geo_reach: fetch failed for %s: %s", url, exc)
-        return None
+    """
+    Direct GET, falling back to Jina Reader if the site blocks or errors
+    (see fetch_html_with_jina_fallback). Jina returns the rendered page
+    HTML, so link discovery and text cleaning below work unchanged.
+    """
+    return fetch_html_with_jina_fallback(url, _HEADERS, _TIMEOUT)
 
 
 def _clean_page_text(html: str) -> str:
