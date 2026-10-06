@@ -91,6 +91,12 @@ def refresh_content_creator_re(
     for callers that want to chain further enrichment onto them.
     """
     creators = eligible_creators(db, days=days, niche=niche, limit=limit)
+    # End the read transaction before scraping: enrich_content_creator_re()
+    # runs ALTER TABLE on test_creator_brand_partnership_posts (and others)
+    # over its own connection, which waits forever on any lock this session
+    # still holds from the eligibility query. Loaded rows stay usable
+    # (expire_on_commit=False).
+    db.commit()
     if not creators:
         logger.info("Refresh content creator RE: no creators older than %d day(s) to refresh", days)
         return 0, set()
