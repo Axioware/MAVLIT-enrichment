@@ -99,39 +99,34 @@ WITH best_per_brand AS (
     tcbp.post_timestamp,
     tcbp.sponsorship_confidence
   FROM content_creator_re ccr
-  JOIN test_creator_brand_partnership_posts tcbp
-    ON tcbp.content_creator_re_id = ccr.id
-  JOIN brands_raw br
-    ON br.id = tcbp.brand_raw_id
-  WHERE ccr.id BETWEEN 169 AND 182
+  JOIN test_creator_brand_partnership_posts tcbp ON tcbp.content_creator_re_id = ccr.id
+  JOIN brands_raw br ON br.id = tcbp.brand_raw_id
+  WHERE ccr.id > 208
+    AND ccr.is_scraped = true
     AND tcbp.sponsorship_confidence >= 90
     AND br.refferls = false
+    AND br.geo_reach_score BETWEEN 0 AND 40
     AND tcbp.post_timestamp >= '2026-01-01'
-    AND tcbp.post_timestamp < '2027-01-01'
-    AND NOT EXISTS (
+    AND tcbp.post_timestamp <  '2027-01-01'
+    AND NOT EXISTS (                       -- same brand, same conditions, creator id 1-208
       SELECT 1
       FROM test_creator_brand_partnership_posts t2
-      JOIN content_creator_re c2
-        ON c2.id = t2.content_creator_re_id
+      JOIN content_creator_re c2 ON c2.id = t2.content_creator_re_id
       WHERE t2.brand_raw_id = tcbp.brand_raw_id
-        AND c2.id NOT BETWEEN 128 AND 168
+        AND c2.id BETWEEN 1 AND 208
+        AND c2.is_scraped = true
+        AND t2.sponsorship_confidence >= 90
+        AND t2.post_timestamp >= '2026-01-01'
+        AND t2.post_timestamp <  '2027-01-01'
     )
   ORDER BY
     tcbp.brand_raw_id,
     tcbp.sponsorship_confidence DESC NULLS LAST,
     tcbp.post_timestamp DESC NULLS LAST
 )
-SELECT
-  creator_username,
-  niche,
-  brand_name,
-  post_url,
-  post_timestamp,
-  sponsorship_confidence
+SELECT creator_username, niche, brand_name, post_url, post_timestamp, sponsorship_confidence
 FROM best_per_brand
-ORDER BY
-  niche ASC,
-  brand_name ASC;
+ORDER BY niche ASC, brand_name ASC;
 
 
 
