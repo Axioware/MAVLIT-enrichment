@@ -4,8 +4,9 @@ pipeline/matching/llm_ranking_v3.py
 Matches v3 — a mix of v1 and v2. Like v2 (llm_ranking.py), the LLM ranks
 every brand passing the Stage 3 hard filters against the creator's
 profile; v3 additionally gives it each brand's "why it's a match"
-taglines (match_text.generate_match_reasons — the evidence v1 shows), and
-the prompt weighs content fit and that match evidence equally.
+taglines (match_text.generate_match_reasons — the evidence v1 shows). The
+prompt has the LLM score content fit and that match evidence separately and
+return confidence = 0.65 x content fit + 0.35 x match evidence.
 
   creator — niche(s), sub-niche tags, content_tags, description(s),
             embedding_text                     (same as v2)
@@ -24,7 +25,10 @@ from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 
 from pipeline.db import CreatorBrandLlmV3Ranking, CreatorProfile, Prompt
-from pipeline.helpers.prompts import LLM_BRAND_RANKING_V3_DEFAULT_PROMPT, LLM_BRAND_RANKING_V3_PROMPT_NAME
+from pipeline.helpers.prompts import (
+    LLM_BRAND_RANKING_V3_DEFAULT_PROMPT,
+    LLM_BRAND_RANKING_V3_PROMPT_NAME,
+)
 from pipeline.matching.llm_ranking import (
     _BATCH_SIZE,
     _MAX_BRANDS,

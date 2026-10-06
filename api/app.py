@@ -2080,8 +2080,8 @@ def refresh_my_llm_matches(
 @app.get("/matches/me/v3", response_model=LlmMatchesResponse)
 def get_my_llm_v3_matches(current_user: CreatorProfile = Depends(get_completed_user)):
     """
-    Matches v3 — brands ranked by the LLM from profile fit AND each brand's
-    "why it's a match" taglines, weighted equally
+    Matches v3 — brands ranked by the LLM from profile fit (65%) AND each
+    brand's "why it's a match" taglines (35%)
     (pipeline/matching/llm_ranking_v3.py). Same response shape as v2.
     Runs in the background after every profile save (after v2), or on
     POST /matches/me/v3/refresh.

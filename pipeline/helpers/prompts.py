@@ -1441,6 +1441,16 @@ Broad brands may receive good scores for creators in the same niche even when th
 
 Specialized brands should receive high scores ONLY when the creator's description, tags, sub-niche, or content clearly indicate that specialization.
 
+SPECIALIZED MISMATCH RULE (overrides every other rule and the scoring bands below):
+If a brand is SPECIALIZED and the creator's description, tags, sub-niches and content do NOT show that specialization, its confidence MUST be 15 or lower.
+This applies when the creator's content is general for the niche, or is about a different specialization.
+Examples:
+* Drum / percussion brands for a singer, songwriter or music producer whose content does not mention drums or percussion -> 15 or lower. Only drummers, percussionists, or creators whose content clearly shows drum work should see drum brands above 15.
+* Vinyl pressing, vinyl retailers, record labels or distribution services for a creator who does not say they release physical music or work with labels -> 15 or lower. Posting songs, covers or original music online does NOT count as releasing physical music.
+* Powerlifting, cycling or other discipline-specific gear for a Fitness creator who does not do that discipline -> 15 or lower.
+* Products for a specific hair type, skin concern or medical condition for a creator who does not cover it -> 15 or lower.
+These brands should end up at the bottom of the ranking, below every broad or matching brand.
+
 Do not force exact tag-to-tag matching. Judge whether the brand's product is realistically useful or promotable by this type of creator.
 
 MUSIC EXAMPLES
@@ -1503,6 +1513,7 @@ RANKING RULES
 * If a brand has very little information, score cautiously.
 * Compare brands against each other so the most naturally relevant sponsorship opportunities receive the highest scores.
 * Specialized brands with no creator-specific evidence should rank below broad brands that are naturally usable by the creator.
+* Apply the SPECIALIZED MISMATCH RULE last: a specialized brand the creator's content does not support is capped at 15.
 
 Judge only from the information provided.
 
@@ -1532,27 +1543,44 @@ BRANDS (JSON list - each has id, name, niche, description, tags, why_it_matches)
 
 "why_it_matches" lists the platform's verified match signals between that brand and this creator. They are written to the creator, so "you" / "yours" means THIS creator. Examples: recent paid partnerships, partnerships with creators whose content is similar to this creator's, follower-size fit, a verified partnerships contact, same niche, the brand sponsoring creators in this creator's niche, audience fit.
 
-For EVERY brand, return a confidence from 0 to 100 that it is a strong, realistic sponsorship opportunity for THIS creator. Weigh these two parts EQUALLY (about half each):
+For EVERY brand, score two parts separately from 0 to 100, then combine them. CONTENT FIT counts for 65% and MATCH EVIDENCE for 35%.
 
-1. CONTENT FIT - how naturally the brand's products fit the creator's niche, sub-niches, tags and description.
+1. CONTENT FIT (65%) - how naturally the brand's products fit the creator's niche, sub-niches, tags and description.
    - BROAD brands (products many creators in the niche can naturally use or recommend) can fit well even without an exact tag match.
      e.g. a singer, songwriter or music producer naturally fits microphones, headphones, audio interfaces, studio gear, music software and general instruments such as guitars.
    - SPECIALIZED brands (a specific instrument, sport, discipline, body/skin/hair concern, medical condition, or a service aimed at artists such as vinyl pressing, record labels, distribution or mastering) fit well ONLY when the creator's information shows that specialization.
      e.g. drum/percussion brands fit drummers, not singers; vinyl pressing fits creators who release physical music; a powerlifting brand fits powerlifters, not yoga creators; a curly-hair brand fits creators who cover curly hair.
    - Apply the same logic to Music, Health, Fitness and Beauty.
+   Content fit scale:
+   - 90-100: direct, natural fit; the brand's specialization matches the creator's content.
+   - 70-89: strong fit; a broad brand the creator could naturally promote.
+   - 45-69: partial or indirect fit.
+   - 20-44: weak fit; shares only a broad niche.
+   - 0-19: no meaningful fit, or a SPECIALIZED brand the creator's content does not support (see the mismatch rule below).
 
-2. MATCH EVIDENCE - how strong the brand's why_it_matches signals are.
+2. MATCH EVIDENCE (35%) - how strong the brand's why_it_matches signals are.
    - Strongest: a recent paid partnership (especially in the last month or 3 months, or with creators whose content matches this creator's); partnerships with creators similar to this creator; follower/size fit; the brand sponsoring creators in this creator's niche.
    - Helpful: a verified partnerships contact; same niche; YouTube sponsorships; a smaller or growing brand (easier to reach); tag overlap with the creator's content; a latest product to pitch around.
    - Weak: lines that only describe the brand's audience (target audience gender or age, who its products are made for) - count them very little.
-   - More and stronger signals = stronger evidence. An empty list means no evidence, which is neutral for content fit but adds nothing.
+   Match evidence scale:
+   - 90-100: a recent paid partnership plus other strong signals.
+   - 70-89: a recent paid partnership, or several strong signals.
+   - 40-69: some helpful signals but no recent paid partnership.
+   - 10-39: only weak signals.
+   - 0-9: no signals (empty why_it_matches).
 
-Combine the two parts:
-- Strong content fit AND strong evidence: 85-100.
-- Strong on one part, good on the other: 70-84.
-- Strong on one part but weak or missing on the other, or moderate on both: 50-69.
-- Weak on both, with only some plausible overlap: 30-49.
-- Poor content fit and little or no evidence: 0-29.
+Final confidence = round(0.65 x content fit + 0.35 x match evidence).
+Examples: fit 90 and evidence 80 -> 87; fit 90 and evidence 0 -> 59; fit 40 and evidence 90 -> 58; fit 10 and evidence 90 -> 38.
+
+SPECIALIZED MISMATCH RULE (apply AFTER the formula; overrides it):
+If a brand is SPECIALIZED and the creator's description, tags, sub-niches and content do NOT show that specialization, the final confidence MUST be 15 or lower - no matter how strong its match evidence is.
+This applies when the creator's content is general for the niche, or is about a different specialization.
+Examples:
+- Drum / percussion brands for a singer, songwriter or music producer whose content does not mention drums or percussion -> 15 or lower, even with a recent paid partnership. Only drummers, percussionists, or creators whose content clearly shows drum work should see drum brands above 15.
+- Vinyl pressing, vinyl retailers, record labels or distribution services for a creator who does not say they release physical music or work with labels -> 15 or lower. Posting songs, covers or original music online does NOT count as releasing physical music.
+- Powerlifting, cycling or other discipline-specific gear for a Fitness creator who does not do that discipline -> 15 or lower.
+- Products for a specific hair type, skin concern or medical condition for a creator who does not cover it -> 15 or lower.
+These brands should end up at the bottom of the ranking, below every broad or matching brand.
 
 RULES
 - Score each brand on the absolute scale above, independently of the other brands in this list. Brands are sent in separate batches, so never rescale or spread scores across the list.
