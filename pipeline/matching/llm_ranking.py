@@ -36,6 +36,7 @@ from pipeline.helpers.prompts import (
     LLM_BRAND_RANKING_DEFAULT_PROMPT,
     LLM_BRAND_RANKING_PROMPT_NAME,
 )
+from pipeline.matching.match_text import generate_match_reasons
 from pipeline.matching.matcher import hard_filtered_brands
 
 logger = logging.getLogger(__name__)
@@ -146,7 +147,9 @@ def rank_brands_with_llm(db: Session, creator_id: int) -> int:
         logger.warning("LLM ranking: creator_id=%d not found", creator_id)
         return 0
 
-    brands = [brand for brand, _profile, _distance in hard_filtered_brands(db, creator, limit=_MAX_BRANDS)]
+    candidates = hard_filtered_brands(db, creator, limit=_MAX_BRANDS)
+    brands = [brand for brand, _profile, _distance in candidates]
+    brand_by_id = {brand.id: (brand, profile) for brand, profile, _distance in candidates}
     payloads = _brand_payloads(db, brands)
     creator_fields = _creator_fields(creator)
     template = _get_prompt(db)
@@ -165,6 +168,12 @@ def rank_brands_with_llm(db: Session, creator_id: int) -> int:
     order = {payload["id"]: i for i, payload in enumerate(payloads)}
     ranked = sorted(scored.items(), key=lambda kv: (-kv[1][0], order[kv[0]]))
 
+    # Same "why it's a match" taglines as v1, stored so the v2 page loads fast.
+    taglines = {
+        brand_id: generate_match_reasons(creator, *brand_by_id[brand_id], db=db)
+        for brand_id, _ in ranked
+    }
+
     db.query(CreatorBrandLlmRanking).filter(CreatorBrandLlmRanking.creator_profile_id == creator_id).delete(
         synchronize_session=False
     )
@@ -174,6 +183,7 @@ def rank_brands_with_llm(db: Session, creator_id: int) -> int:
             brand_raw_id=brand_id,
             confidence=confidence,
             reason=reason or None,
+            reasons=taglines[brand_id],
             rank=rank,
         )
         for rank, (brand_id, (confidence, reason)) in enumerate(ranked, start=1)

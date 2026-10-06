@@ -245,7 +245,7 @@
 
     .rank-num { color: #64748b; font-weight: 700; margin-right: .4rem; }
     .score-badge.static { cursor: default; }
-    .llm-reason { font-size: .85rem; color: #cbd5e1; line-height: 1.5; }
+    .llm-reason { font-size: .85rem; color: #cbd5e1; line-height: 1.5; margin-bottom: .4rem; }
     .llm-status { display: flex; align-items: center; gap: .6rem; color: #94a3b8; font-size: .85rem; padding: 1rem 0; }
     .llm-status .spinner { width: 18px; height: 18px; }
 
@@ -689,6 +689,13 @@
   var V2_POLL_MS = 5000;
   var v2Loaded = false;
   var v2PollTimer = null;
+  var lastV2Data = null;
+  var expandedV2Brands = {};
+
+  function toggleV2Reasons(brandId) {
+    expandedV2Brands[brandId] = !expandedV2Brands[brandId];
+    if (lastV2Data) renderV2(lastV2Data);
+  }
 
   function switchVersion(version) {
     var isV2 = version === 'v2';
@@ -739,6 +746,7 @@
   }
 
   function renderV2(data) {
+    lastV2Data = data;
     var busy = data.status === 'queued' || data.status === 'running';
     var btn = document.getElementById('v2RerankBtn');
     btn.disabled = busy;
@@ -771,18 +779,34 @@
 
     list.innerHTML = statusHtml;
     data.matches.forEach(function(m) {
+      // AI fit explanation first, then the same "why it's a match" taglines
+      // as V1 (top REASONS_PREVIEW, expandable to all).
+      var reasons = m.reasons || [];
+      var expandable = reasons.length > REASONS_PREVIEW;
+      var expanded = expandable && !!expandedV2Brands[m.brand_raw_id];
       var card = document.createElement('div');
-      card.className = 'card';
+      card.className = expandable ? 'card expandable' : 'card';
       card.innerHTML =
         '<div class="card-head">' +
           '<span><span class="rank-num">#' + m.rank + '</span>' +
           '<button class="brand-name" type="button" title="View partnership posts">' + escapeHtml(m.brand_name) + '</button></span>' +
           '<span class="score-badge static">' + m.confidence + '% fit</span>' +
         '</div>' +
-        (m.reason ? '<p class="llm-reason">' + escapeHtml(m.reason) + '</p>' : '');
+        (m.reason ? '<p class="llm-reason">' + escapeHtml(m.reason) + '</p>' : '') +
+        (reasons.length ? '<ul class="reasons">' + reasonsListHtml(reasons, expanded) + '</ul>' : '') +
+        (expandable
+          ? '<button class="reasons-toggle" type="button" aria-expanded="' + expanded + '">' +
+              (expanded ? 'Show less' : 'Show all ' + reasons.length + ' reasons') +
+            '</button>'
+          : '');
       card.querySelector('.brand-name').addEventListener('click', function() {
         openPostsModal(m.brand_raw_id, m.brand_name);
       });
+      if (expandable) {
+        card.querySelector('.reasons-toggle').addEventListener('click', function() {
+          toggleV2Reasons(m.brand_raw_id);
+        });
+      }
       list.appendChild(card);
     });
   }

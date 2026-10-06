@@ -655,6 +655,9 @@ class CreatorBrandLlmRanking(Base):
     brand_raw_id        = Column(Integer, ForeignKey("brands_raw.id"), primary_key=True)
     confidence          = Column(Integer, nullable=False)
     reason              = Column(Text)
+    # "Why it's a match" taglines (match_text.generate_match_reasons), built
+    # at ranking time so the v2 page doesn't recompute them per load.
+    reasons             = Column(JSONB)
     rank                = Column(Integer, nullable=False)
     computed_at         = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

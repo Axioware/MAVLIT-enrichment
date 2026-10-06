@@ -117,6 +117,7 @@ from pipeline.helpers.prompts import (
     WEBSITE_PICK_PROMPT_NAME,
 )
 from pipeline.matching.llm_ranking import rank_brands_with_llm
+from pipeline.matching.match_text import generate_match_reasons
 from pipeline.matching.matcher import get_matches
 from pipeline.seed import run_seed
 
@@ -466,6 +467,7 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_ranking_status TEXT NOT NULL DEFAULT 'idle'",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_ranking_error TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_ranked_at TIMESTAMPTZ",
+        "ALTER TABLE creator_brand_llm_rankings ADD COLUMN IF NOT EXISTS reasons JSONB",
         # brands_niches: many-to-many mirror of brands_raw.niche (see BrandNiche
         # docstring). New brands get a row automatically via insert_brand()/
         # insert_brands_batch(); this backfills every brand that already
@@ -1945,7 +1947,8 @@ class LlmMatchResult(BaseModel):
     niche:        str | None = None
     rank:         int
     confidence:   int
-    reason:       str | None = None
+    reason:       str | None = None         # the LLM's one-line fit explanation
+    reasons:      list[str] = []            # "why it's a match" taglines, same as v1
 
 
 class LlmMatchesResponse(BaseModel):
@@ -1965,6 +1968,16 @@ def _llm_matches_response(db, user_id: int) -> LlmMatchesResponse:
         .order_by(CreatorBrandLlmRanking.rank)
         .all()
     )
+    # Taglines are stored at ranking time; rows ranked before that existed
+    # (reasons NULL) get them built live until the next re-rank.
+    missing = [brand.id for ranking, brand in rows if ranking.reasons is None]
+    live_reasons: dict[int, list[str]] = {}
+    if missing:
+        profiles = {p.brand_raw_id: p for p in db.query(BrandProfile).filter(BrandProfile.brand_raw_id.in_(missing))}
+        for ranking, brand in rows:
+            if ranking.reasons is None:
+                live_reasons[brand.id] = generate_match_reasons(row, brand, profiles.get(brand.id), db=db)
+
     matches = [
         LlmMatchResult(
             brand_raw_id=brand.id,
@@ -1973,6 +1986,7 @@ def _llm_matches_response(db, user_id: int) -> LlmMatchesResponse:
             rank=ranking.rank,
             confidence=ranking.confidence,
             reason=ranking.reason,
+            reasons=ranking.reasons if ranking.reasons is not None else live_reasons.get(brand.id, []),
         )
         for ranking, brand in rows
     ]
