@@ -340,6 +340,7 @@
       <div class="version-toggle" role="tablist" aria-label="Matching version">
         <button type="button" role="tab" id="tabV1" class="active" aria-selected="true" onclick="switchVersion('v1')">V1</button>
         <button type="button" role="tab" id="tabV2" aria-selected="false" onclick="switchVersion('v2')">V2</button>
+        <button type="button" role="tab" id="tabV3" aria-selected="false" onclick="switchVersion('v3')">V3</button>
       </div>
 
       <div id="v1Section">
@@ -362,10 +363,21 @@
         <div class="toolbar">
           <span class="subtitle" id="v2MetaLine" style="margin:0;"></span>
           <div class="toolbar-actions">
-            <button class="btn-refresh" id="v2RerankBtn" onclick="rerankV2()">Re-rank with AI</button>
+            <button class="btn-refresh" id="v2RerankBtn" onclick="rerankAi('v2')">Re-rank with AI</button>
           </div>
         </div>
         <div id="v2List"></div>
+      </div>
+
+      <div id="v3Section" hidden>
+        <p class="version-note">V3 — AI ranking that weighs how well each brand fits your profile and its match evidence (the reasons under each brand) equally.</p>
+        <div class="toolbar">
+          <span class="subtitle" id="v3MetaLine" style="margin:0;"></span>
+          <div class="toolbar-actions">
+            <button class="btn-refresh" id="v3RerankBtn" onclick="rerankAi('v3')">Re-rank with AI</button>
+          </div>
+        </div>
+        <div id="v3List"></div>
       </div>
     </div>
   </div>
@@ -688,17 +700,23 @@
       });
   }
 
-  // ---------- V1 / V2 switch ----------
-  var V2_POLL_MS = 5000;
-  var v2Loaded = false;
-  var v2PollTimer = null;
-  var lastV2Data = null;
-  var expandedV2Brands = {};
+  // ---------- V1 / V2 / V3 switch ----------
+  // V2 and V3 are both AI rankings with the same API shape
+  // (/matches/me/<version> and /matches/me/<version>/refresh) and card
+  // layout; each keeps its own state. Element ids: <version>Section,
+  // <version>MetaLine, <version>RerankBtn, <version>List, <version>BusyMsg.
+  var VERSIONS = ['v1', 'v2', 'v3'];
+  var AI_POLL_MS = 5000;
+  var aiState = {};
+  ['v2', 'v3'].forEach(function(v) {
+    aiState[v] = { loaded: false, pollTimer: null, lastData: null, expanded: {}, busy: false };
+  });
 
-  // Rotating "working on it" lines while the AI ranking runs — a new random
-  // one every V2_BUSY_MSG_MS, never the same twice in a row. Runs on its own
-  // timer so the 5s data polling re-render doesn't reset it.
-  var V2_BUSY_MESSAGES = [
+  // Rotating "working on it" lines while an AI ranking runs — a new random
+  // one every BUSY_MSG_MS, never the same twice in a row. One shared timer
+  // (both rankings can run at once after a profile save) that keeps going
+  // across the 5s polling re-renders.
+  var BUSY_MESSAGES = [
     'AI is organizing brands according to your profile…',
     'Matching your niche and content with every brand…',
     'Reading brand descriptions and tags…',
@@ -706,60 +724,55 @@
     'Finding the brands that fit you best…',
     'Polishing your top matches…'
   ];
-  var V2_BUSY_MSG_MS = 5000;
-  var v2BusyIndex = -1;
-  var v2BusyTimer = null;
+  var BUSY_MSG_MS = 5000;
+  var busyIndex = -1;
+  var busyTimer = null;
 
   function nextBusyIndex() {
     var next;
-    do { next = Math.floor(Math.random() * V2_BUSY_MESSAGES.length); }
-    while (V2_BUSY_MESSAGES.length > 1 && next === v2BusyIndex);
+    do { next = Math.floor(Math.random() * BUSY_MESSAGES.length); }
+    while (BUSY_MESSAGES.length > 1 && next === busyIndex);
     return next;
   }
 
-  function startBusyMessages() {
-    if (v2BusyTimer) return;
-    v2BusyIndex = nextBusyIndex();
-    v2BusyTimer = setInterval(function() {
-      var el = document.getElementById('v2BusyMsg');
-      v2BusyIndex = nextBusyIndex();
-      if (!el) return;
-      el.classList.add('fading');
-      setTimeout(function() {
-        el.textContent = V2_BUSY_MESSAGES[v2BusyIndex];
-        el.classList.remove('fading');
-      }, 350);
-    }, V2_BUSY_MSG_MS);
-  }
-
-  function stopBusyMessages() {
-    clearInterval(v2BusyTimer);
-    v2BusyTimer = null;
-  }
-
-  function toggleV2Reasons(brandId) {
-    expandedV2Brands[brandId] = !expandedV2Brands[brandId];
-    if (lastV2Data) renderV2(lastV2Data);
+  function syncBusyMessages() {
+    var anyBusy = Object.keys(aiState).some(function(v) { return aiState[v].busy; });
+    if (!anyBusy) {
+      clearInterval(busyTimer);
+      busyTimer = null;
+      return;
+    }
+    if (busyTimer) return;
+    busyIndex = nextBusyIndex();
+    busyTimer = setInterval(function() {
+      busyIndex = nextBusyIndex();
+      Array.prototype.forEach.call(document.querySelectorAll('.llm-busy-msg'), function(el) {
+        el.classList.add('fading');
+        setTimeout(function() {
+          el.textContent = BUSY_MESSAGES[busyIndex];
+          el.classList.remove('fading');
+        }, 350);
+      });
+    }, BUSY_MSG_MS);
   }
 
   function switchVersion(version) {
-    var isV2 = version === 'v2';
-    document.getElementById('v1Section').hidden = isV2;
-    document.getElementById('v2Section').hidden = !isV2;
-    ['v1', 'v2'].forEach(function(v) {
+    VERSIONS.forEach(function(v) {
+      document.getElementById(v + 'Section').hidden = v !== version;
       var tab = document.getElementById('tab' + v.toUpperCase());
       tab.classList.toggle('active', v === version);
       tab.setAttribute('aria-selected', String(v === version));
     });
     try { localStorage.setItem('mavlit_matches_version', version); } catch (e) {}
-    if (isV2 && !v2Loaded) loadV2();
+    if (aiState[version] && !aiState[version].loaded) loadAi(version);
   }
 
-  // ---------- V2: LLM ranking ----------
-  function loadV2() {
-    v2Loaded = true;
-    clearTimeout(v2PollTimer);
-    fetch('/matches/me/v2', { credentials: 'include' })
+  // ---------- V2 / V3: AI ranking ----------
+  function loadAi(version) {
+    var state = aiState[version];
+    state.loaded = true;
+    clearTimeout(state.pollTimer);
+    fetch('/matches/me/' + version, { credentials: 'include' })
       .then(function(r) {
         if (r.status === 401) {
           window.location.href = '/signin?return_to=' + encodeURIComponent('/matches');
@@ -768,52 +781,58 @@
         if (!r.ok) return errorFromResponse(r, 'Failed to load AI ranking');
         return r.json();
       })
-      .then(function(data) { if (data) renderV2(data); })
+      .then(function(data) { if (data) renderAi(version, data); })
       .catch(function(err) {
-        document.getElementById('v2List').innerHTML =
+        document.getElementById(version + 'List').innerHTML =
           '<p class="error-msg">' + escapeHtml(err.message || 'Failed to load AI ranking') + '</p>';
       });
   }
 
-  function rerankV2() {
-    var btn = document.getElementById('v2RerankBtn');
+  function rerankAi(version) {
+    var btn = document.getElementById(version + 'RerankBtn');
     btn.disabled = true;
-    fetch('/matches/me/v2/refresh', { method: 'POST', credentials: 'include' })
+    fetch('/matches/me/' + version + '/refresh', { method: 'POST', credentials: 'include' })
       .then(function(r) {
         if (!r.ok) return errorFromResponse(r, 'Could not start AI ranking');
         return r.json();
       })
-      .then(renderV2)
+      .then(function(data) { renderAi(version, data); })
       .catch(function(err) {
         btn.disabled = false;
         alert(err.message || 'Could not start AI ranking');
       });
   }
 
-  function renderV2(data) {
-    lastV2Data = data;
-    var busy = data.status === 'queued' || data.status === 'running';
-    if (!busy) stopBusyMessages();
-    var btn = document.getElementById('v2RerankBtn');
-    btn.disabled = busy;
-    btn.textContent = busy ? 'Ranking…' : 'Re-rank with AI';
+  function toggleAiReasons(version, brandId) {
+    var state = aiState[version];
+    state.expanded[brandId] = !state.expanded[brandId];
+    if (state.lastData) renderAi(version, state.lastData);
+  }
 
-    document.getElementById('v2MetaLine').textContent = data.ranked_at
+  function renderAi(version, data) {
+    var state = aiState[version];
+    state.lastData = data;
+    state.busy = data.status === 'queued' || data.status === 'running';
+    syncBusyMessages();
+
+    var btn = document.getElementById(version + 'RerankBtn');
+    btn.disabled = state.busy;
+    btn.textContent = state.busy ? 'Ranking…' : 'Re-rank with AI';
+
+    document.getElementById(version + 'MetaLine').textContent = data.ranked_at
       ? 'Ranked ' + new Date(data.ranked_at).toLocaleString() + ' — ' + data.total + ' brands'
       : '';
 
-    var list = document.getElementById('v2List');
+    var list = document.getElementById(version + 'List');
     var statusHtml = '';
-    if (busy) {
-      startBusyMessages();
+    if (state.busy) {
       statusHtml = '<div class="llm-status"><div class="spinner"></div>' +
-        '<span class="llm-busy-msg" id="v2BusyMsg" aria-live="polite">' + V2_BUSY_MESSAGES[v2BusyIndex] + '</span></div>' +
+        '<span class="llm-busy-msg" id="' + version + 'BusyMsg" aria-live="polite">' + BUSY_MESSAGES[busyIndex] + '</span></div>' +
         '<p class="llm-busy-note">This can take a minute or two' +
         (data.matches.length ? ' — your previous ranking is shown below until it finishes.' : '.') + '</p>';
-      clearTimeout(v2PollTimer);
-      v2PollTimer = setTimeout(loadV2, V2_POLL_MS);
+      clearTimeout(state.pollTimer);
+      state.pollTimer = setTimeout(function() { loadAi(version); }, AI_POLL_MS);
     } else if (data.status === 'failed') {
-      stopBusyMessages();
       statusHtml = '<p class="error-msg" style="padding:1rem 0;">AI ranking failed' +
         (data.error ? ': ' + escapeHtml(data.error) : '') + '. Try "Re-rank with AI".</p>';
     }
@@ -832,7 +851,7 @@
       // as V1 (top REASONS_PREVIEW, expandable to all).
       var reasons = m.reasons || [];
       var expandable = reasons.length > REASONS_PREVIEW;
-      var expanded = expandable && !!expandedV2Brands[m.brand_raw_id];
+      var expanded = expandable && !!state.expanded[m.brand_raw_id];
       var card = document.createElement('div');
       card.className = expandable ? 'card expandable' : 'card';
       card.innerHTML =
@@ -853,7 +872,7 @@
       });
       if (expandable) {
         card.querySelector('.reasons-toggle').addEventListener('click', function() {
-          toggleV2Reasons(m.brand_raw_id);
+          toggleAiReasons(version, m.brand_raw_id);
         });
       }
       list.appendChild(card);
@@ -864,7 +883,7 @@
   (function restoreVersion() {
     var saved = null;
     try { saved = localStorage.getItem('mavlit_matches_version'); } catch (e) {}
-    if (saved === 'v2') switchVersion('v2');
+    if (aiState[saved]) switchVersion(saved);
   })();
 </script>
 </body>

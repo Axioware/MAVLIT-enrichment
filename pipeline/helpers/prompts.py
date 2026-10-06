@@ -1511,3 +1511,57 @@ Reply ONLY with this JSON object, with no extra text:
 
 Include every brand id from the input list exactly once.
 """
+
+
+#  matching/llm_ranking_v3.py  (Matches v3)
+
+LLM_BRAND_RANKING_V3_PROMPT_NAME = "creator_brand_llm_ranking_v3"
+
+LLM_BRAND_RANKING_V3_DEFAULT_PROMPT = """\
+You are ranking brands for a content creator on a creator-brand sponsorship matching platform.
+
+CREATOR
+Niche(s): {creator_niches}
+Sub-niche tags: {creator_sub_niches}
+Content tags: {content_tags}
+Description: {creator_description}
+Profile summary: {embedding_text}
+
+BRANDS (JSON list - each has id, name, niche, description, tags, why_it_matches):
+{brands_json}
+
+"why_it_matches" lists the platform's verified match signals between that brand and this creator. They are written to the creator, so "you" / "yours" means THIS creator. Examples: recent paid partnerships, partnerships with creators whose content is similar to this creator's, follower-size fit, a verified partnerships contact, same niche, the brand sponsoring creators in this creator's niche, audience fit.
+
+For EVERY brand, return a confidence from 0 to 100 that it is a strong, realistic sponsorship opportunity for THIS creator. Weigh these two parts EQUALLY (about half each):
+
+1. CONTENT FIT - how naturally the brand's products fit the creator's niche, sub-niches, tags and description.
+   - BROAD brands (products many creators in the niche can naturally use or recommend) can fit well even without an exact tag match.
+     e.g. a singer, songwriter or music producer naturally fits microphones, headphones, audio interfaces, studio gear, music software and general instruments such as guitars.
+   - SPECIALIZED brands (a specific instrument, sport, discipline, body/skin/hair concern, medical condition, or a service aimed at artists such as vinyl pressing, record labels, distribution or mastering) fit well ONLY when the creator's information shows that specialization.
+     e.g. drum/percussion brands fit drummers, not singers; vinyl pressing fits creators who release physical music; a powerlifting brand fits powerlifters, not yoga creators; a curly-hair brand fits creators who cover curly hair.
+   - Apply the same logic to Music, Health, Fitness and Beauty.
+
+2. MATCH EVIDENCE - how strong the brand's why_it_matches signals are.
+   - Strongest: a recent paid partnership (especially in the last month or 3 months, or with creators whose content matches this creator's); partnerships with creators similar to this creator; follower/size fit; the brand sponsoring creators in this creator's niche.
+   - Helpful: a verified partnerships contact; same niche; YouTube sponsorships; a smaller or growing brand (easier to reach); tag overlap with the creator's content; a latest product to pitch around.
+   - Weak: lines that only describe the brand's audience (target audience gender or age, who its products are made for) - count them very little.
+   - More and stronger signals = stronger evidence. An empty list means no evidence, which is neutral for content fit but adds nothing.
+
+Combine the two parts:
+- Strong content fit AND strong evidence: 85-100.
+- Strong on one part, good on the other: 70-84.
+- Strong on one part but weak or missing on the other, or moderate on both: 50-69.
+- Weak on both, with only some plausible overlap: 30-49.
+- Poor content fit and little or no evidence: 0-29.
+
+RULES
+- Score each brand on the absolute scale above, independently of the other brands in this list. Brands are sent in separate batches, so never rescale or spread scores across the list.
+- Do not invent creator skills, interests, activities or demographics that the creator information does not support (for example, do not assume the creator releases physical music, tours, runs a label, or practices a specific sport or discipline unless stated).
+- Do not reward a brand for being large, famous or recognizable.
+- If a brand has very little information, score cautiously.
+- Use only the information provided.
+
+Reply ONLY with this JSON object, no extra text:
+{"rankings": [{"id": 123, "confidence": 0, "reason": "one short sentence naming the content fit and the strongest match signal"}]}
+Include every brand id from the list exactly once.
+"""

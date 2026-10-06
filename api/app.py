@@ -52,6 +52,7 @@ from pipeline.db import (
     ContentCreatorRE,
     ContractReview,
     CreatorBrandLlmRanking,
+    CreatorBrandLlmV3Ranking,
     CreatorNiche,
     CreatorProfile,
     InitialBrandScore,
@@ -105,6 +106,8 @@ from pipeline.helpers.prompts import (
     LINK_CLASSIFY_PROMPT_NAME,
     LLM_BRAND_RANKING_DEFAULT_PROMPT,
     LLM_BRAND_RANKING_PROMPT_NAME,
+    LLM_BRAND_RANKING_V3_DEFAULT_PROMPT,
+    LLM_BRAND_RANKING_V3_PROMPT_NAME,
     PITCH_DEFAULT_PROMPT,
     PITCH_PROMPT_NAME,
     RATE_INTEL_DEFAULT_PROMPT,
@@ -117,6 +120,7 @@ from pipeline.helpers.prompts import (
     WEBSITE_PICK_PROMPT_NAME,
 )
 from pipeline.matching.llm_ranking import rank_brands_with_llm
+from pipeline.matching.llm_ranking_v3 import rank_brands_with_llm_v3
 from pipeline.matching.match_text import generate_match_reasons
 from pipeline.matching.matcher import get_matches
 from pipeline.seed import run_seed
@@ -468,6 +472,10 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_ranking_error TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_ranked_at TIMESTAMPTZ",
         "ALTER TABLE creator_brand_llm_rankings ADD COLUMN IF NOT EXISTS reasons JSONB",
+        # Matches v3 — LLM ranking with taglines (pipeline/matching/llm_ranking_v3.py)
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_v3_ranking_status TEXT NOT NULL DEFAULT 'idle'",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_v3_ranking_error TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_v3_ranked_at TIMESTAMPTZ",
         # brands_niches: many-to-many mirror of brands_raw.niche (see BrandNiche
         # docstring). New brands get a row automatically via insert_brand()/
         # insert_brands_batch(); this backfills every brand that already
@@ -599,6 +607,7 @@ def _run_migrations() -> None:
             (LINK_CLASSIFY_PROMPT_NAME, LINK_CLASSIFY_DEFAULT_PROMPT),
             (WEBSITE_PICK_PROMPT_NAME,  WEBSITE_PICK_DEFAULT_PROMPT),
             (LLM_BRAND_RANKING_PROMPT_NAME, LLM_BRAND_RANKING_DEFAULT_PROMPT),
+            (LLM_BRAND_RANKING_V3_PROMPT_NAME, LLM_BRAND_RANKING_V3_DEFAULT_PROMPT),
         ]:
             if not db.query(Prompt).filter(Prompt.name == name).first():
                 db.add(Prompt(name=name, content=content))
@@ -1797,33 +1806,56 @@ def generate_my_creator_description(
         db.close()
 
 
-def _run_llm_ranking_job(creator_id: int) -> None:
-    """Matches v2: rank the creator's hard-filtered brands with the LLM."""
+# AI ranking versions: v2 (profile fit) and v3 (profile fit + taglines).
+# Each has its own ranking function, results table and status columns
+# (<prefix>_ranking_status / <prefix>_ranking_error / <prefix>_ranked_at).
+_AI_RANKINGS = {
+    "v2": {"rank": lambda db, cid: rank_brands_with_llm(db, cid),    "model": CreatorBrandLlmRanking,   "prefix": "llm"},
+    "v3": {"rank": lambda db, cid: rank_brands_with_llm_v3(db, cid), "model": CreatorBrandLlmV3Ranking, "prefix": "llm_v3"},
+}
+
+
+def _run_ai_ranking_job(creator_id: int, version: str) -> None:
+    """Run one AI ranking version for a creator, tracking its status columns."""
+    config = _AI_RANKINGS[version]
+    status_field = f"{config['prefix']}_ranking_status"
+    error_field = f"{config['prefix']}_ranking_error"
+    ranked_at_field = f"{config['prefix']}_ranked_at"
     db = SessionLocal()
     try:
         row = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
         if not row:
             return
-        row.llm_ranking_status = "running"
-        row.llm_ranking_error = None
+        setattr(row, status_field, "running")
+        setattr(row, error_field, None)
         db.commit()
 
-        rank_brands_with_llm(db, creator_id)
+        config["rank"](db, creator_id)
 
         row = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
-        row.llm_ranking_status = "completed"
-        row.llm_ranked_at = datetime.now(timezone.utc)
+        setattr(row, status_field, "completed")
+        setattr(row, ranked_at_field, datetime.now(timezone.utc))
         db.commit()
     except Exception as exc:
         db.rollback()
-        logger.exception("LLM ranking background job failed for creator_id=%d", creator_id)
+        logger.exception("AI ranking %s background job failed for creator_id=%d", version, creator_id)
         row = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
         if row:
-            row.llm_ranking_status = "failed"
-            row.llm_ranking_error = str(exc)
+            setattr(row, status_field, "failed")
+            setattr(row, error_field, str(exc))
             db.commit()
     finally:
         db.close()
+
+
+def _run_llm_ranking_job(creator_id: int) -> None:
+    """Matches v2: rank the creator's hard-filtered brands with the LLM."""
+    _run_ai_ranking_job(creator_id, "v2")
+
+
+def _run_llm_v3_ranking_job(creator_id: int) -> None:
+    """Matches v3: rank with profile fit + "why it's a match" taglines."""
+    _run_ai_ranking_job(creator_id, "v3")
 
 
 def _run_creator_signals_job(creator_id: int) -> None:
@@ -1835,8 +1867,9 @@ def _run_creator_signals_job(creator_id: int) -> None:
     finally:
         db.close()
     # After signals, so the LLM sees fresh content_tags / embedding_text and
-    # the hard filter's embedding ordering is up to date.
+    # the hard filter's embedding ordering is up to date. v2, then v3.
     _run_llm_ranking_job(creator_id)
+    _run_llm_v3_ranking_job(creator_id)
 
 
 @app.put("/creator-profile/me", response_model=CreatorProfileResponse)
@@ -1864,8 +1897,10 @@ def upsert_my_creator_profile(
         for field, value in payload.items():
             setattr(row, field, value)
         row.creator_tier = bucket_creator_tier(row.follower_count)
-        row.llm_ranking_status = "queued"   # signals job runs the v2 LLM ranking next
+        row.llm_ranking_status = "queued"     # signals job runs the v2 LLM ranking next,
         row.llm_ranking_error = None
+        row.llm_v3_ranking_status = "queued"  # then v3
+        row.llm_v3_ranking_error = None
 
         db.commit()
         db.refresh(row)
@@ -1959,13 +1994,15 @@ class LlmMatchesResponse(BaseModel):
     matches:   list[LlmMatchResult]
 
 
-def _llm_matches_response(db, user_id: int) -> LlmMatchesResponse:
+def _ai_matches_response(db, user_id: int, version: str) -> LlmMatchesResponse:
+    config = _AI_RANKINGS[version]
+    ranking_model = config["model"]
     row = db.query(CreatorProfile).filter(CreatorProfile.id == user_id).first()
     rows = (
-        db.query(CreatorBrandLlmRanking, BrandRaw)
-        .join(BrandRaw, BrandRaw.id == CreatorBrandLlmRanking.brand_raw_id)
-        .filter(CreatorBrandLlmRanking.creator_profile_id == user_id)
-        .order_by(CreatorBrandLlmRanking.rank)
+        db.query(ranking_model, BrandRaw)
+        .join(BrandRaw, BrandRaw.id == ranking_model.brand_raw_id)
+        .filter(ranking_model.creator_profile_id == user_id)
+        .order_by(ranking_model.rank)
         .all()
     )
     # Taglines are stored at ranking time; rows ranked before that existed
@@ -1990,13 +2027,30 @@ def _llm_matches_response(db, user_id: int) -> LlmMatchesResponse:
         )
         for ranking, brand in rows
     ]
+    ranked_at = getattr(row, f"{config['prefix']}_ranked_at")
     return LlmMatchesResponse(
-        status=row.llm_ranking_status or "idle",
-        error=row.llm_ranking_error,
-        ranked_at=row.llm_ranked_at.isoformat() if row.llm_ranked_at else None,
+        status=getattr(row, f"{config['prefix']}_ranking_status") or "idle",
+        error=getattr(row, f"{config['prefix']}_ranking_error"),
+        ranked_at=ranked_at.isoformat() if ranked_at else None,
         total=len(matches),
         matches=matches,
     )
+
+
+def _refresh_ai_matches(background_tasks: BackgroundTasks, user_id: int, version: str) -> LlmMatchesResponse:
+    """Queue a new ranking run for `version` (no-op if one is already queued/running)."""
+    prefix = _AI_RANKINGS[version]["prefix"]
+    db = SessionLocal()
+    try:
+        row = db.query(CreatorProfile).filter(CreatorProfile.id == user_id).first()
+        if getattr(row, f"{prefix}_ranking_status") not in ("queued", "running"):
+            setattr(row, f"{prefix}_ranking_status", "queued")
+            setattr(row, f"{prefix}_ranking_error", None)
+            db.commit()
+            background_tasks.add_task(_run_ai_ranking_job, user_id, version)
+        return _ai_matches_response(db, user_id, version)
+    finally:
+        db.close()
 
 
 @app.get("/matches/me/v2", response_model=LlmMatchesResponse)
@@ -2009,7 +2063,7 @@ def get_my_llm_matches(current_user: CreatorProfile = Depends(get_completed_user
     """
     db = SessionLocal()
     try:
-        return _llm_matches_response(db, current_user.id)
+        return _ai_matches_response(db, current_user.id, "v2")
     finally:
         db.close()
 
@@ -2019,18 +2073,33 @@ def refresh_my_llm_matches(
     background_tasks: BackgroundTasks,
     current_user: CreatorProfile = Depends(get_completed_user),
 ):
-    """Queue a new LLM ranking run (no-op if one is already queued/running)."""
+    """Queue a new v2 LLM ranking run (no-op if one is already queued/running)."""
+    return _refresh_ai_matches(background_tasks, current_user.id, "v2")
+
+
+@app.get("/matches/me/v3", response_model=LlmMatchesResponse)
+def get_my_llm_v3_matches(current_user: CreatorProfile = Depends(get_completed_user)):
+    """
+    Matches v3 — brands ranked by the LLM from profile fit AND each brand's
+    "why it's a match" taglines, weighted equally
+    (pipeline/matching/llm_ranking_v3.py). Same response shape as v2.
+    Runs in the background after every profile save (after v2), or on
+    POST /matches/me/v3/refresh.
+    """
     db = SessionLocal()
     try:
-        row = db.query(CreatorProfile).filter(CreatorProfile.id == current_user.id).first()
-        if row.llm_ranking_status not in ("queued", "running"):
-            row.llm_ranking_status = "queued"
-            row.llm_ranking_error = None
-            db.commit()
-            background_tasks.add_task(_run_llm_ranking_job, current_user.id)
-        return _llm_matches_response(db, current_user.id)
+        return _ai_matches_response(db, current_user.id, "v3")
     finally:
         db.close()
+
+
+@app.post("/matches/me/v3/refresh", response_model=LlmMatchesResponse)
+def refresh_my_llm_v3_matches(
+    background_tasks: BackgroundTasks,
+    current_user: CreatorProfile = Depends(get_completed_user),
+):
+    """Queue a new v3 LLM ranking run (no-op if one is already queued/running)."""
+    return _refresh_ai_matches(background_tasks, current_user.id, "v3")
 
 
 class PartnershipPost(BaseModel):

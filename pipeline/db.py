@@ -636,6 +636,12 @@ class CreatorProfile(Base):
     llm_ranking_error  = Column(Text)
     llm_ranked_at      = Column(TIMESTAMP(timezone=True))
 
+    # Matches v3 — LLM ranking from profile fit + "why it's a match"
+    # taglines (pipeline/matching/llm_ranking_v3.py). Same status values.
+    llm_v3_ranking_status = Column(Text, nullable=False, server_default="idle", default="idle")
+    llm_v3_ranking_error  = Column(Text)
+    llm_v3_ranked_at      = Column(TIMESTAMP(timezone=True))
+
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), onupdate=func.now())
 
@@ -657,6 +663,23 @@ class CreatorBrandLlmRanking(Base):
     reason              = Column(Text)
     # "Why it's a match" taglines (match_text.generate_match_reasons), built
     # at ranking time so the v2 page doesn't recompute them per load.
+    reasons             = Column(JSONB)
+    rank                = Column(Integer, nullable=False)
+    computed_at         = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class CreatorBrandLlmV3Ranking(Base):
+    """
+    Matches v3: same shape as CreatorBrandLlmRanking (v2), but the LLM also
+    weighs each brand's "why it's a match" taglines alongside profile fit
+    (pipeline/matching/llm_ranking_v3.py). Fully replaced on each run.
+    """
+    __tablename__ = "creator_brand_llm_v3_rankings"
+
+    creator_profile_id = Column(Integer, ForeignKey("creator_profiles.id"), primary_key=True)
+    brand_raw_id        = Column(Integer, ForeignKey("brands_raw.id"), primary_key=True)
+    confidence          = Column(Integer, nullable=False)
+    reason              = Column(Text)
     reasons             = Column(JSONB)
     rank                = Column(Integer, nullable=False)
     computed_at         = Column(TIMESTAMP(timezone=True), server_default=func.now())

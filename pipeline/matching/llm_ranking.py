@@ -107,13 +107,15 @@ def _brand_payloads(db: Session, brands: list) -> list[dict]:
     ]
 
 
-def _rank_batch(template: str, creator_fields: dict, batch: list[dict], creator_id: int) -> dict[int, tuple[int, str]]:
+def _rank_batch(
+    template: str, creator_fields: dict, batch: list[dict], creator_id: int, model: str = _MODEL,
+) -> dict[int, tuple[int, str]]:
     prompt = fill_template(template, **creator_fields, brands_json=json.dumps(batch, ensure_ascii=False))
     result = call_gpt_json(
         prompt,
         context=f"llm brand ranking creator_id={creator_id} ({len(batch)} brands)",
         timeout=_BATCH_TIMEOUT,
-        model=_MODEL,
+        model=model,
     )
     rankings = result.get("rankings") if isinstance(result, dict) else None
     if not isinstance(rankings, list):
