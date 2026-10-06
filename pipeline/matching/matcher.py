@@ -114,33 +114,13 @@ _FOLLOWER_TOLERANCE = 2   # +/-200% buffer beyond the brand's confirmed collabor
 
 
 
-def get_matches(
-    db: Session,
-    creator_id: int,
-    limit: int = 100,
-    offset: int = 0,
-    *,
-    include_total: bool = False,
-) -> list[dict] | tuple[list[dict], int]:
+def _hard_filtered_query(db: Session, creator: CreatorProfile):
     """
-    Returns up to `limit` ranked brand matches for one creator, best-first,
-    starting at `offset`. Each result:
-        {
-          "brand_raw_id": int, "brand_name": str,
-          "total_score": float (0-1), "dimensions": {...},
-          "reasons": [str, ...],
-        }
-    Returns [] if the creator doesn't exist or has no embedding yet
-    (Stage 2 — compute_creator_signals — must run first).
+    Step A — the hard-filtered (BrandRaw, BrandProfile, distance) query for
+    one creator, unordered and unlimited, plus the cosine-distance
+    expression to order it by. Shared by get_matches (v1) and
+    hard_filtered_brands (v2 LLM ranking) so both use identical filters.
     """
-    creator = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
-    if not creator:
-        logger.warning("Matching: creator_id=%d not found", creator_id)
-        return ([], 0) if include_total else []
-    if creator.embedding is None:
-        logger.info("Matching: creator_id=%d has no embedding yet — run Stage 2 first", creator_id)
-        return ([], 0) if include_total else []
-
     distance_expr = BrandProfile.embedding.cosine_distance(creator.embedding)
 
     query = (
@@ -282,6 +262,53 @@ def get_matches(
             )
         )
         query = query.filter(or_(audience_gender_match, collaborator_gender_match, re_creator_gender_match))
+
+    return query, distance_expr
+
+
+def hard_filtered_brands(db: Session, creator: CreatorProfile, limit: int | None = None) -> list:
+    """
+    Every brand passing the Step A hard filters for `creator`, as
+    (BrandRaw, BrandProfile, distance) tuples nearest-first by embedding,
+    optionally capped at `limit`. [] if the creator has no embedding.
+    """
+    if creator.embedding is None:
+        return []
+    query, distance_expr = _hard_filtered_query(db, creator)
+    query = query.order_by(distance_expr)
+    if limit is not None:
+        query = query.limit(limit)
+    return query.all()
+
+
+def get_matches(
+    db: Session,
+    creator_id: int,
+    limit: int = 100,
+    offset: int = 0,
+    *,
+    include_total: bool = False,
+) -> list[dict] | tuple[list[dict], int]:
+    """
+    Returns up to `limit` ranked brand matches for one creator, best-first,
+    starting at `offset`. Each result:
+        {
+          "brand_raw_id": int, "brand_name": str,
+          "total_score": float (0-1), "dimensions": {...},
+          "reasons": [str, ...],
+        }
+    Returns [] if the creator doesn't exist or has no embedding yet
+    (Stage 2 — compute_creator_signals — must run first).
+    """
+    creator = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
+    if not creator:
+        logger.warning("Matching: creator_id=%d not found", creator_id)
+        return ([], 0) if include_total else []
+    if creator.embedding is None:
+        logger.info("Matching: creator_id=%d has no embedding yet — run Stage 2 first", creator_id)
+        return ([], 0) if include_total else []
+
+    query, distance_expr = _hard_filtered_query(db, creator)
 
     total = query.count()
 

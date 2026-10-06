@@ -1405,3 +1405,109 @@ If the current employer is missing/empty, that means LinkedIn doesn't show one (
 Reply ONLY with this JSON object, no extra text:
 {"match": false, "reason": "short one-line reason"}
 """
+
+
+#  matching/llm_ranking.py  (Matches v2)
+LLM_BRAND_RANKING_PROMPT_NAME = "creator_brand_llm_ranking"
+
+LLM_BRAND_RANKING_DEFAULT_PROMPT = """
+You are matching a content creator with brands for realistic paid sponsorship opportunities on a creator-brand matching platform.
+
+CREATOR
+Niche(s): {creator_niches}
+Sub-niche tags: {creator_sub_niches}
+Content tags: {content_tags}
+Description: {creator_description}
+Profile summary: {embedding_text}
+
+BRANDS (JSON list — each has id, name, niche, description, tags):
+{brands_json}
+
+For EVERY brand, estimate how relevant and realistic a paid sponsorship would be for THIS creator. Return a confidence score from 0 to 100.
+
+IMPORTANT MATCHING PRINCIPLE
+
+Do NOT assume that two entities are a strong match just because they share the same broad niche.
+
+First determine whether the brand is:
+
+1. BROAD / GENERAL:
+   Its products can naturally be used, promoted, or recommended by many creator types within the niche.
+
+2. SPECIALIZED:
+   Its products are mainly relevant to a specific activity, profession, content type, audience, body concern, instrument, sport, or sub-niche.
+
+Broad brands may receive good scores for creators in the same niche even when the creator does not mention the exact product category, as long as using the product would be natural.
+
+Specialized brands should receive high scores ONLY when the creator's description, tags, sub-niche, or content clearly indicate that specialization.
+
+Do not force exact tag-to-tag matching. Judge whether the brand's product is realistically useful or promotable by this type of creator.
+
+MUSIC EXAMPLES
+
+* A singer, songwriter, musician, or music producer can reasonably match with broad music products such as microphones, headphones, audio interfaces, studio equipment, music software, instruments, recording equipment, or other generally useful music products.
+
+* A guitar brand may still be relevant to a singer, songwriter, producer, or general musician when guitar/instrument use would be natural, even if the creator does not explicitly have the tag "guitar".
+
+* A highly specialized drum/percussion brand should rank high primarily for drummers, percussionists, producers who clearly work with drums/percussion, or creators whose content indicates that use case.
+
+* A vinyl record, turntable, DJ-specific, orchestral-instrument, or other specialized brand should not receive a high score merely because the creator's niche is Music. Look for supporting evidence that the creator's content makes that product naturally relevant.
+
+Apply the same logic to all supported niches:
+
+HEALTH
+A general wellness, nutrition, or health-focused brand may fit many Health creators.
+A specialized product such as a pregnancy product, dental device, glucose monitor, or condition-specific product requires relevant creator content or audience evidence.
+
+FITNESS
+General activewear, recovery, hydration, or broad fitness products may fit many Fitness creators.
+Specialized products for powerlifting, running, cycling, bodybuilding, yoga, or another specific discipline should score highest when the creator actually participates in or discusses that discipline.
+
+BEAUTY
+General skincare, makeup, haircare, or beauty products may fit many Beauty creators.
+Highly specialized products for a particular hair type, skin concern, nail technique, professional procedure, or other narrow use case require supporting creator evidence.
+
+SCORING
+
+90-100:
+Exceptional and highly natural sponsorship fit.
+The brand directly matches the creator's content, specialization, audience, or demonstrated use case.
+
+80-89:
+Strong fit.
+The brand is highly relevant and the creator could promote it naturally, even if there is not an exact tag match.
+
+65-79:
+Good broader-niche fit.
+There is a realistic sponsorship opportunity, but the connection is broader or less specific.
+
+45-64:
+Partial or indirect fit.
+There is some plausible overlap, but the product is not strongly connected to the creator's demonstrated content.
+
+20-44:
+Weak fit.
+The brand shares some broad niche relationship, but its product or specialization is unlikely to be naturally promoted by this creator.
+
+0-19:
+No meaningful or realistic sponsorship fit.
+
+RANKING RULES
+
+* Prioritize semantic and real-world product relevance over exact keyword overlap.
+* Exact matching specialized tags are strong positive evidence.
+* Missing an exact tag is NOT automatically negative when the brand is broadly useful within the creator's niche.
+* A shared broad niche alone is NOT enough to justify a high score for a specialized brand.
+* Do not invent creator skills, interests, demographics, or activities that are not supported by the provided information.
+* Do not reward brands for being large, famous, or recognizable.
+* If a brand has very little information, score cautiously.
+* Compare brands against each other so the most naturally relevant sponsorship opportunities receive the highest scores.
+* Specialized brands with no creator-specific evidence should rank below broad brands that are naturally usable by the creator.
+
+Judge only from the information provided.
+
+Reply ONLY with this JSON object, with no extra text:
+{"rankings": [{"id": 123, "confidence": 0, "reason": "one short sentence explaining why this brand is or is not a natural sponsorship fit"}]}
+
+Include every brand id from the input list exactly once.
+"""

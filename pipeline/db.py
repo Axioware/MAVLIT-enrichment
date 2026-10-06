@@ -630,11 +630,34 @@ class CreatorProfile(Base):
     embedding     = Column(Vector(1024))   # text-embedding-3-small (OpenAI API), must match BrandProfile.embedding
     embedding_text = Column(Text)
 
+    # Matches v2 — LLM ranking of the creator's hard-filtered brands
+    # (pipeline/matching/llm_ranking.py), refreshed on every profile save.
+    # Status: idle | queued | running | completed | failed.
+    llm_ranking_status = Column(Text, nullable=False, server_default="idle", default="idle")
+    llm_ranking_error  = Column(Text)
+    llm_ranked_at      = Column(TIMESTAMP(timezone=True))
+
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), onupdate=func.now())
 
     def __str__(self) -> str:
         return self.creator_handle or self.email or f"Creator #{self.id}"
+
+
+class CreatorBrandLlmRanking(Base):
+    """
+    Matches v2: one LLM-assigned fit confidence (0-100) + short reason per
+    hard-filtered brand for a creator. Fully replaced on each ranking run
+    (pipeline/matching/llm_ranking.py); `rank` is 1 = best fit.
+    """
+    __tablename__ = "creator_brand_llm_rankings"
+
+    creator_profile_id = Column(Integer, ForeignKey("creator_profiles.id"), primary_key=True)
+    brand_raw_id        = Column(Integer, ForeignKey("brands_raw.id"), primary_key=True)
+    confidence          = Column(Integer, nullable=False)
+    reason              = Column(Text)
+    rank                = Column(Integer, nullable=False)
+    computed_at         = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
 class SavedBrand(Base):

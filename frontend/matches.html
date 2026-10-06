@@ -218,6 +218,37 @@
 
     #resultsSection { display: none; }
 
+    /* V1 / V2 switch */
+    .version-toggle {
+      display: inline-flex;
+      margin-bottom: 1.25rem;
+      padding: .2rem;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 999px;
+    }
+    .version-toggle button {
+      appearance: none;
+      padding: .35rem 1.1rem;
+      background: none;
+      border: none;
+      border-radius: 999px;
+      color: #94a3b8;
+      font-family: inherit;
+      font-size: .85rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .version-toggle button:hover { color: #e2e8f0; }
+    .version-toggle button.active { background: #0284c7; color: #fff; }
+    .version-note { font-size: .8rem; color: #64748b; margin: -.6rem 0 1.25rem; }
+
+    .rank-num { color: #64748b; font-weight: 700; margin-right: .4rem; }
+    .score-badge.static { cursor: default; }
+    .llm-reason { font-size: .85rem; color: #cbd5e1; line-height: 1.5; }
+    .llm-status { display: flex; align-items: center; gap: .6rem; color: #94a3b8; font-size: .85rem; padding: 1rem 0; }
+    .llm-status .spinner { width: 18px; height: 18px; }
+
     .modal-overlay {
       position: fixed;
       inset: 0;
@@ -303,6 +334,13 @@
       <h1>Your Matches</h1>
       <p class="subtitle">Brands ranked for your profile, with the top reasons behind each match.</p>
 
+      <div class="version-toggle" role="tablist" aria-label="Matching version">
+        <button type="button" role="tab" id="tabV1" class="active" aria-selected="true" onclick="switchVersion('v1')">V1</button>
+        <button type="button" role="tab" id="tabV2" aria-selected="false" onclick="switchVersion('v2')">V2</button>
+      </div>
+
+      <div id="v1Section">
+      <p class="version-note">V1 — rule-based scoring.</p>
       <div class="toolbar">
         <span class="subtitle" id="metaLine" style="margin:0;"></span>
         <div class="toolbar-actions">
@@ -314,6 +352,18 @@
       </div>
 
       <div id="matchList"></div>
+      </div>
+
+      <div id="v2Section" hidden>
+        <p class="version-note">V2 — AI ranking: an LLM compares your profile (niche, tags, description) with each brand's description and tags.</p>
+        <div class="toolbar">
+          <span class="subtitle" id="v2MetaLine" style="margin:0;"></span>
+          <div class="toolbar-actions">
+            <button class="btn-refresh" id="v2RerankBtn" onclick="rerankV2()">Re-rank with AI</button>
+          </div>
+        </div>
+        <div id="v2List"></div>
+      </div>
     </div>
   </div>
 
@@ -635,7 +685,114 @@
       });
   }
 
+  // ---------- V1 / V2 switch ----------
+  var V2_POLL_MS = 5000;
+  var v2Loaded = false;
+  var v2PollTimer = null;
+
+  function switchVersion(version) {
+    var isV2 = version === 'v2';
+    document.getElementById('v1Section').hidden = isV2;
+    document.getElementById('v2Section').hidden = !isV2;
+    ['v1', 'v2'].forEach(function(v) {
+      var tab = document.getElementById('tab' + v.toUpperCase());
+      tab.classList.toggle('active', v === version);
+      tab.setAttribute('aria-selected', String(v === version));
+    });
+    try { localStorage.setItem('mavlit_matches_version', version); } catch (e) {}
+    if (isV2 && !v2Loaded) loadV2();
+  }
+
+  // ---------- V2: LLM ranking ----------
+  function loadV2() {
+    v2Loaded = true;
+    clearTimeout(v2PollTimer);
+    fetch('/matches/me/v2', { credentials: 'include' })
+      .then(function(r) {
+        if (r.status === 401) {
+          window.location.href = '/signin?return_to=' + encodeURIComponent('/matches');
+          return null;
+        }
+        if (!r.ok) return errorFromResponse(r, 'Failed to load AI ranking');
+        return r.json();
+      })
+      .then(function(data) { if (data) renderV2(data); })
+      .catch(function(err) {
+        document.getElementById('v2List').innerHTML =
+          '<p class="error-msg">' + escapeHtml(err.message || 'Failed to load AI ranking') + '</p>';
+      });
+  }
+
+  function rerankV2() {
+    var btn = document.getElementById('v2RerankBtn');
+    btn.disabled = true;
+    fetch('/matches/me/v2/refresh', { method: 'POST', credentials: 'include' })
+      .then(function(r) {
+        if (!r.ok) return errorFromResponse(r, 'Could not start AI ranking');
+        return r.json();
+      })
+      .then(renderV2)
+      .catch(function(err) {
+        btn.disabled = false;
+        alert(err.message || 'Could not start AI ranking');
+      });
+  }
+
+  function renderV2(data) {
+    var busy = data.status === 'queued' || data.status === 'running';
+    var btn = document.getElementById('v2RerankBtn');
+    btn.disabled = busy;
+    btn.textContent = busy ? 'Ranking…' : 'Re-rank with AI';
+
+    document.getElementById('v2MetaLine').textContent = data.ranked_at
+      ? 'Ranked ' + new Date(data.ranked_at).toLocaleString() + ' — ' + data.total + ' brands'
+      : '';
+
+    var list = document.getElementById('v2List');
+    var statusHtml = '';
+    if (busy) {
+      statusHtml = '<div class="llm-status"><div class="spinner"></div>' +
+        'AI is ranking your brands — this can take a minute or two.' +
+        (data.matches.length ? ' Showing your previous ranking until it finishes.' : '') + '</div>';
+      clearTimeout(v2PollTimer);
+      v2PollTimer = setTimeout(loadV2, V2_POLL_MS);
+    } else if (data.status === 'failed') {
+      statusHtml = '<p class="error-msg" style="padding:1rem 0;">AI ranking failed' +
+        (data.error ? ': ' + escapeHtml(data.error) : '') + '. Try "Re-rank with AI".</p>';
+    }
+
+    if (!data.matches.length) {
+      list.innerHTML = statusHtml || ('<p class="empty-msg">' +
+        (data.status === 'idle'
+          ? 'No AI ranking yet. It runs automatically when you save your creator profile, or click "Re-rank with AI".'
+          : 'The AI ranking found no brands for your profile.') + '</p>');
+      return;
+    }
+
+    list.innerHTML = statusHtml;
+    data.matches.forEach(function(m) {
+      var card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML =
+        '<div class="card-head">' +
+          '<span><span class="rank-num">#' + m.rank + '</span>' +
+          '<button class="brand-name" type="button" title="View partnership posts">' + escapeHtml(m.brand_name) + '</button></span>' +
+          '<span class="score-badge static">' + m.confidence + '% fit</span>' +
+        '</div>' +
+        (m.reason ? '<p class="llm-reason">' + escapeHtml(m.reason) + '</p>' : '');
+      card.querySelector('.brand-name').addEventListener('click', function() {
+        openPostsModal(m.brand_raw_id, m.brand_name);
+      });
+      list.appendChild(card);
+    });
+  }
+
   loadMatches();
+  (function restoreVersion() {
+    var saved = null;
+    try { saved = localStorage.getItem('mavlit_matches_version'); } catch (e) {}
+    if (saved === 'v2') switchVersion('v2');
+  })();
 </script>
 </body>
 </html>
