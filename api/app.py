@@ -1585,6 +1585,44 @@ def list_brand_category_niches():
         db.close()
 
 
+@app.get("/brand-category-tags")
+def list_brand_category_tags(niche: list[str] = Query(default=[])):
+    """
+    Options for the creator-profile "Brand categories to avoid" fields:
+    distinct brands_niches.tags of brands in the requested primary niche(s),
+    e.g. /brand-category-tags?niche=Music&niche=Beauty.
+
+    A niche matches any brands_niches.niche that contains it
+    (case-insensitive), so "Health" also covers "Health & Wellness".
+    Tags are deduped case-insensitively. Returns {"tags_by_niche": {niche:
+    [tags...]}} keyed by each requested niche exactly as passed. Selecting
+    a tag excludes every brand carrying it (matcher.py hard filter).
+    """
+    requested = [n.strip() for n in niche if n and n.strip()]
+    if not requested:
+        return {"tags_by_niche": {}}
+
+    db = SessionLocal()
+    try:
+        tags_by_niche: dict[str, list[str]] = {}
+        for name in requested:
+            rows = db.execute(text("""
+                SELECT DISTINCT trim(tag)
+                FROM brands_niches,
+                     jsonb_array_elements_text(tags) AS tag
+                WHERE jsonb_typeof(tags) = 'array'
+                  AND niche ILIKE :pattern
+                  AND trim(tag) <> ''
+            """), {"pattern": f"%{name}%"}).fetchall()
+            seen: dict[str, str] = {}
+            for (tag,) in rows:
+                seen.setdefault(tag.casefold(), tag)
+            tags_by_niche[name] = sorted(seen.values(), key=str.casefold)
+        return {"tags_by_niche": tags_by_niche}
+    finally:
+        db.close()
+
+
 @app.get("/creator-sub-niches")
 def list_creator_sub_niches():
     """Distinct brand tag values used as searchable creator sub-niches."""

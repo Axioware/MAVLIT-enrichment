@@ -140,6 +140,8 @@
       cursor: pointer;
     }
     .niche-suggestion:hover { background: #334155; }
+    .niche-suggestion-hint { color: #94a3b8; cursor: default; }
+    .niche-suggestion-hint:hover { background: transparent; }
     .platform-card { display: none; }
     .platform-choices { display: flex; gap: 1rem; flex-wrap: wrap; }
     .check-choice { display: flex; align-items: center; gap: .5rem; cursor: pointer; color: #cbd5e1; }
@@ -326,7 +328,7 @@
           <div class="field full">
             <label for="instagram_excluded_categories">Brand categories to avoid</label>
             <div class="niche-picker">
-              <input id="instagram_excluded_categories" name="instagram_excluded_categories" type="text" autocomplete="off" placeholder="Search and select category(ies)" onfocus="showNicheSuggestions('instagram_excluded_categories', 'avoid')" oninput="showNicheSuggestions('instagram_excluded_categories', 'avoid')" />
+              <input id="instagram_excluded_categories" name="instagram_excluded_categories" type="text" autocomplete="off" placeholder="Search and select tag(s) to avoid" onfocus="showNicheSuggestions('instagram_excluded_categories', 'avoid')" oninput="showNicheSuggestions('instagram_excluded_categories', 'avoid')" />
               <div class="niche-suggestions" id="instagram_excluded_categories_suggestions"></div>
             </div>
           </div>
@@ -384,7 +386,7 @@
           <div class="field full">
             <label for="youtube_excluded_categories">Brand categories to avoid</label>
             <div class="niche-picker">
-              <input id="youtube_excluded_categories" name="youtube_excluded_categories" type="text" autocomplete="off" placeholder="Search and select category(ies)" onfocus="showNicheSuggestions('youtube_excluded_categories', 'avoid')" oninput="showNicheSuggestions('youtube_excluded_categories', 'avoid')" />
+              <input id="youtube_excluded_categories" name="youtube_excluded_categories" type="text" autocomplete="off" placeholder="Search and select tag(s) to avoid" onfocus="showNicheSuggestions('youtube_excluded_categories', 'avoid')" oninput="showNicheSuggestions('youtube_excluded_categories', 'avoid')" />
               <div class="niche-suggestions" id="youtube_excluded_categories_suggestions"></div>
             </div>
           </div>
@@ -438,7 +440,9 @@
       'Home Workouts', 'Bodybuilding', 'CrossFit', 'Mobility', 'Sports Training'
     ]
   };
-  var brandCategoryNiches = [];
+  // "Brand categories to avoid" options: brands_niches tags per primary
+  // niche (lowercased), loaded on demand from GET /brand-category-tags.
+  var avoidTagsByNiche = {};
 
   // The min/max range is derived from the selected bracket rather than typed
   // separately, so the saved profile retains the audience age selection for
@@ -707,11 +711,39 @@
     updateMselLabel('sub_niches_list');
   }
 
-  function loadBrandCategoryNiches() {
-    return fetch('/brand-category-niches')
-      .then(function(r) { return r.ok ? r.json() : { niches: [] }; })
-      .then(function(data) { brandCategoryNiches = data.niches || []; })
-      .catch(function() { brandCategoryNiches = []; });
+  function selectedPrimaryNiches(platform) {
+    var primaryInput = document.getElementById(platform + '_primary_niche');
+    return (primaryInput ? primaryInput.value : '')
+      .split(',')
+      .map(function(value) { return value.trim().toLowerCase(); })
+      .filter(Boolean);
+  }
+
+  // Fetches tags for any niches not cached yet. Failed niches are cached as
+  // [] so a broken request doesn't refetch on every keystroke.
+  function loadAvoidTags(niches) {
+    var missing = niches.filter(function(niche) { return !(niche in avoidTagsByNiche); });
+    if (!missing.length) return Promise.resolve();
+    var query = missing.map(function(niche) { return 'niche=' + encodeURIComponent(niche); }).join('&');
+    return fetch('/brand-category-tags?' + query)
+      .then(function(r) { return r.ok ? r.json() : { tags_by_niche: {} }; })
+      .catch(function() { return { tags_by_niche: {} }; })
+      .then(function(data) {
+        var byNiche = data.tags_by_niche || {};
+        missing.forEach(function(niche) { avoidTagsByNiche[niche] = byNiche[niche] || []; });
+      });
+  }
+
+  function avoidTagsFor(niches) {
+    var seen = {};
+    var tags = [];
+    niches.forEach(function(niche) {
+      (avoidTagsByNiche[niche] || []).forEach(function(tag) {
+        var key = tag.toLowerCase();
+        if (!seen[key]) { seen[key] = true; tags.push(tag); }
+      });
+    });
+    return tags.sort(function(a, b) { return a.localeCompare(b, 'en', { sensitivity: 'base' }); });
   }
 
   function currentNicheSearch(value) {
@@ -724,18 +756,25 @@
     var menu = document.getElementById(inputId + '_suggestions');
     var query = currentNicheSearch(input.value).toLowerCase();
     var source;
+    var platform = inputId.indexOf('youtube_') === 0 ? 'youtube' : 'instagram';
     if (kind === 'primary') {
       source = PRIMARY_NICHES;
     } else if (kind === 'avoid') {
-      source = brandCategoryNiches;
+      var avoidNiches = selectedPrimaryNiches(platform);
+      if (!avoidNiches.length) {
+        showSuggestionHint(menu, 'Select a primary niche first to see its brand tags.');
+        return;
+      }
+      if (avoidNiches.some(function(niche) { return !(niche in avoidTagsByNiche); })) {
+        showSuggestionHint(menu, 'Loading tags…');
+        loadAvoidTags(avoidNiches).then(function() {
+          if (document.activeElement === input) showNicheSuggestions(inputId, kind);
+        });
+        return;
+      }
+      source = avoidTagsFor(avoidNiches);
     } else {
-      var platform = inputId.indexOf('youtube_') === 0 ? 'youtube' : 'instagram';
-      var primaryInput = document.getElementById(platform + '_primary_niche');
-      var selectedPrimaryNiches = (primaryInput ? primaryInput.value : '')
-        .split(',')
-        .map(function(value) { return value.trim().toLowerCase(); })
-        .filter(Boolean);
-      source = Array.from(new Set(selectedPrimaryNiches.reduce(function(all, niche) {
+      source = Array.from(new Set(selectedPrimaryNiches(platform).reduce(function(all, niche) {
         return all.concat(SUB_NICHES_BY_PRIMARY[niche] || []);
       }, [])));
     }
@@ -762,6 +801,15 @@
       menu.appendChild(option);
     });
     menu.classList.toggle('open', matches.length > 0);
+  }
+
+  function showSuggestionHint(menu, text) {
+    menu.innerHTML = '';
+    var hint = document.createElement('div');
+    hint.className = 'niche-suggestion niche-suggestion-hint';
+    hint.textContent = text;
+    menu.appendChild(hint);
+    menu.classList.add('open');
   }
 
   function pollDescriptionGeneration(platform, jobId, body) {
@@ -1023,7 +1071,6 @@
   }
 
   updatePlatformSections();
-  loadBrandCategoryNiches();
   checkAuth();
 </script>
 </body>

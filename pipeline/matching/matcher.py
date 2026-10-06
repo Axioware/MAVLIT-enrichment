@@ -7,7 +7,8 @@ Runs on every page load; designed to be cheap:
   Step A — Hard filters: drop brands with essentially zero sponsorship
            activity (a low floor, not a strict cutoff — unscored brands
            are kept, only confirmed-zero-activity ones are dropped). Also
-           drops brands whose niche is in the creator's excluded_categories.
+           drops brands carrying any brands_niches tag in the creator's
+           excluded_categories ("Brand categories to avoid").
 
            Instagram-specific filters, all gated on primary_platform ==
            "instagram" (not applied for any other primary_platform):
@@ -88,11 +89,12 @@ cheap enough for a real-time page load regardless.
 
 import logging
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from pipeline.db import (
     BrandInstagramUser,
+    BrandNiche,
     BrandProfile,
     BrandRaw,
     ContentCreatorRE,
@@ -152,11 +154,25 @@ def get_matches(
     query = query.filter(
         or_(BrandProfile.sponsorship_activity_score.is_(None), BrandProfile.sponsorship_activity_score > _ACTIVITY_FLOOR)
     )
-    if creator.excluded_categories:
-        excluded = [c.strip().lower() for c in creator.excluded_categories if c]
-        if excluded:
-            for niche in excluded:
-                query = query.filter(~BrandRaw.niche.ilike(f"%{niche}%"))
+    # "Brand categories to avoid" are brands_niches.tags (picked on the
+    # creator-profile page from the tags of their primary niche) — drop any
+    # brand carrying one of them (exact tag, case-insensitive).
+    excluded_tags = sorted({
+        c.strip().lower() for c in (creator.excluded_categories or [])
+        if isinstance(c, str) and c.strip()
+    })
+    if excluded_tags:
+        tagged_brand_ids = (
+            db.query(BrandNiche.brand_raw_id)
+            .filter(
+                func.jsonb_typeof(BrandNiche.tags) == "array",
+                text(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements_text(brands_niches.tags) AS t(tag) "
+                    "WHERE lower(trim(t.tag)) = ANY(:excluded_tags))"
+                ).bindparams(excluded_tags=excluded_tags),
+            )
+        )
+        query = query.filter(~BrandRaw.id.in_(tagged_brand_ids))
 
     # Instagram-specific hard filters, gated on primary_platform == "instagram".
     if creator.primary_platform and creator.primary_platform.strip().lower() == "instagram":
