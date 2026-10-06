@@ -337,6 +337,25 @@ enrich_content_creator_re(db, limit=1, niche='fitness')
 db.close()
 "
 
+## refresh_content_creator_re (re-scrape already-scraped creators for NEW partnerships)
+Picks creators with is_scraped = true, currenttime older than --days (default 30), and at least one
+test_creator_brand_partnership_posts row with sponsorship_confidence >= 90. Scrapes their latest 40 posts,
+brand-checks only posts not seen before, then sets currenttime = now().
+
+python -m pipeline.enrichment_re.refresh_content_creator_re --dry-run
+
+OR (refresh every eligible creator, default 30 days)
+
+python -m pipeline.enrichment_re.refresh_content_creator_re
+
+OR (15 days, max 20 creators, one niche)
+
+python -m pipeline.enrichment_re.refresh_content_creator_re --days 15 --limit 20 --niche music
+
+Then score the new partnership rows:
+
+python -m pipeline.enrichment_re.score_post_sponsorship
+
 ## brand_wikidata_lookup (reverse-lookup bare brands by instagram_handle)
 python3 -c "
 import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')

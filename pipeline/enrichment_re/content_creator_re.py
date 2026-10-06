@@ -25,7 +25,9 @@ is_scraped=False:
      them in instagram_users (user_type="commenter") with
      is_content_creator_re=True, and link those commenters only to the brand(s)
      confirmed on that same source post.
-  5. Mark content_creator_re.is_scraped=True.
+  5. Mark content_creator_re.is_scraped=True and set currenttime=now() — the
+     "last scraped" time refresh_content_creator_re.py uses to pick creators
+     due for a re-scrape.
 
 Prompts (editable via /admin > Prompts):
   brand_check — this module only
@@ -36,6 +38,7 @@ import logging
 import os
 import sys
 import time
+from datetime import datetime, timezone
 
 if __package__ in (None, ""):
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
@@ -308,13 +311,17 @@ def _record_llm_partnership_post(
 
 def enrich_content_creator_re(
     db: Session, limit: int = 1, creator_ids: list[int] | None = None,
-    niche: str | None = None,
+    niche: str | None = None, skip_seen_posts: bool = False,
 ) -> tuple[int, set[int]]:
     """
     Process up to `limit` content_creator_re rows where is_scraped=False.
     Pass niche to only pick pending rows of that niche (case-insensitive).
     Pass creator_ids to re-run exactly those rows instead, whether or not
     they were already scraped (limit and niche are ignored then).
+    Pass skip_seen_posts=True (used by refresh_content_creator_re.py) to
+    send only posts not already stored for the creator to the brand_check
+    LLM — all scraped posts are still upserted into instagram_users, and
+    commenters are still collected for newly confirmed partnership posts.
     Returns (rows_processed, brand_raw_ids) — the second element is the
     union of every brands_raw.id confirmed/linked across all processed rows
     in this call (new bare rows this discovered, or existing brands a
@@ -356,6 +363,7 @@ def enrich_content_creator_re(
         if not username:
             logger.warning("Content creator RE: row id=%d has no username — skipping", row.id)
             row.is_scraped = True
+            row.currenttime = datetime.now(timezone.utc)  # last scraped (refresh_content_creator_re.py uses it)
             db.commit()
             processed += 1
             continue
@@ -381,6 +389,7 @@ def enrich_content_creator_re(
         if not raw_posts:
             logger.warning("Content creator RE: no posts returned for @%s", username)
             row.is_scraped = True
+            row.currenttime = datetime.now(timezone.utc)  # last scraped (refresh_content_creator_re.py uses it)
             db.commit()
             processed += 1
             continue
@@ -394,6 +403,18 @@ def enrich_content_creator_re(
         profile = _profile_from_posts(raw_posts)
         demo = _classify_demographics(db, username, profile)
         time.sleep(0.3)
+
+        # Refresh runs: posts already stored for this creator were brand-checked
+        # on an earlier scrape. Read them BEFORE this scrape is upserted below.
+        seen_post_ids: set[str] = set()
+        if skip_seen_posts:
+            seen_post_ids = {
+                str(post_id) for (post_id,) in db.query(InstagramUser.post_id).filter(
+                    InstagramUser.username == username,
+                    InstagramUser.user_type == "contentcreatorRE",
+                    InstagramUser.post_id.isnot(None),
+                )
+            }
 
         #  Store creator — one row per post, niche from content_creator_re.niche
         creator_rows = [
@@ -418,7 +439,14 @@ def enrich_content_creator_re(
         #  runs for posts where the LLM confirmed a brand partnership.
         confirmed_brand_ids: set[int] = set()
         branded_posts: list[tuple[dict, set[int]]] = []
+        if skip_seen_posts:
+            logger.info(
+                "Content creator RE: @%s — %d of %d scraped post(s) are new and will be brand-checked",
+                username, sum(1 for item in raw_posts if str(item.get("id")) not in seen_post_ids), len(raw_posts),
+            )
         for item in raw_posts:
+            if skip_seen_posts and str(item.get("id")) in seen_post_ids:
+                continue
             db.commit()  # release brands_raw locks from the previous post before the LLM call
             brand_matches = _check_post_for_brands(db, username, profile.get("fullName"), item)
             if brand_matches:
@@ -541,6 +569,8 @@ def enrich_content_creator_re(
             continue
 
         row.is_scraped = True
+
+        row.currenttime = datetime.now(timezone.utc)  # last scraped (refresh_content_creator_re.py uses it)
         db.commit()
         processed += 1
         logger.info("Content creator RE: @%s done", username)
