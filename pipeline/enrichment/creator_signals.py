@@ -8,7 +8,8 @@ the brand-side pipelines in this package. Computes and caches:
   1) creator_tier       — bucketed from follower_count (pipeline.helpers.creator_tier,
                            same nano/micro/macro/mega buckets used on the brand side)
   2) content_tags       — LLM-extracted content tags + audience-value keywords,
-                           from niche/sub_niches/content_description
+                           from niche/sub_niches/description (instagram_description,
+                           else youtube_description)
   3) embedding + embedding_text — prose built the same way as
                            build_brand_embedding_text() in brand_signals.py,
                            embedded via the same OpenAI text-embedding-3-small model
@@ -40,6 +41,14 @@ def _get_tags_prompt(db: Session) -> str:
     return row.content if row else TAGS_DEFAULT_PROMPT
 
 
+def creator_description(profile: CreatorProfile) -> str | None:
+    """The creator's description: instagram_description, else youtube_description."""
+    for value in (profile.instagram_description, profile.youtube_description):
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
 def _extract_content_tags(db: Session, profile: CreatorProfile) -> list[str]:
     """
     Merges content_tags + audience_value_keywords into one flat list — Stage 3
@@ -47,14 +56,15 @@ def _extract_content_tags(db: Session, profile: CreatorProfile) -> list[str]:
     the two categories), so keeping one column avoids an unused split.
     Returns [] if there's nothing to extract from, or on any LLM failure.
     """
-    if not profile.content_niche and not profile.content_description:
+    description = creator_description(profile)
+    if not profile.content_niche and not description:
         return []
 
     prompt = fill_template(
         _get_tags_prompt(db),
         niche=profile.content_niche or "unknown",
         sub_niches=", ".join(_platform_sub_niches(profile)) or "none provided",
-        content_description=profile.content_description or "none provided",
+        content_description=description or "none provided",
     )
     result = call_gpt_json(prompt, context=f"creator tags for creator_id={profile.id}")
     if not isinstance(result, dict):
@@ -97,8 +107,9 @@ def build_creator_embedding_text(profile: CreatorProfile) -> str:
     sub_niches = _platform_sub_niches(profile)
     if sub_niches:
         parts.append(f"covering {', '.join(sub_niches)}")
-    if profile.content_description:
-        parts.append(profile.content_description.strip())
+    description = creator_description(profile)
+    if description:
+        parts.append(description)
     if profile.content_tags:
         parts.append(f"known for {', '.join(profile.content_tags)}")
     if profile.primary_platform:

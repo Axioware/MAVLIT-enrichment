@@ -544,7 +544,6 @@
         }
         if (data.status === 'completed') {
           body[platform + '_description'] = data.description || '';
-          body.content_description = selectedPlatforms()[0] === platform ? data.description : body.content_description;
           generatedDescriptions[platform] = data.description || '';
           description.value = data.description || '';
           description.readOnly = false;
@@ -833,7 +832,6 @@
           document.getElementById(platform + '_description').value = description;
           if (body) {
             body[platform + '_description'] = description;
-            if (selectedPlatforms()[0] === platform) body.content_description = description;
           }
           return profile;
         }
@@ -924,7 +922,6 @@
       primary_platform: platforms.length ? platforms.join(',') : null,
       follower_count: primary === 'instagram' ? number('instagram_followers') : number('youtube_subscribers'),
       content_niche: primary ? value(primary + '_primary_niche') : null,
-      content_description: primary ? value(primary + '_description') : null,
       excluded_categories: primary ? list(primary + '_excluded_categories') : null,
       instagram_handle: value('instagram_handle'), instagram_followers: number('instagram_followers'),
       instagram_primary_niche: value('instagram_primary_niche'), instagram_sub_niches: list('instagram_sub_niches'),
@@ -956,7 +953,7 @@
     if (!body.content_niche) {
       throw new Error('Please choose your primary niche before saving.');
     }
-    if (!body.content_description) {
+    if (!body.instagram_description && !body.youtube_description) {
       throw new Error('Please add a short creator description before saving.');
     }
     if (selected.indexOf('instagram') !== -1 && (!body.instagram_handle || !body.instagram_followers || body.instagram_followers <= 0)) {

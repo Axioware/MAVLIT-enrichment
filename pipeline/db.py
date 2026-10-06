@@ -589,7 +589,6 @@ class CreatorProfile(Base):
 
     #  Matching projections populated from the selected primary platform
     content_niche = Column(Text)
-    content_description  = Column(Text)    # free-text creator-written description, source text for LLM tag extraction
     excluded_categories   = Column(JSONB)   # brand niches/categories this creator refuses to work with — Stage 3 hard filter
 
     #  Platform profile fields used by creator-profile.html

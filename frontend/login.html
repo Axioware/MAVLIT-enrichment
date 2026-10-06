@@ -221,7 +221,7 @@
     var primaryPlatform = String(user.primary_platform || '').trim();
     var followerCount = user.follower_count;
     var contentNiche = String(user.content_niche || '').trim();
-    var description = String(user.content_description || user.instagram_description || user.youtube_description || '').trim();
+    var description = String(user.instagram_description || user.youtube_description || '').trim();
     var selectedPlatforms = primaryPlatform ? primaryPlatform.split(',').map(function(v) { return v.trim().toLowerCase(); }).filter(Boolean) : [];
 
     if (!fullName || age === null || age === undefined || !gender || !selectedPlatforms.length || !contentNiche || !description || !followerCount || followerCount <= 0) {

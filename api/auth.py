@@ -91,7 +91,6 @@ def is_profile_complete(profile: CreatorProfile | dict | None) -> bool:
         primary_platform = str(profile.get("primary_platform") or "").strip()
         follower_count = profile.get("follower_count")
         content_niche = str(profile.get("content_niche") or "").strip()
-        content_description = str(profile.get("content_description") or "").strip()
         instagram_handle = str(profile.get("instagram_handle") or "").strip()
         instagram_followers = profile.get("instagram_followers")
         youtube_channel_name = str(profile.get("youtube_channel_name") or "").strip()
@@ -105,7 +104,6 @@ def is_profile_complete(profile: CreatorProfile | dict | None) -> bool:
         primary_platform = (profile.primary_platform or "").strip()
         follower_count = profile.follower_count
         content_niche = (profile.content_niche or "").strip()
-        content_description = (profile.content_description or "").strip()
         instagram_handle = (profile.instagram_handle or "").strip()
         instagram_followers = profile.instagram_followers
         youtube_channel_name = (profile.youtube_channel_name or "").strip()
@@ -126,7 +124,7 @@ def is_profile_complete(profile: CreatorProfile | dict | None) -> bool:
     if not content_niche:
         return False
 
-    description_text = content_description or instagram_description or youtube_description
+    description_text = instagram_description or youtube_description
     if not description_text:
         return False
 

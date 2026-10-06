@@ -413,7 +413,8 @@ def _run_migrations() -> None:
         # the older single audience_age_bracket), and embedding_text to
         # mirror brand_match_profile's embedding/embedding_text pairing.
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS sub_niches JSONB",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS content_description TEXT",
+        # content_description replaced by instagram_description / youtube_description
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS content_description",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS excluded_categories JSONB",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS follower_count INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS age INTEGER",
@@ -1512,7 +1513,6 @@ class CreatorProfileRequest(BaseModel):
     gender:           str | None = None
 
     content_niche:       str | None = None
-    content_description: str | None = None
     excluded_categories:  list[str] | None = None
 
     instagram_handle: str | None = None

@@ -67,7 +67,7 @@ def _creator_fields(creator: CreatorProfile) -> dict[str, str]:
         if niche.strip()
     ]
     descriptions = [
-        d.strip() for d in (creator.instagram_description, creator.youtube_description, creator.content_description)
+        d.strip() for d in (creator.instagram_description, creator.youtube_description)
         if d and d.strip()
     ]
     return {

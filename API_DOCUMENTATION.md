@@ -124,7 +124,6 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
     "age": 29,
     "gender": "female",
     "content_niche": "fitness",
-    "content_description": "Strength and mobility for busy professionals",
     "excluded_categories": ["gambling"],
     "instagram_handle": "averystone",
     "instagram_followers": 42000,
