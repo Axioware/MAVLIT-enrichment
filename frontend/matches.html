@@ -246,8 +246,11 @@
     .rank-num { color: #64748b; font-weight: 700; margin-right: .4rem; }
     .score-badge.static { cursor: default; }
     .llm-reason { font-size: .85rem; color: #cbd5e1; line-height: 1.5; margin-bottom: .4rem; }
-    .llm-status { display: flex; align-items: center; gap: .6rem; color: #94a3b8; font-size: .85rem; padding: 1rem 0; }
-    .llm-status .spinner { width: 18px; height: 18px; }
+    .llm-status { display: flex; align-items: center; gap: .6rem; color: #94a3b8; font-size: .85rem; padding: 1rem 0 .25rem; }
+    .llm-status .spinner { width: 18px; height: 18px; flex-shrink: 0; }
+    .llm-busy-msg { color: #e2e8f0; transition: opacity .35s ease; }
+    .llm-busy-msg.fading { opacity: 0; }
+    .llm-busy-note { font-size: .78rem; color: #64748b; padding: 0 0 1rem 1.7rem; }
 
     .modal-overlay {
       position: fixed;
@@ -692,6 +695,48 @@
   var lastV2Data = null;
   var expandedV2Brands = {};
 
+  // Rotating "working on it" lines while the AI ranking runs — a new random
+  // one every V2_BUSY_MSG_MS, never the same twice in a row. Runs on its own
+  // timer so the 5s data polling re-render doesn't reset it.
+  var V2_BUSY_MESSAGES = [
+    'AI is organizing brands according to your profile…',
+    'Matching your niche and content with every brand…',
+    'Reading brand descriptions and tags…',
+    'Shuffling brands into the perfect order…',
+    'Finding the brands that fit you best…',
+    'Polishing your top matches…'
+  ];
+  var V2_BUSY_MSG_MS = 5000;
+  var v2BusyIndex = -1;
+  var v2BusyTimer = null;
+
+  function nextBusyIndex() {
+    var next;
+    do { next = Math.floor(Math.random() * V2_BUSY_MESSAGES.length); }
+    while (V2_BUSY_MESSAGES.length > 1 && next === v2BusyIndex);
+    return next;
+  }
+
+  function startBusyMessages() {
+    if (v2BusyTimer) return;
+    v2BusyIndex = nextBusyIndex();
+    v2BusyTimer = setInterval(function() {
+      var el = document.getElementById('v2BusyMsg');
+      v2BusyIndex = nextBusyIndex();
+      if (!el) return;
+      el.classList.add('fading');
+      setTimeout(function() {
+        el.textContent = V2_BUSY_MESSAGES[v2BusyIndex];
+        el.classList.remove('fading');
+      }, 350);
+    }, V2_BUSY_MSG_MS);
+  }
+
+  function stopBusyMessages() {
+    clearInterval(v2BusyTimer);
+    v2BusyTimer = null;
+  }
+
   function toggleV2Reasons(brandId) {
     expandedV2Brands[brandId] = !expandedV2Brands[brandId];
     if (lastV2Data) renderV2(lastV2Data);
@@ -748,6 +793,7 @@
   function renderV2(data) {
     lastV2Data = data;
     var busy = data.status === 'queued' || data.status === 'running';
+    if (!busy) stopBusyMessages();
     var btn = document.getElementById('v2RerankBtn');
     btn.disabled = busy;
     btn.textContent = busy ? 'Ranking…' : 'Re-rank with AI';
@@ -759,12 +805,15 @@
     var list = document.getElementById('v2List');
     var statusHtml = '';
     if (busy) {
+      startBusyMessages();
       statusHtml = '<div class="llm-status"><div class="spinner"></div>' +
-        'AI is ranking your brands — this can take a minute or two.' +
-        (data.matches.length ? ' Showing your previous ranking until it finishes.' : '') + '</div>';
+        '<span class="llm-busy-msg" id="v2BusyMsg" aria-live="polite">' + V2_BUSY_MESSAGES[v2BusyIndex] + '</span></div>' +
+        '<p class="llm-busy-note">This can take a minute or two' +
+        (data.matches.length ? ' — your previous ranking is shown below until it finishes.' : '.') + '</p>';
       clearTimeout(v2PollTimer);
       v2PollTimer = setTimeout(loadV2, V2_POLL_MS);
     } else if (data.status === 'failed') {
+      stopBusyMessages();
       statusHtml = '<p class="error-msg" style="padding:1rem 0;">AI ranking failed' +
         (data.error ? ': ' + escapeHtml(data.error) : '') + '. Try "Re-rank with AI".</p>';
     }
