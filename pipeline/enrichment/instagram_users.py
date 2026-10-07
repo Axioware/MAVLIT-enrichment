@@ -69,6 +69,8 @@ from pipeline.helpers.prompts import (
 logger = logging.getLogger(__name__)
 
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"
+# Only instagram_posts rows with a partnership (sponsorship) confidence at or above this are processed.
+_MIN_SPONSORSHIP_CONFIDENCE = 95
 
 #  Prompt helpers
 
@@ -537,7 +539,8 @@ def enrich_instagram_users(
     brand_raw_id: int | None = None,
 ) -> int:
     """
-    Process up to `limit` instagram_posts with sponsorship_confidence >= 90
+    Process up to `limit` instagram_posts with sponsorship_confidence >= 95
+    (_MIN_SPONSORSHIP_CONFIDENCE)
     where is_users_scraped=False. Returns number of posts processed.
 
     Pass row_id to target one specific instagram_posts row by its primary
@@ -559,7 +562,7 @@ def enrich_instagram_users(
     db.execute(text("ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS post_collaborators TEXT"))
     db.commit()
 
-    query = db.query(InstagramPost).filter(InstagramPost.sponsorship_confidence >= 90)
+    query = db.query(InstagramPost).filter(InstagramPost.sponsorship_confidence >= _MIN_SPONSORSHIP_CONFIDENCE)
     if row_id is not None:
         query = query.filter(InstagramPost.id == row_id)
     elif brand_raw_id is not None:
