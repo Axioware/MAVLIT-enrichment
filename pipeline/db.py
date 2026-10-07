@@ -630,7 +630,7 @@ class CreatorProfile(Base):
     embedding_text = Column(Text)
 
     # Matches v2 — LLM ranking of the creator's hard-filtered brands
-    # (pipeline/matching/llm_ranking.py), refreshed on every profile save.
+    # (pipeline/matching/llm_ranking_v2.py), refreshed on every profile save.
     # Status: idle | queued | running | completed | failed.
     llm_ranking_status = Column(Text, nullable=False, server_default="idle", default="idle")
     llm_ranking_error  = Column(Text)
@@ -653,7 +653,7 @@ class CreatorBrandLlmRanking(Base):
     """
     Matches v2: one LLM-assigned fit confidence (0-100) + short reason per
     hard-filtered brand for a creator. Fully replaced on each ranking run
-    (pipeline/matching/llm_ranking.py); `rank` is 1 = best fit.
+    (pipeline/matching/llm_ranking_v2.py); `rank` is 1 = best fit.
     """
     __tablename__ = "creator_brand_llm_rankings"
 

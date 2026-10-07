@@ -1407,7 +1407,7 @@ Reply ONLY with this JSON object, no extra text:
 """
 
 
-#  matching/llm_ranking.py  (Matches v2)
+#  matching/llm_ranking_v2.py  (Matches v2)
 LLM_BRAND_RANKING_PROMPT_NAME = "creator_brand_llm_ranking"
 
 LLM_BRAND_RANKING_DEFAULT_PROMPT = """

@@ -119,7 +119,7 @@ from pipeline.helpers.prompts import (
     WEBSITE_PICK_DEFAULT_PROMPT,
     WEBSITE_PICK_PROMPT_NAME,
 )
-from pipeline.matching.llm_ranking import rank_brands_with_llm
+from pipeline.matching.llm_ranking_v2 import rank_brands_with_llm
 from pipeline.matching.llm_ranking_v3 import rank_brands_with_llm_v3
 from pipeline.matching.match_text import generate_match_reasons
 from pipeline.matching.matcher import get_matches
@@ -467,7 +467,7 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS audience_age_min INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS audience_age_max INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS embedding_text TEXT",
-        # Matches v2 — LLM ranking status (pipeline/matching/llm_ranking.py)
+        # Matches v2 — LLM ranking status (pipeline/matching/llm_ranking_v2.py)
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_ranking_status TEXT NOT NULL DEFAULT 'idle'",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_ranking_error TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_ranked_at TIMESTAMPTZ",
@@ -2057,7 +2057,7 @@ def _refresh_ai_matches(background_tasks: BackgroundTasks, user_id: int, version
 def get_my_llm_matches(current_user: CreatorProfile = Depends(get_completed_user)):
     """
     Matches v2 — the logged-in creator's brands as ranked by the LLM
-    (pipeline/matching/llm_ranking.py) from the last ranking run, best
+    (pipeline/matching/llm_ranking_v2.py) from the last ranking run, best
     first, plus that run's status. Ranking runs in the background after
     every profile save, or on POST /matches/me/v2/refresh.
     """

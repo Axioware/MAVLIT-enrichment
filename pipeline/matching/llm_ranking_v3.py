@@ -1,7 +1,7 @@
 """
 pipeline/matching/llm_ranking_v3.py
 
-Matches v3 — a mix of v1 and v2. Like v2 (llm_ranking.py), the LLM ranks
+Matches v3 — a mix of v1 and v2. Like v2 (llm_ranking_v2.py), the LLM ranks
 every brand passing the Stage 3 hard filters against the creator's
 profile; v3 additionally gives it each brand's "why it's a match"
 taglines (match_text.generate_match_reasons — the evidence v1 shows). The
@@ -29,7 +29,7 @@ from pipeline.helpers.prompts import (
     LLM_BRAND_RANKING_V3_DEFAULT_PROMPT,
     LLM_BRAND_RANKING_V3_PROMPT_NAME,
 )
-from pipeline.matching.llm_ranking import (
+from pipeline.matching.llm_ranking_v2 import (
     _BATCH_SIZE,
     _MAX_BRANDS,
     _WORKERS,

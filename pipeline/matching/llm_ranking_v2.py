@@ -1,5 +1,5 @@
 """
-pipeline/matching/llm_ranking.py
+pipeline/matching/llm_ranking_v2.py
 
 Matches v2 — LLM ranking of a creator's brands, as an alternative to the
 rule-based v1 scoring in scoring.py.
