@@ -1925,6 +1925,7 @@ class MatchDimension(BaseModel):
 class MatchResult(BaseModel):
     brand_raw_id: int
     brand_name:   str
+    website:      str | None = None   # brands_raw.website
     niche:        str | None = None
     total_score:  float
     dimensions:   dict[str, MatchDimension]
@@ -1979,6 +1980,7 @@ def refresh_my_matches(
 class LlmMatchResult(BaseModel):
     brand_raw_id: int
     brand_name:   str
+    website:      str | None = None   # brands_raw.website
     niche:        str | None = None
     rank:         int
     confidence:   int
@@ -2019,6 +2021,7 @@ def _ai_matches_response(db, user_id: int, version: str) -> LlmMatchesResponse:
         LlmMatchResult(
             brand_raw_id=brand.id,
             brand_name=brand.name or f"brand {brand.id}",
+            website=brand.website,
             niche=brand.niche,
             rank=ranking.rank,
             confidence=ranking.confidence,

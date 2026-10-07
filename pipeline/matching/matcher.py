@@ -364,6 +364,7 @@ def get_matches(
         results.append({
             "brand_raw_id": brand.id,
             "brand_name":   brand.name,
+            "website":      brand.website,
             "niche":        brand.niche,
             "total_score":  round(scored["total_score"], 4),
             "niche_tier":   scored["niche_tier"],

@@ -114,6 +114,16 @@
       justify-content: space-between;
       margin-bottom: .6rem;
     }
+    .brand-title { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+    .brand-website {
+      font-size: .78rem;
+      color: #38bdf8;
+      text-decoration: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .brand-website:hover { text-decoration: underline; }
     .brand-name {
       font-size: 1.05rem;
       font-weight: 700;
@@ -482,6 +492,19 @@
     applyFilterAndRender();
   }
 
+  // Brand website link shown under the brand name (V1/V2/V3). Only http(s)
+  // URLs are linked; a bare domain gets https:// prepended. Shown as the
+  // host without "www.".
+  function websiteHtml(url) {
+    var raw = String(url || '').trim();
+    if (!raw) return '';
+    var href = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw.replace(/^\/+/, '');
+    var host;
+    try { host = new URL(href).hostname.replace(/^www\./i, ''); } catch (e) { return ''; }
+    return '<a class="brand-website" href="' + escapeHtml(href) + '" target="_blank" rel="noopener noreferrer" title="' +
+      escapeHtml(href) + '">' + escapeHtml(host) + ' &#8599;</a>';
+  }
+
   function escapeHtml(value) {
     return String(value == null ? '' : value)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -633,7 +656,10 @@
 
       card.innerHTML =
         '<div class="card-head">' +
-          '<button class="brand-name" type="button" title="View partnership posts">' + m.brand_name.replace(/</g, '&lt;') + '</button>' +
+          '<div class="brand-title">' +
+            '<button class="brand-name" type="button" title="View partnership posts">' + m.brand_name.replace(/</g, '&lt;') + '</button>' +
+            websiteHtml(m.website) +
+          '</div>' +
           '<span class="score-wrap">' +
             '<button class="score-badge" type="button" aria-label="Match score details" aria-describedby="score-tooltip-' + m.brand_raw_id + '">' + pct(m.total_score) + ' match</button>' +
             '<span class="score-tooltip" role="tooltip" id="score-tooltip-' + m.brand_raw_id + '">' +
@@ -930,8 +956,11 @@
       card.className = expandable ? 'card expandable' : 'card';
       card.innerHTML =
         '<div class="card-head">' +
-          '<span><span class="rank-num">#' + m.rank + '</span>' +
-          '<button class="brand-name" type="button" title="View partnership posts">' + escapeHtml(m.brand_name) + '</button></span>' +
+          '<div class="brand-title">' +
+            '<span><span class="rank-num">#' + m.rank + '</span>' +
+            '<button class="brand-name" type="button" title="View partnership posts">' + escapeHtml(m.brand_name) + '</button></span>' +
+            websiteHtml(m.website) +
+          '</div>' +
           '<span class="score-badge static">' + m.confidence + '% fit</span>' +
         '</div>' +
         (m.reason ? '<p class="llm-reason">' + escapeHtml(m.reason) + '</p>' : '') +
