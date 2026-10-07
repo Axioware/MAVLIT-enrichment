@@ -1537,8 +1537,9 @@ Sub-niche tags: {creator_sub_niches}
 Content tags: {content_tags}
 Description: {creator_description}
 Profile summary: {embedding_text}
+Gender: {creator_gender}
 
-BRANDS (JSON list - each has id, name, niche, description, tags, why_it_matches):
+BRANDS (JSON list - each has id, name, niche, description, tags, why_it_matches, target_audience_gender, product_audience_gender):
 {brands_json}
 
 "why_it_matches" lists the platform's verified match signals between that brand and this creator. They are written to the creator, so "you" / "yours" means THIS creator. Examples: recent paid partnerships, partnerships with creators whose content is similar to this creator's, follower-size fit, a verified partnerships contact, same niche, the brand sponsoring creators in this creator's niche, audience fit.
@@ -1551,6 +1552,13 @@ For EVERY brand, score two parts separately from 0 to 100, then combine them. CO
    - SPECIALIZED brands (a specific instrument, sport, discipline, body/skin/hair concern, medical condition, or a service aimed at artists such as vinyl pressing, record labels, distribution or mastering) fit well ONLY when the creator's information shows that specialization.
      e.g. drum/percussion brands fit drummers, not singers; vinyl pressing fits creators who release physical music; a powerlifting brand fits powerlifters, not yoga creators; a curly-hair brand fits creators who cover curly hair.
    - Apply the same logic to Music, Health, Fitness and Beauty.
+   - GENDER FIT is part of content fit. Use the creator's Gender and each brand's target_audience_gender (who its marketing targets) and product_audience_gender (who its products are made for). It is a SOFT signal, never an automatic exclusion:
+     - If the creator's gender is "not specified", ignore gender completely.
+     - "unknown" means the brand's audience gender has not been determined - treat it as neutral, never as a mismatch.
+     - target or product audience "both", or the creator's own gender: no gender penalty.
+     - Brand targets the OPPOSITE gender: do NOT exclude it. Many such brands still sponsor creators of the other gender and their products can be used or promoted by them (e.g. a female-targeted skincare, fragrance, haircare, wellness, food, home or lifestyle brand for a male creator; a female-targeted brand whose product_audience_gender is "both"). Lower content fit only a little in that case.
+       Positive evidence of fit for this creator overrides the audience label: product_audience_gender "both", or why_it_matches lines showing it has backed creators of this creator's gender ("has already backed ... male creators", "partnered with creators ... same as yours").
+     - Lower content fit strongly (into the 0-19 band) ONLY when the product itself is clearly made for and only usable by the opposite gender (e.g. menstrual or maternity products, bras or women's intimate apparel, men's beard care) AND there is no evidence the brand works with creators of this creator's gender.
    Content fit scale:
    - 90-100: direct, natural fit; the brand's specialization matches the creator's content.
    - 70-89: strong fit; a broad brand the creator could naturally promote.
@@ -1561,7 +1569,7 @@ For EVERY brand, score two parts separately from 0 to 100, then combine them. CO
 2. MATCH EVIDENCE (35%) - how strong the brand's why_it_matches signals are.
    - Strongest: a recent paid partnership (especially in the last month or 3 months, or with creators whose content matches this creator's); partnerships with creators similar to this creator; follower/size fit; the brand sponsoring creators in this creator's niche.
    - Helpful: a verified partnerships contact; same niche; YouTube sponsorships; a smaller or growing brand (easier to reach); tag overlap with the creator's content; a latest product to pitch around.
-   - Weak: lines that only describe the brand's audience (target audience gender or age, who its products are made for) - count them very little.
+   - Weak: lines that only describe the brand's audience (target audience gender or age, who its products are made for) - count them very little as evidence (gender fit is judged under CONTENT FIT).
    Match evidence scale:
    - 90-100: a recent paid partnership plus other strong signals.
    - 70-89: a recent paid partnership, or several strong signals.

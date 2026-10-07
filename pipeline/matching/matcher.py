@@ -114,7 +114,7 @@ _FOLLOWER_TOLERANCE = 2   # +/-200% buffer beyond the brand's confirmed collabor
 
 
 
-def _hard_filtered_query(db: Session, creator: CreatorProfile):
+def _hard_filtered_query(db: Session, creator: CreatorProfile, apply_gender_filter: bool = True):
     """
     Step A — the hard-filtered (BrandRaw, BrandProfile, distance) query for
     one creator, unordered and unlimited, plus the cosine-distance
@@ -236,45 +236,80 @@ def _hard_filtered_query(db: Session, creator: CreatorProfile):
     #     user_type "contentcreatorRE") has the creator's gender, via a
     #     sponsorship_confidence >= 90 test partnership post
     creator_gender = (creator.gender or "").strip().lower()
-    if creator_gender in ("male", "female"):
+    if apply_gender_filter and creator_gender in ("male", "female"):
         audience_gender_match = func.lower(func.trim(BrandRaw.target_audience_gender)).in_((creator_gender, "both"))
-        collaborator_gender_match = BrandRaw.id.in_(
-            db.query(BrandInstagramUser.brand_raw_id)
-            .join(InstagramUser, InstagramUser.id == BrandInstagramUser.instagram_user_id)
-            .join(InstagramPost, InstagramPost.post_id == InstagramUser.post_id)
-            .filter(
-                InstagramUser.user_type != "commenter",
-                func.lower(func.trim(InstagramUser.gender)) == creator_gender,
-                InstagramPost.brand_raw_id == BrandInstagramUser.brand_raw_id,
-                InstagramPost.sponsorship_confidence >= 90,
-            )
-        )
-        re_creator_gender_match = BrandRaw.id.in_(
-            db.query(TestCreatorBrandPartnershipPost.brand_raw_id)
-            .join(
-                InstagramUser,
-                func.lower(InstagramUser.username) == func.lower(TestCreatorBrandPartnershipPost.creator_username),
-            )
-            .filter(
-                InstagramUser.user_type == "contentcreatorRE",
-                func.lower(func.trim(InstagramUser.gender)) == creator_gender,
-                TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
-            )
-        )
+        collaborator_gender_match, re_creator_gender_match = _creator_gender_evidence(db, creator_gender)
         query = query.filter(or_(audience_gender_match, collaborator_gender_match, re_creator_gender_match))
 
     return query, distance_expr
 
 
-def hard_filtered_brands(db: Session, creator: CreatorProfile, limit: int | None = None) -> list:
+def _creator_gender_evidence(db: Session, gender: str):
+    """
+    (collaborator_match, re_creator_match) filter clauses: the brand has at
+    least one creator of `gender` on a sponsorship_confidence >= 90 post —
+      - a non-commenter Instagram collaborator on the brand's own posts
+      - a reverse-engineered creator (instagram_users user_type
+        "contentcreatorRE") on a test partnership post
+    Shared by the v1/v2 gender hard filter and v3's NULL-audience rule.
+    """
+    collaborator_match = BrandRaw.id.in_(
+        db.query(BrandInstagramUser.brand_raw_id)
+        .join(InstagramUser, InstagramUser.id == BrandInstagramUser.instagram_user_id)
+        .join(InstagramPost, InstagramPost.post_id == InstagramUser.post_id)
+        .filter(
+            InstagramUser.user_type != "commenter",
+            func.lower(func.trim(InstagramUser.gender)) == gender,
+            InstagramPost.brand_raw_id == BrandInstagramUser.brand_raw_id,
+            InstagramPost.sponsorship_confidence >= 90,
+        )
+    )
+    re_creator_match = BrandRaw.id.in_(
+        db.query(TestCreatorBrandPartnershipPost.brand_raw_id)
+        .join(
+            InstagramUser,
+            func.lower(InstagramUser.username) == func.lower(TestCreatorBrandPartnershipPost.creator_username),
+        )
+        .filter(
+            InstagramUser.user_type == "contentcreatorRE",
+            func.lower(func.trim(InstagramUser.gender)) == gender,
+            TestCreatorBrandPartnershipPost.sponsorship_confidence >= 90,
+        )
+    )
+    return collaborator_match, re_creator_match
+
+
+def brand_ids_with_creator_gender(db: Session, brand_ids: list[int], gender: str) -> set[int]:
+    """
+    Which of `brand_ids` have at least one creator of `gender` (male /
+    female) on a sponsorship_confidence >= 90 post — the same evidence the
+    v1/v2 gender hard filter accepts. Empty set for any other gender.
+    """
+    gender = (gender or "").strip().lower()
+    if not brand_ids or gender not in ("male", "female"):
+        return set()
+    collaborator_match, re_creator_match = _creator_gender_evidence(db, gender)
+    return {
+        brand_id for (brand_id,) in db.query(BrandRaw.id).filter(
+            BrandRaw.id.in_(brand_ids), or_(collaborator_match, re_creator_match),
+        )
+    }
+
+
+def hard_filtered_brands(
+    db: Session, creator: CreatorProfile, limit: int | None = None, apply_gender_filter: bool = True,
+) -> list:
     """
     Every brand passing the Step A hard filters for `creator`, as
     (BrandRaw, BrandProfile, distance) tuples nearest-first by embedding,
     optionally capped at `limit`. [] if the creator has no embedding.
+
+    apply_gender_filter=False skips only the gender hard filter (v3 LLM
+    ranking judges gender fit itself); every other filter still applies.
     """
     if creator.embedding is None:
         return []
-    query, distance_expr = _hard_filtered_query(db, creator)
+    query, distance_expr = _hard_filtered_query(db, creator, apply_gender_filter=apply_gender_filter)
     query = query.order_by(distance_expr)
     if limit is not None:
         query = query.limit(limit)

@@ -9,8 +9,20 @@ prompt has the LLM score content fit and that match evidence separately and
 return confidence = 0.65 x content fit + 0.35 x match evidence.
 
   creator — niche(s), sub-niche tags, content_tags, description(s),
-            embedding_text                     (same as v2)
-  brand   — name, niche, description, brands_niches tags, why_it_matches
+            embedding_text (same as v2), gender
+  brand   — name, niche, description, brands_niches tags, why_it_matches,
+            target_audience_gender, product_audience_gender
+
+Unlike v1/v2, v3 does NOT apply the matcher's gender hard filter: brands of
+every target audience gender (male / female / both) are sent, and the
+prompt has the LLM weigh gender fit itself as a soft signal (a
+female-targeted brand whose products or partnerships also suit men is not
+excluded for a male creator). Brands with NO target_audience_gender
+(NULL / unknown) are excluded from v3 UNLESS they have sponsored a creator
+of this creator's gender (Instagram collaborator or RE creator, confidence
+>= 90) — e.g. a NULL-audience brand that backed male creators is shown to
+a male creator. For creators without a male/female gender, NULL-audience
+brands are always excluded.
 
 Batching, model (gpt-5), parsing and the fully-replaced results table
 mirror v2; results go to creator_brand_llm_v3_rankings with the taglines
@@ -38,11 +50,23 @@ from pipeline.matching.llm_ranking_v2 import (
     _rank_batch,
 )
 from pipeline.matching.match_text import generate_match_reasons
-from pipeline.matching.matcher import hard_filtered_brands
+from pipeline.matching.matcher import brand_ids_with_creator_gender, hard_filtered_brands
 
 logger = logging.getLogger(__name__)
 
 _MODEL = "gpt-5"
+
+
+def _gender_label(value: str | None) -> str:
+    """Brand audience gender for the prompt: male / female / both, else unknown."""
+    v = (value or "").strip().lower()
+    return v if v in ("male", "female", "both") else "unknown"
+
+
+def _creator_gender_label(value: str | None) -> str:
+    """Creator gender for the prompt: male / female, else not specified."""
+    v = (value or "").strip().lower()
+    return v if v in ("male", "female") else "not specified"
 
 
 def _get_prompt(db: Session) -> str:
@@ -62,7 +86,23 @@ def rank_brands_with_llm_v3(db: Session, creator_id: int) -> int:
         logger.warning("LLM ranking v3: creator_id=%d not found", creator_id)
         return 0
 
-    candidates = hard_filtered_brands(db, creator, limit=_MAX_BRANDS)
+    # Every hard filter except the creator-vs-brand gender match — the LLM
+    # judges gender fit softly. Brands with NO target_audience_gender
+    # (NULL / unknown) are kept only when they have sponsored a creator of
+    # this creator's gender (confidence >= 90, same evidence as the v1/v2
+    # gender filter); otherwise they are left out of v3.
+    all_candidates = hard_filtered_brands(db, creator, limit=_MAX_BRANDS, apply_gender_filter=False)
+    unknown_ids = [b.id for b, _p, _d in all_candidates if _gender_label(b.target_audience_gender) == "unknown"]
+    unknown_with_gender_creator = brand_ids_with_creator_gender(db, unknown_ids, creator.gender)
+    candidates = [
+        candidate for candidate in all_candidates
+        if _gender_label(candidate[0].target_audience_gender) != "unknown"
+        or candidate[0].id in unknown_with_gender_creator
+    ]
+    audience = {
+        brand.id: (_gender_label(brand.target_audience_gender), _gender_label(brand.product_audience_gender))
+        for brand, _profile, _distance in candidates
+    }
     taglines = {
         brand.id: generate_match_reasons(creator, brand, profile, db=db)
         for brand, profile, _distance in candidates
@@ -70,7 +110,8 @@ def rank_brands_with_llm_v3(db: Session, creator_id: int) -> int:
     payloads = _brand_payloads(db, [brand for brand, _profile, _distance in candidates])
     for payload in payloads:
         payload["why_it_matches"] = taglines[payload["id"]]
-    creator_fields = _creator_fields(creator)
+        payload["target_audience_gender"], payload["product_audience_gender"] = audience[payload["id"]]
+    creator_fields = {**_creator_fields(creator), "creator_gender": _creator_gender_label(creator.gender)}
     template = _get_prompt(db)
     db.commit()  # release read locks before the slow LLM calls
 

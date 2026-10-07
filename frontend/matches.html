@@ -86,6 +86,21 @@
     }
     .toolbar-actions { display: flex; align-items: center; gap: .6rem; }
 
+    .brand-search {
+      display: block;
+      width: 100%;
+      margin-bottom: 1rem;
+      padding: .55rem .8rem;
+      background: #0f172a;
+      color: #e2e8f0;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: .9rem;
+    }
+    .brand-search:focus { outline: none; border-color: #38bdf8; }
+    .brand-search::placeholder { color: #64748b; }
+
     .card {
       background: #1e293b;
       border: 1px solid #334155;
@@ -241,6 +256,7 @@
     }
     .version-toggle button:hover { color: #e2e8f0; }
     .version-toggle button.active { background: #0284c7; color: #fff; }
+    .tab-count { margin-left: .35rem; font-size: .75rem; font-weight: 600; opacity: .8; }
     .version-note { font-size: .8rem; color: #64748b; margin: -.6rem 0 1.25rem; }
 
     .rank-num { color: #64748b; font-weight: 700; margin-right: .4rem; }
@@ -337,10 +353,13 @@
       <h1>Your Matches</h1>
       <p class="subtitle">Brands ranked for your profile, with the top reasons behind each match.</p>
 
+      <input type="search" id="brandSearch" class="brand-search" placeholder="Search brands by name or niche…"
+             aria-label="Search brands in V1, V2 and V3" autocomplete="off" oninput="onBrandSearch(this.value)" />
+
       <div class="version-toggle" role="tablist" aria-label="Matching version">
-        <button type="button" role="tab" id="tabV1" class="active" aria-selected="true" onclick="switchVersion('v1')">V1</button>
-        <button type="button" role="tab" id="tabV2" aria-selected="false" onclick="switchVersion('v2')">V2</button>
-        <button type="button" role="tab" id="tabV3" aria-selected="false" onclick="switchVersion('v3')">V3</button>
+        <button type="button" role="tab" id="tabV1" class="active" aria-selected="true" onclick="switchVersion('v1')">V1<span class="tab-count" id="countV1"></span></button>
+        <button type="button" role="tab" id="tabV2" aria-selected="false" onclick="switchVersion('v2')">V2<span class="tab-count" id="countV2"></span></button>
+        <button type="button" role="tab" id="tabV3" aria-selected="false" onclick="switchVersion('v3')">V3<span class="tab-count" id="countV3"></span></button>
       </div>
 
       <div id="v1Section">
@@ -575,9 +594,12 @@
 
   function applyFilterAndRender() {
     var selected = document.getElementById('nicheFilter').value;
-    var filtered = selected
+    var byNiche = selected
       ? currentMatches.filter(function(m) { return m.niche === selected; })
       : currentMatches;
+    var filtered = byNiche.filter(matchesSearch);
+    document.getElementById('metaLine').textContent =
+      v1MetaBase + (selected ? ' · ' + byNiche.length + ' in ' + selected : '') + searchSuffix(filtered.length);
     renderMatchList(filtered, selected);
   }
 
@@ -590,7 +612,9 @@
       return;
     }
     if (!matches.length) {
-      list.innerHTML = '<p class="empty-msg">No matches in "' + selectedNiche.replace(/</g, '&lt;') + '" — try a different niche.</p>';
+      list.innerHTML = brandSearchQuery
+        ? noSearchResultsHtml()
+        : '<p class="empty-msg">No matches in "' + selectedNiche.replace(/</g, '&lt;') + '" — try a different niche.</p>';
       return;
     }
 
@@ -634,9 +658,52 @@
     });
   }
 
+  // Brand search — one box filters V1, V2 and V3 (by brand name or niche),
+  // client-side over the lists already loaded; no extra API calls.
+  var brandSearchQuery = '';
+
+  function matchesSearch(m) {
+    if (!brandSearchQuery) return true;
+    var haystack = ((m.brand_name || '') + ' ' + (m.niche || '')).toLowerCase();
+    return haystack.indexOf(brandSearchQuery) !== -1;
+  }
+
+  function searchSuffix(count) {
+    return brandSearchQuery ? ' · ' + count + ' matching "' + brandSearchQuery + '"' : '';
+  }
+
+  function noSearchResultsHtml() {
+    return '<p class="empty-msg">No brands match "' + escapeHtml(brandSearchQuery) + '".</p>';
+  }
+
+  function onBrandSearch(value) {
+    brandSearchQuery = (value || '').trim().toLowerCase();
+    applyFilterAndRender();
+    Object.keys(aiState).forEach(function(v) {
+      if (aiState[v].lastData) renderAi(v, aiState[v].lastData);
+    });
+  }
+
+  // Total brand count shown on each version's tab button ("V1 · 79").
+  function setTabCount(version, total) {
+    var el = document.getElementById('count' + version.toUpperCase());
+    if (el) el.textContent = (typeof total === 'number') ? '· ' + total : '';
+  }
+
+  function brandsLabel(n) {
+    return n + (n === 1 ? ' brand' : ' brands');
+  }
+
+  // V1 meta line base ("79 brands — Live, computed …"); the niche filter appends its count.
+  var v1MetaBase = '';
+
   function renderMatches(data) {
-    document.getElementById('metaLine').textContent =
-      (data.cached ? 'Cached' : 'Live') + ' — computed ' + new Date(data.computed_at).toLocaleString();
+    var shown = (data.matches || []).length;
+    var total = typeof data.total === 'number' ? data.total : shown;
+    setTabCount('v1', total);
+    v1MetaBase = brandsLabel(total) +
+      (shown < total ? ' (showing top ' + shown + ')' : '') +
+      ' — ' + (data.cached ? 'Cached' : 'Live') + ', computed ' + new Date(data.computed_at).toLocaleString();
 
     currentMatches = data.matches || [];
     populateNicheFilter(currentMatches);
@@ -819,9 +886,11 @@
     btn.disabled = state.busy;
     btn.textContent = state.busy ? 'Ranking…' : 'Re-rank with AI';
 
-    document.getElementById(version + 'MetaLine').textContent = data.ranked_at
-      ? 'Ranked ' + new Date(data.ranked_at).toLocaleString() + ' — ' + data.total + ' brands'
-      : '';
+    setTabCount(version, data.total);
+    var visible = (data.matches || []).filter(matchesSearch);
+    document.getElementById(version + 'MetaLine').textContent = brandsLabel(data.total) +
+      (data.ranked_at ? ' — Ranked ' + new Date(data.ranked_at).toLocaleString() : '') +
+      searchSuffix(visible.length);
 
     var list = document.getElementById(version + 'List');
     var statusHtml = '';
@@ -845,8 +914,13 @@
       return;
     }
 
+    if (!visible.length) {
+      list.innerHTML = statusHtml + noSearchResultsHtml();
+      return;
+    }
+
     list.innerHTML = statusHtml;
-    data.matches.forEach(function(m) {
+    visible.forEach(function(m) {
       // AI fit explanation first, then the same "why it's a match" taglines
       // as V1 (top REASONS_PREVIEW, expandable to all).
       var reasons = m.reasons || [];
@@ -880,6 +954,8 @@
   }
 
   loadMatches();
+  // Load V2/V3 too so every tab shows its brand count straight away.
+  Object.keys(aiState).forEach(function(v) { loadAi(v); });
   (function restoreVersion() {
     var saved = null;
     try { saved = localStorage.getItem('mavlit_matches_version'); } catch (e) {}
