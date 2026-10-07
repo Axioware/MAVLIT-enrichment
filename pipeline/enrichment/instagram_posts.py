@@ -10,12 +10,13 @@ Prompts are editable via /admin > Prompts.
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, OPENAI_KEY
-from pipeline.db import BrandRaw, InstagramPost, Prompt
+from pipeline.db import BrandRaw, InstagramPost, Prompt, TestCreatorBrandPartnershipPost
 from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 _ACTOR_ID     = "shu8hvrXbJbY3Eb9W"
 _POSTS_LIMIT  = 40   # last N posts, regardless of how far back that goes
 _RESULTS_TYPE = "posts"
+_MIN_PARTNERSHIP_CONFIDENCE = 90   # brand needs a test_creator_brand_partnership_posts row at/above this
 
 #  Prompt helpers
 
@@ -345,11 +347,14 @@ def enrich_instagram_posts(
     posts_limit: int = _POSTS_LIMIT,
     brand_id: int | None = None,
     niche: str | None = None,
+    workers: int = 1,
 ) -> int:
     """
     For each brand with instagram_handle set, instagram_checked=False,
-    refferls=False, geo_reach_score NULL or 0-40, and
-    has_official_website=True:
+    refferls=False, geo_reach_score 0-40 (NULL = not geo-scored yet is
+    skipped), and at least one
+    test_creator_brand_partnership_posts row with sponsorship_confidence
+    >= 90 (an official website is not required):
       1. Scrape posts via Apify
     2. Apply LLM filtering to all creator signals
         3. Store every fetched post with a post ID in instagram_posts, keeping
@@ -361,14 +366,19 @@ def enrich_instagram_posts(
     All posts_limit posts are always fetched from Apify in one call (no
     change to scrape cost).
 
-    Pass brand_id to target one specific brand directly — this bypasses the
-    has_official_website filter, but still skips the brand when
-    instagram_checked=True. instagram_handle must still be set.
+    Pass brand_id to target one specific brand directly — it still skips the
+    brand when instagram_checked=True, and instagram_handle must still be set.
 
     Pass niche to scope the run to brands.niche matching that value exactly
     (case-insensitive) — brands_raw.niche is stored verbatim as typed at
     seed time (see pipeline/seed.py), so this must match that same string.
     Ignored if brand_id is also given.
+
+    Pass workers > 1 to run that many Apify scrapes at the same time (the
+    slow part). Only the Apify calls run in parallel threads; LLM filtering,
+    scoring and every DB write still happen one brand at a time in this
+    thread (the Session is not thread-safe), in the order scrapes finish.
+    workers=1 (default) behaves exactly like the original sequential loop.
 
     Returns number of brands processed.
     """
@@ -376,10 +386,21 @@ def enrich_instagram_posts(
         logger.warning("APIFY_TOKEN not set — skipping Instagram enrichment")
         return 0
 
+    # Only brands with at least one confirmed (>= 90) creator partnership
+    # from the reverse-engineering evidence table.
+    has_confident_partnership = (
+        db.query(TestCreatorBrandPartnershipPost.id)
+        .filter(
+            TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
+            TestCreatorBrandPartnershipPost.sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE,
+        )
+        .exists()
+    )
     query = db.query(BrandRaw).filter(
         BrandRaw.instagram_handle.isnot(None),
         BrandRaw.refferls.is_(False),
-        (BrandRaw.geo_reach_score.is_(None) | BrandRaw.geo_reach_score.between(0, 40)),
+        BrandRaw.geo_reach_score.between(0, 40),   # NULL (not geo-scored yet) is skipped
+        has_confident_partnership,
     )
     if brand_id is not None:
         query = query.filter(
@@ -387,10 +408,7 @@ def enrich_instagram_posts(
             BrandRaw.instagram_checked.is_(False),
         )
     else:
-        query = query.filter(
-            BrandRaw.instagram_checked.is_(False),
-            BrandRaw.has_official_website.is_(True),
-        )
+        query = query.filter(BrandRaw.instagram_checked.is_(False))
         if niche:
             query = query.filter(func.lower(BrandRaw.niche) == niche.strip().lower())
 
@@ -400,14 +418,22 @@ def enrich_instagram_posts(
         logger.info("Instagram: no pending brands with instagram_handle")
         return 0
 
-    logger.info("Instagram: processing %d brands", len(brands))
+    workers = max(1, int(workers or 1))
+    logger.info("Instagram: processing %d brands (%d parallel Apify scrape(s))", len(brands), workers)
     total_posts = 0
     checked_count = 0
 
+    # Handles are read here, in this thread — worker threads never touch ORM objects.
+    handles = {brand.id: normalize_handle(brand.instagram_handle) for brand in brands}
+    db.commit()  # don't hold the brand-query transaction open during long Apify runs
+
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="ig-apify")
+    futures = {pool.submit(_scrape_handle, handles[brand.id], posts_limit): brand for brand in brands}
     try:
-        for brand in brands:
-            handle = normalize_handle(brand.instagram_handle)
-            items  = _scrape_handle(handle, posts_limit)
+        for future in as_completed(futures):
+            brand  = futures[future]
+            handle = handles[brand.id]
+            items  = future.result()   # re-raises ApifyQuotaExceeded from the worker
 
             if items is None:
                 logger.warning(
@@ -496,6 +522,11 @@ def enrich_instagram_posts(
             "remaining brands stay instagram_checked=False for the next run",
             exc, checked_count, len(brands),
         )
+    finally:
+        # Drop scrapes that haven't started (quota hit / error); in-flight ones
+        # finish in the background and are discarded — their brands stay
+        # instagram_checked=False for the next run.
+        pool.shutdown(wait=False, cancel_futures=True)
 
     logger.info("Instagram: %d/%d brands checked, %d posts stored", checked_count, len(brands), total_posts)
     # checked_count, not len(brands) — a batch where every brand hits an

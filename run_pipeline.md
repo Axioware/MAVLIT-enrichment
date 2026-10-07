@@ -48,6 +48,30 @@ enrich_instagram_posts(db, limit=1, niche='fashion')
 db.close()
 "
 
+OR (parallel Apify — scrape `workers` brands at the same time; LLM + DB steps still run one brand at a time)
+
+python3 -c "
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.instagram_posts import enrich_instagram_posts
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+db = SessionLocal()
+enrich_instagram_posts(db, limit=100, workers=5)
+db.close()
+"
+
+or (parallel, one niche)
+
+python3 -c "
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.instagram_posts import enrich_instagram_posts
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+db = SessionLocal()
+enrich_instagram_posts(db, limit=100, niche='fashion', workers=4)
+db.close()
+"
+
 ## to run youtube_sponsorship.py (daily limited run)
 python3 -c "
 from dotenv import load_dotenv; load_dotenv()
