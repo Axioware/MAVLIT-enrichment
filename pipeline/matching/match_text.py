@@ -364,16 +364,25 @@ def _target_gender_reason(creator: CreatorProfile, brand: BrandRaw, db) -> str |
     if not target_label:
         return None
     line = f"{brand.name}'s target audience is {target_label}."
-
     creator_gender = (creator.gender or "").strip().lower()
-    if creator_gender in ("male", "female") and brand_gender == "both":
-        return f"{brand.name}'s target audience gender ({creator_gender}) which is same as yours."
-    if db is None or creator_gender not in ("male", "female") or brand_gender == creator_gender:
+
+    if brand_gender == "both":
+        if creator_gender in ("male", "female"):
+            return f"{brand.name}'s target audience gender ({creator_gender}) which is same as yours."
         return line
 
+    # Brand targets men or women: "target audience is men" is only shown to
+    # male creators (and "women" only to female creators).
+    if brand_gender == creator_gender:
+        return line
+    if db is None or creator_gender not in ("male", "female"):
+        return None
+
+    # Opposite gender: only the "door is open" line, and only when the brand
+    # has already backed creators of this creator's gender.
     partners = _same_gender_partner_niches(creator_gender, brand, db)
     if not partners:
-        return line
+        return None
 
     niche_counts = Counter(niche for niche in partners.values() if niche)
     niche_text = f" in {niche_counts.most_common(1)[0][0]}" if niche_counts else ""

@@ -142,8 +142,10 @@ Placeholders: `{brand}` = brand name, `{similarity}` = `80-90%` or `90-100%`, `{
 | Option | Condition | Tagline |
 |---|---|---|
 | a | User is male or female, and the brand's gender is `both` | {brand}'s target audience gender ({male / female}, the user's gender) which is same as yours. |
-| b | The brand's gender is `male` or `female` and matches the user's gender, **or** the user has no male/female gender (none / company account), **or** no creator of the user's gender was found | {brand}'s target audience is {men / women / both men and women}. |
+| b | The brand's gender is `male` or `female` and **equals** the user's gender, **or** the brand's gender is `both` and the user has no male/female gender (none / company account) | {brand}'s target audience is {men / women / both men and women}. |
 | c | The brand's gender (`male` / `female`) does **not** match the user's, but at least one brand creator (Instagram collaborator or RE creator, sponsorship confidence ≥ 90) has the user's gender | {brand}'s target audience is {women / men}, but it has already backed {a male creator / N male creators} in {niche}, so the door is open for creators like you. |
+
+Not shown at all: the brand's gender (`male` / `female`) does not match the user's and it has backed no creator of the user's gender, **or** the brand's gender is `male` / `female` and the user has no male/female gender. ("…'s target audience is men." is only ever shown to male users, "…women." only to female users.)
 
 If the brand's gender **and** a creator's gender both match the user, only **a** or **b** is shown, never **c**.
 

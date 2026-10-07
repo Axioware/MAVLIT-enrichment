@@ -1552,13 +1552,11 @@ For EVERY brand, score two parts separately from 0 to 100, then combine them. CO
    - SPECIALIZED brands (a specific instrument, sport, discipline, body/skin/hair concern, medical condition, or a service aimed at artists such as vinyl pressing, record labels, distribution or mastering) fit well ONLY when the creator's information shows that specialization.
      e.g. drum/percussion brands fit drummers, not singers; vinyl pressing fits creators who release physical music; a powerlifting brand fits powerlifters, not yoga creators; a curly-hair brand fits creators who cover curly hair.
    - Apply the same logic to Music, Health, Fitness and Beauty.
-   - GENDER FIT is part of content fit. Use the creator's Gender and each brand's target_audience_gender (who its marketing targets) and product_audience_gender (who its products are made for). It is a SOFT signal, never an automatic exclusion:
+   - GENDER FIT. Use the creator's Gender and each brand's target_audience_gender (who its marketing targets) and product_audience_gender (who its products are made for):
      - If the creator's gender is "not specified", ignore gender completely.
      - "unknown" means the brand's audience gender has not been determined - treat it as neutral, never as a mismatch.
-     - target or product audience "both", or the creator's own gender: no gender penalty.
-     - Brand targets the OPPOSITE gender: do NOT exclude it. Many such brands still sponsor creators of the other gender and their products can be used or promoted by them (e.g. a female-targeted skincare, fragrance, haircare, wellness, food, home or lifestyle brand for a male creator; a female-targeted brand whose product_audience_gender is "both"). Lower content fit only a little in that case.
-       Positive evidence of fit for this creator overrides the audience label: product_audience_gender "both", or why_it_matches lines showing it has backed creators of this creator's gender ("has already backed ... male creators", "partnered with creators ... same as yours").
-     - Lower content fit strongly (into the 0-19 band) ONLY when the product itself is clearly made for and only usable by the opposite gender (e.g. menstrual or maternity products, bras or women's intimate apparel, men's beard care) AND there is no evidence the brand works with creators of this creator's gender.
+     - target_audience_gender "both" or the creator's own gender: no gender penalty.
+     - target_audience_gender is the OPPOSITE of the creator's gender: apply the OPPOSITE GENDER RULE below - these brands always rank at the very bottom.
    Content fit scale:
    - 90-100: direct, natural fit; the brand's specialization matches the creator's content.
    - 70-89: strong fit; a broad brand the creator could naturally promote.
@@ -1589,6 +1587,11 @@ Examples:
 - Powerlifting, cycling or other discipline-specific gear for a Fitness creator who does not do that discipline -> 15 or lower.
 - Products for a specific hair type, skin concern or medical condition for a creator who does not cover it -> 15 or lower.
 These brands should end up at the bottom of the ranking, below every broad or matching brand.
+
+OPPOSITE GENDER RULE (apply LAST; overrides the formula and every other rule):
+If the creator's gender is "male" and the brand's target_audience_gender is "female", or the creator's gender is "female" and the brand's target_audience_gender is "male", the final confidence MUST be 10 or lower - no matter how strong its content fit, product_audience_gender or match evidence is - so these brands rank below every other brand.
+This rule does NOT apply when target_audience_gender is "both" or "unknown", or when the creator's gender is "not specified".
+Example: a female creator and a brand with target_audience_gender "male" -> confidence 10 or lower, even with a recent paid partnership.
 
 RULES
 - Score each brand on the absolute scale above, independently of the other brands in this list. Brands are sent in separate batches, so never rescale or spread scores across the list.
