@@ -28,6 +28,14 @@ in batches of 10 rows so progress is saved as it goes):
 A username whose Apify scrape fails is left unhandled — its row stays
 collaborators_checked = false and it is retried on the next run.
 
+Only rows from confirmed partner creators are read:
+  - user_type mention / tagged_user / coauthor_producer: the creator must be
+    referenced (tagged_users / mentions / coauthor_producers / sponsors) on
+    an instagram_posts row with sponsorship_confidence >= 95.
+  - user_type contentcreatorRE: the creator must have a
+    test_creator_brand_partnership_posts row with sponsorship_confidence >= 90.
+Commenter rows are never read.
+
 --niche / --gender limit the run to instagram_users rows whose creator
 niche (instagram_users.niche) / gender (instagram_users.gender) match,
 case-insensitive — e.g. --niche music --gender female --limit 1 processes
@@ -47,11 +55,17 @@ import json
 import logging
 import time
 
-from sqlalchemy import func, text
+from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, OPENAI_KEY
-from pipeline.db import ContentCreatorRE, InstagramUser, SessionLocal
+from pipeline.db import (
+    ContentCreatorRE,
+    InstagramPost,
+    InstagramUser,
+    SessionLocal,
+    TestCreatorBrandPartnershipPost,
+)
 from pipeline.enrichment.instagram_users import _profile_from_posts, _scrape_posts
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 
@@ -61,6 +75,12 @@ POSTS_PER_CREATOR = 5
 NICHES = ("Music", "Beauty", "Health", "Fitness", "Other")
 BRAND_NICHE = "Brand"
 _ROW_BATCH = 200  # instagram_users rows read per query while collecting usernames
+
+# Which instagram_users rows count as confirmed partner creators.
+_BRAND_POST_USER_TYPES = ("mention", "tagged_user", "coauthor_producer")
+_BRAND_POST_MIN_CONFIDENCE = 95   # instagram_posts.sponsorship_confidence
+_RE_USER_TYPE = "contentcreatorRE"
+_RE_MIN_CONFIDENCE = 90           # test_creator_brand_partnership_posts.sponsorship_confidence
 
 USERNAME_TYPE_PROMPT = """You are classifying an Instagram account from its username ONLY.
 
@@ -110,6 +130,20 @@ If the account is a brand, return:
 
 
 def _ensure_columns(db: Session) -> None:
+    # ALTER TABLE ... IF NOT EXISTS still takes an exclusive lock, which queues
+    # behind any open instagram_users transaction (e.g. enrich_instagram_users
+    # mid-Apify scrape) and blocks every other query on the table — so only
+    # run it when a column is actually missing.
+    existing = {
+        name for (name,) in db.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'instagram_users' "
+            "AND column_name IN ('post_collaborators', 'collaborators_checked')"
+        ))
+    }
+    db.commit()
+    if existing == {"post_collaborators", "collaborators_checked"}:
+        return
     db.execute(text("ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS post_collaborators TEXT"))
     db.execute(text(
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS "
@@ -120,6 +154,55 @@ def _ensure_columns(db: Session) -> None:
 
 def _split_usernames(value: str | None) -> list[str]:
     return [u.strip().lstrip("@") for u in (value or "").split(",") if u.strip().lstrip("@")]
+
+
+def _bare_username(entry) -> str | None:
+    """instagram_posts JSON list entries are usernames (older rows may be {"username": ...})."""
+    value = entry.get("username") if isinstance(entry, dict) else entry
+    if not isinstance(value, str):
+        return None
+    value = value.strip().lstrip("@").lower()
+    return value or None
+
+
+def _qualifying_creator_filter(db: Session):
+    """
+    Filter clause for instagram_users rows from confirmed partner creators:
+    brand-post creators referenced on an instagram_posts row with
+    sponsorship_confidence >= _BRAND_POST_MIN_CONFIDENCE, and RE creators with
+    a test_creator_brand_partnership_posts row at >= _RE_MIN_CONFIDENCE.
+    """
+    brand_post_creators: set[str] = set()
+    posts = (
+        db.query(InstagramPost.tagged_users, InstagramPost.mentions,
+                 InstagramPost.coauthor_producers, InstagramPost.sponsors)
+        .filter(InstagramPost.sponsorship_confidence >= _BRAND_POST_MIN_CONFIDENCE)
+        .all()
+    )
+    for post in posts:
+        for field in post:
+            for entry in field if isinstance(field, list) else []:
+                username = _bare_username(entry)
+                if username:
+                    brand_post_creators.add(username)
+
+    re_creators = {
+        u.lower() for (u,) in
+        db.query(func.lower(func.trim(TestCreatorBrandPartnershipPost.creator_username)))
+        .filter(
+            TestCreatorBrandPartnershipPost.sponsorship_confidence >= _RE_MIN_CONFIDENCE,
+            TestCreatorBrandPartnershipPost.creator_username.isnot(None),
+        )
+        .distinct()
+        .all()
+        if u
+    }
+
+    username = func.lower(func.trim(InstagramUser.username))
+    return or_(
+        and_(InstagramUser.user_type.in_(_BRAND_POST_USER_TYPES), username.in_(sorted(brand_post_creators) or [""])),
+        and_(InstagramUser.user_type == _RE_USER_TYPE, username.in_(sorted(re_creators) or [""])),
+    )
 
 
 def _existing_creator_usernames(db: Session) -> set[str]:
@@ -149,6 +232,7 @@ def _collect_work(
     (case-insensitive).
     """
     known = _existing_creator_usernames(db)
+    qualifying_creator = _qualifying_creator_filter(db)
     queued: list[str] = []
     queued_keys: set[str] = set()
     rows: dict[int, list[str]] = {}
@@ -161,6 +245,7 @@ def _collect_work(
             InstagramUser.post_collaborators.isnot(None),
             InstagramUser.post_collaborators != "",
             InstagramUser.id > last_id,
+            qualifying_creator,
         )
         if niche:
             query = query.filter(func.lower(func.trim(InstagramUser.niche)) == niche.strip().lower())
