@@ -27,9 +27,17 @@ worked through in batches of 50 so progress is saved as it goes):
 A username whose Apify scrape fails is left unhandled — its row stays
 collaborators_checked = false and it is retried on the next run.
 
+--niche / --gender limit the run to instagram_users rows whose creator
+niche (instagram_users.niche) / gender (instagram_users.gender) match,
+case-insensitive — e.g. --niche music --gender female --limit 1 processes
+every comma-separated username of the first unchecked female Music creator
+row.
+
 Run from the project root:
     python -m pipeline.enrichment_re.discover_collaborator_creators --dry-run
     python -m pipeline.enrichment_re.discover_collaborator_creators --limit 50
+    python -m pipeline.enrichment_re.discover_collaborator_creators --niche music --limit 1
+    python -m pipeline.enrichment_re.discover_collaborator_creators --niche music --gender female --limit 1
     python -m pipeline.enrichment_re.discover_collaborator_creators            # all
 """
 
@@ -125,6 +133,7 @@ def _existing_creator_usernames(db: Session) -> set[str]:
 
 def _collect_work(
     db: Session, limit: int, skip_row_ids: set[int] | None = None,
+    niche: str | None = None, gender: str | None = None,
 ) -> tuple[list[str], dict[int, list[str]]]:
     """
     Walk unchecked instagram_users rows in id order and collect up to `limit`
@@ -135,7 +144,9 @@ def _collect_work(
     out entirely, so it stays unchecked for the next run — except the first
     row, which is always taken (so a run can go over `limit` when that single
     row has more new usernames than the limit). Rows in skip_row_ids (ones
-    that already failed earlier in this run) are ignored.
+    that already failed earlier in this run) are ignored. niche / gender
+    restrict to rows whose instagram_users.niche / gender match
+    (case-insensitive).
     """
     known = _existing_creator_usernames(db)
     queued: list[str] = []
@@ -144,18 +155,17 @@ def _collect_work(
     last_id = 0
 
     while len(queued) < limit:
-        batch = (
-            db.query(InstagramUser.id, InstagramUser.post_collaborators)
-            .filter(
-                InstagramUser.collaborators_checked == False,  # noqa: E712
-                InstagramUser.post_collaborators.isnot(None),
-                InstagramUser.post_collaborators != "",
-                InstagramUser.id > last_id,
-            )
-            .order_by(InstagramUser.id)
-            .limit(_ROW_BATCH)
-            .all()
+        query = db.query(InstagramUser.id, InstagramUser.post_collaborators).filter(
+            InstagramUser.collaborators_checked == False,  # noqa: E712
+            InstagramUser.post_collaborators.isnot(None),
+            InstagramUser.post_collaborators != "",
+            InstagramUser.id > last_id,
         )
+        if niche:
+            query = query.filter(func.lower(func.trim(InstagramUser.niche)) == niche.strip().lower())
+        if gender:
+            query = query.filter(func.lower(func.trim(InstagramUser.gender)) == gender.strip().lower())
+        batch = query.order_by(InstagramUser.id).limit(_ROW_BATCH).all()
         if not batch:
             break
         for row_id, value in batch:
@@ -273,9 +283,10 @@ def _process_username(db: Session, username: str, summary: dict, tag: str) -> bo
 
 def run(
     db: Session, limit: int, dry_run: bool = False, skip_row_ids: set[int] | None = None,
+    niche: str | None = None, gender: str | None = None,
 ) -> dict:
     _ensure_columns(db)
-    usernames, rows = _collect_work(db, limit, skip_row_ids)
+    usernames, rows = _collect_work(db, limit, skip_row_ids, niche, gender)
     db.commit()  # end the read transaction before slow LLM/Apify work
     logger.info("Collected %d new username(s) from %d instagram_users row(s)", len(usernames), len(rows))
 
@@ -313,7 +324,7 @@ def run(
     return summary
 
 
-def run_all(db: Session, batch_size: int = 50) -> dict:
+def run_all(db: Session, batch_size: int = 50, niche: str | None = None, gender: str | None = None) -> dict:
     """
     Process every remaining username, batch_size at a time, marking rows
     checked after each batch so a crash mid-way keeps the finished batches.
@@ -327,7 +338,7 @@ def run_all(db: Session, batch_size: int = 50) -> dict:
     while True:
         batch_no += 1
         logger.info("===== batch %d =====", batch_no)
-        summary = run(db, batch_size, skip_row_ids=skip_row_ids)
+        summary = run(db, batch_size, skip_row_ids=skip_row_ids, niche=niche, gender=gender)
         if not summary["usernames"]:
             break
         skip_row_ids |= summary["failed_row_ids"]
@@ -351,6 +362,14 @@ def main() -> int:
         "--limit", type=int, default=None,
         help="Max new usernames to process this run. Omit to process ALL remaining usernames (in batches of 50).",
     )
+    parser.add_argument(
+        "--niche", type=str, default=None,
+        help="Only rows whose creator niche (instagram_users.niche) matches, case-insensitive — e.g. music.",
+    )
+    parser.add_argument(
+        "--gender", type=str, default=None,
+        help="Only rows whose creator gender (instagram_users.gender) matches, case-insensitive — e.g. female.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="List the usernames that would be processed; no LLM/Apify/writes.")
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
@@ -359,11 +378,11 @@ def main() -> int:
     db = SessionLocal()
     try:
         if args.limit is not None:
-            summary = run(db, args.limit, dry_run=args.dry_run)
+            summary = run(db, args.limit, dry_run=args.dry_run, niche=args.niche, gender=args.gender)
         elif args.dry_run:
-            summary = run(db, 10**9, dry_run=True)  # list everything, write nothing
+            summary = run(db, 10**9, dry_run=True, niche=args.niche, gender=args.gender)  # list everything, write nothing
         else:
-            summary = run_all(db)
+            summary = run_all(db, niche=args.niche, gender=args.gender)
     finally:
         db.close()
 
