@@ -67,6 +67,9 @@ website is eligible for correction here.
 
 Sets instagram_profile_checked=True whether or not anything changed, so a
 row isn't retried every run.
+
+Batch mode only picks brands with at least one
+test_creator_brand_partnership_posts row at sponsorship_confidence >= 90.
 """
 
 import json
@@ -76,12 +79,12 @@ from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
-from sqlalchemy import or_
+from sqlalchemy import exists, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, SEARXNG_URL
-from pipeline.db import BrandRaw, Prompt
+from pipeline.db import BrandRaw, Prompt, TestCreatorBrandPartnershipPost
 from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.http import fetch_page_via_jina, fetch_page_with_jina_fallback
@@ -95,6 +98,8 @@ from pipeline.helpers.prompts import (
 from pipeline.helpers.social import normalize_handle
 
 logger = logging.getLogger(__name__)
+
+_MIN_PARTNERSHIP_CONFIDENCE = 90   # brand needs a test_creator_brand_partnership_posts row at/above this
 
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"  # same Instagram scraper used across the pipeline
 # Full browser-like header set — link-in-bio hosts (Linktree in particular,
@@ -683,8 +688,10 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
         already tried and failed to match it (instagram_wikidata_checked=
         True) — keeps that more authoritative lookup as the first attempt
         for bare rows instead of racing it.
+    Either way, only brands with a test_creator_brand_partnership_posts row
+    at sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE.
 
-    Pass brand_id to target one specific brand directly — bypasses both of
+    Pass brand_id to target one specific brand directly — bypasses all of
     the above gates (and instagram_profile_checked) entirely.
 
     Returns number of brand rows processed (resolved, corrected, or not).
@@ -702,6 +709,10 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
             or_(
                 BrandRaw.name.isnot(None),
                 BrandRaw.instagram_wikidata_checked == True,
+            ),
+            exists().where(
+                TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
+                TestCreatorBrandPartnershipPost.sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE,
             ),
         )
 

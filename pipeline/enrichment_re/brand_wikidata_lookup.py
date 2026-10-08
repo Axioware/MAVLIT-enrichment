@@ -22,6 +22,9 @@ duplicated logic needed here.
 
 Marks instagram_wikidata_checked=True whether or not a match was found,
 so unresolvable handles aren't retried every run.
+
+Batch mode only picks brands with at least one
+test_creator_brand_partnership_posts row at sponsorship_confidence >= 90.
 """
 
 import logging
@@ -29,10 +32,11 @@ import time
 from urllib.parse import urlparse
 
 import httpx
+from sqlalchemy import exists
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from pipeline.db import BrandRaw
+from pipeline.db import BrandRaw, TestCreatorBrandPartnershipPost
 from pipeline.helpers.normalize import normalize
 from pipeline.helpers.social import normalize_handle
 
@@ -205,6 +209,16 @@ def _apply_match(db: Session, brand: BrandRaw, data: dict, handle: str) -> None:
         )
 
 
+_MIN_PARTNERSHIP_CONFIDENCE = 90   # brand needs a test_creator_brand_partnership_posts row at/above this
+
+
+def _has_confident_partnership():
+    return exists().where(
+        TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
+        TestCreatorBrandPartnershipPost.sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE,
+    )
+
+
 def enrich_brand_wikidata_lookup(db: Session, limit: int = 50, brand_id: int | None = None) -> int:
     """
     For brands_raw rows with name IS NULL and instagram_handle set,
@@ -212,8 +226,11 @@ def enrich_brand_wikidata_lookup(db: Session, limit: int = 50, brand_id: int | N
     wikidata_id, entity_type, description, website, domain. niche is left
     untouched.
 
+    Batch mode only picks brands with a test_creator_brand_partnership_posts
+    row at sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE.
+
     Pass brand_id to target one specific brand directly — bypasses the
-    instagram_wikidata_checked filter.
+    instagram_wikidata_checked and partnership-confidence filters.
 
     Returns number of brand rows processed (matched or not).
     """
@@ -224,7 +241,10 @@ def enrich_brand_wikidata_lookup(db: Session, limit: int = 50, brand_id: int | N
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:
-        query = query.filter(BrandRaw.instagram_wikidata_checked == False)
+        query = query.filter(
+            BrandRaw.instagram_wikidata_checked == False,
+            _has_confident_partnership(),
+        )
 
     brands: list[BrandRaw] = query.limit(limit).all()
 
