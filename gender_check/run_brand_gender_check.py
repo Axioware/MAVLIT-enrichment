@@ -217,6 +217,18 @@ def _gender_metrics_result(result: dict) -> dict:
     }
 
 
+UNSURE_TARGET_GENDER_CONFIDENCE = 50
+
+
+def _default_target_gender(metrics: dict) -> dict:
+    """target_audience_gender is never saved NULL: when the LLM still gives
+    none, fall back to "both" at low confidence (the prompt's "not sure" rule)."""
+    if metrics.get("target_audience_gender") is None:
+        metrics["target_audience_gender"] = "both"
+        metrics["target_audience_gender_confidence"] = UNSURE_TARGET_GENDER_CONFIDENCE
+    return metrics
+
+
 def _ensure_gender_columns(db) -> None:
     db.execute(text("""
         ALTER TABLE brands_raw
@@ -355,7 +367,7 @@ def main() -> int:
                 context=f"brand gender check brand_raw_id={brand['brand_raw_id']}",
                 model=LLM_MODEL,
             )
-            gender_metrics = _gender_metrics_result(result)
+            gender_metrics = _default_target_gender(_gender_metrics_result(result))
             updated = (
                 db.query(BrandRaw)
                 .filter(BrandRaw.id == brand["brand_raw_id"])

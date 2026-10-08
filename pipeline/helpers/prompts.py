@@ -550,18 +550,22 @@ Do NOT infer a person's age simply from their appearance.
 GENDER CLASSIFICATION
 --------------------------------------------------
 
-For each gender field, return exactly ONE of:
+TARGET AUDIENCE GENDER IS MANDATORY. Return exactly ONE of:
+
+- "male"
+- "female"
+- "both"
+
+Never return null for target_audience_gender. Use every available signal (captions, hashtags, partner creators, products, website, description) to choose "male" or "female" when one gender clearly dominates. If you are NOT sure, or the evidence is neutral, gender-inclusive, weak or conflicting, return "both" with a LOW confidence score (50-69).
+
+PRODUCT AUDIENCE GENDER: return exactly ONE of:
 
 - "male"
 - "female"
 - "both"
 - null
 
-"both" means there is evidence that the brand/product genuinely serves or targets both male and female audiences.
-
-Do NOT use "both" simply because the evidence is uncertain or incomplete.
-
-If there is insufficient evidence to determine the gender classification, return null and use a lower confidence score.
+For product audience gender, "both" means there is evidence that the product genuinely serves both male and female audiences. Do NOT use "both" for product audience gender simply because the evidence is uncertain or incomplete; return null and use a lower confidence score instead.
 
 --------------------------------------------------
 AGE RANGE
@@ -748,7 +752,8 @@ For age confidence:
 
 If the evidence is insufficient:
 
-- Use null for the affected gender field.
+- target_audience_gender: never null; use "both" with a low confidence score (50-69).
+- product_audience_gender: use null.
 - Use null for unsupported age endpoints.
 - Lower the corresponding confidence score.
 - Never invent a value just to avoid returning null.
@@ -760,7 +765,7 @@ OUTPUT FORMAT
 Return ONLY valid JSON.
 
 {
-   "target_audience_gender": "male|female|both|null",
+   "target_audience_gender": "male|female|both",
    "target_audience_gender_confidence": 0,
 
    "target_audience_min_age": null,

@@ -39,6 +39,7 @@ MAX_INSTAGRAM_POSTS_FOR_LLM = 10
 LLM_MODEL = "gpt-5"
 MAX_WEBSITE_PAGES = 5
 AUDIENCE_STOP_CONFIDENCE = 90
+UNSURE_TARGET_GENDER_CONFIDENCE = 50   # saved with target gender "both" when the LLM still returns none
 PAGE_TEXT_LIMIT = 6000
 
 # Product and audience pages take priority over generic site pages. Other
@@ -201,17 +202,20 @@ Do NOT determine demographics from:
 
 Gender Classification
 
-For each gender field, return exactly one of these JSON values:
+TARGET AUDIENCE GENDER IS MANDATORY. target_audience_gender must be exactly one of:
+- "male"
+- "female"
+- "both"
+
+Never return null for target_audience_gender. Use every signal available (partner creators, Instagram captions and hashtags, website text, products, description) to pick "male" or "female" when one gender clearly dominates (see the ratio rule below). If you are NOT sure, or the evidence is neutral, gender-inclusive, weak or conflicting, return "both" with a LOW target_audience_gender_confidence (50-69).
+
+PRODUCT AUDIENCE GENDER: product_audience_gender must be exactly one of:
 - "male"
 - "female"
 - "both"
 - null
 
-Use "both" only when there is positive evidence the brand actively serves both genders.
-
-If evidence is weak, conflicting, or absent:
-- return null
-- lower confidence
+Use "both" for product_audience_gender only when there is positive evidence the product actively serves both genders. If evidence is weak, conflicting, or absent, return null for product_audience_gender and lower its confidence.
 
 Partner creators (target audience gender)
 
@@ -221,7 +225,8 @@ The creators a brand partners with show who its marketing is aimed at. Use them 
 
 Judge each creator's gender from their username, display name and the post caption. Skip creators whose gender you cannot tell, and accounts that are brands or businesses rather than people.
 
-- Return "both" for target_audience_gender only if you found BOTH male and female partner creators AND the split is balanced: between 50/50 and 70/30.
+- When partner creators show a gender split, return "both" only if you found BOTH male and female partner creators AND the split is balanced: between 50/50 and 70/30.
+- If you cannot tell any partner creator's gender and no other evidence shows one gender dominating, return "both" with a low confidence (50-69) — never null.
 - If MORE than 70% of the partner creators whose gender you can tell are one gender, return that gender, not "both". Examples:
   - 5 female + 5 male (50/50) -> "both"
   - 7 female + 3 male (70/30) -> "both"
@@ -301,10 +306,10 @@ RECENT INSTAGRAM POSTS:
 REVERSE ENGINEERING PARTNER CREATORS (creators with a confirmed paid partnership post for this brand):
 {re_creators}
 
-Return ONLY valid JSON with exactly these keys. Use JSON null (without quotes) for unknown gender, age, or latest product values, and integer numbers (without quotes) for ages and confidence scores. Do not include comments, markdown, or extra keys.
+Return ONLY valid JSON with exactly these keys. target_audience_gender is never null. Use JSON null (without quotes) for unknown product gender, age, or latest product values, and integer numbers (without quotes) for ages and confidence scores. Do not include comments, markdown, or extra keys.
 
 {
-  "target_audience_gender": null,
+  "target_audience_gender": "both",
   "target_audience_gender_confidence": 0,
   "target_audience_min_age": null,
   "target_audience_max_age": null,
@@ -776,6 +781,11 @@ def main() -> int:
             if metrics is None:
                 logger.warning("No audience estimates returned for brand_raw_id=%s; skipping save.", brand["brand_raw_id"])
                 continue
+            # target_audience_gender is never saved NULL — the prompt's
+            # "not sure -> both" rule, enforced if the LLM still skips it.
+            if metrics["target_audience_gender"] is None:
+                metrics["target_audience_gender"] = "both"
+                metrics["target_audience_gender_confidence"] = UNSURE_TARGET_GENDER_CONFIDENCE
 
             updated = (
                 db.query(BrandRaw)
