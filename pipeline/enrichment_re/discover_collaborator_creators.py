@@ -257,6 +257,7 @@ def _process_username(db: Session, username: str, summary: dict, tag: str) -> bo
         summary["brand_by_username"] += 1
         logger.info("%s: brand (username check) — skipped", tag)
         return True
+    logger.info("%s: creator (username check) — scraping %d posts", tag, POSTS_PER_CREATOR)
 
     posts = _scrape_posts(username, n=POSTS_PER_CREATOR)
     if posts is None:
