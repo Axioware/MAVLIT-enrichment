@@ -17,7 +17,9 @@ in batches of 10 rows so progress is saved as it goes):
   2b. For creators only: check Meta's Branded Content Library
      (facebook_branded_content_checker.py) for branded-content posts in its
      date window. No result (0, or the account isn't in the search dropdown)
-     stops here — nothing is saved, no Apify cost.
+     stops here — nothing is saved, no Apify cost. Every check's outcome
+     (found / not_found / not_in_dropdown / error + result count) is saved
+     to facebook_branded_content_checks, one row per username.
   3. For creators with >= 1 branded-content result: scrape 5 posts via Apify, then a second LLM call reads
      the profile + those posts to double-check creator vs brand AND pick the
      niche: Music, Beauty, Health, Fitness or Other.
@@ -63,18 +65,26 @@ import logging
 import time
 
 from sqlalchemy import and_, func, or_, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, OPENAI_KEY
 from pipeline.db import (
+    Base,
     ContentCreatorRE,
+    FacebookBrandedContentCheck,
     InstagramPost,
     InstagramUser,
     SessionLocal,
     TestCreatorBrandPartnershipPost,
+    engine,
 )
 from pipeline.enrichment.instagram_users import _profile_from_posts, _scrape_posts
-from pipeline.enrichment_re.facebook_branded_content_checker import CheckError, check_branded_content
+from pipeline.enrichment_re.facebook_branded_content_checker import (
+    END_DATE,
+    START_DATE,
+    check_branded_content,
+)
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 
 logger = logging.getLogger(__name__)
@@ -139,6 +149,9 @@ If the account is a brand, return:
 
 
 def _ensure_columns(db: Session) -> None:
+    # The checks table is new (create_all skips it when it exists, and only
+    # touches this table — no lock on instagram_users).
+    Base.metadata.create_all(bind=engine, tables=[FacebookBrandedContentCheck.__table__])
     # ALTER TABLE ... IF NOT EXISTS still takes an exclusive lock, which queues
     # behind any open instagram_users transaction (e.g. enrich_instagram_users
     # mid-Apify scrape) and blocks every other query on the table — so only
@@ -157,6 +170,24 @@ def _ensure_columns(db: Session) -> None:
     db.execute(text(
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS "
         "collaborators_checked BOOLEAN NOT NULL DEFAULT false"
+    ))
+    db.commit()
+
+
+def _save_branded_content_check(
+    db: Session, username: str, status: str,
+    instagram_id: str | None = None, result_count: int | None = None, error: str | None = None,
+) -> None:
+    """Upsert this username's latest Branded Content Library check outcome."""
+    values = {
+        "username": username, "instagram_id": instagram_id, "status": status,
+        "result_count": result_count, "error": (error or "")[:2000] or None,
+        "start_date": START_DATE, "end_date": END_DATE,
+    }
+    statement = insert(FacebookBrandedContentCheck).values(**values)
+    db.execute(statement.on_conflict_do_update(
+        index_elements=[FacebookBrandedContentCheck.username],
+        set_={**{k: statement.excluded[k] for k in values if k != "username"}, "checked_at": func.now()},
     ))
     db.commit()
 
@@ -356,9 +387,15 @@ def _process_username(db: Session, username: str, summary: dict, tag: str) -> bo
     logger.info("%s: creator (username check) — checking Branded Content Library", tag)
     try:
         branded = asyncio.run(check_branded_content(username))
-    except CheckError as exc:
+    except Exception as exc:  # CheckError or any browser failure — record it, retry next run
+        _save_branded_content_check(db, username, "error", error=f"{type(exc).__name__}: {exc}")
         logger.warning("%s: Branded Content check failed (%s) — will retry next run", tag, exc)
         return False
+    _save_branded_content_check(
+        db, username,
+        "found" if branded.result_count >= 1 else ("not_found" if branded.instagram_id else "not_in_dropdown"),
+        instagram_id=branded.instagram_id, result_count=branded.result_count,
+    )
     if branded.result_count < 1:
         summary["no_branded_content"] += 1
         logger.info(

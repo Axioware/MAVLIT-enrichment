@@ -808,6 +808,36 @@ class TestNiche(Base):
     embedding   = Column(Vector(1024))
 
 
+class FacebookBrandedContentCheck(Base):
+    """
+    One row per Instagram username checked against Meta's Branded Content
+    Library (pipeline/enrichment_re/facebook_branded_content_checker.py, run
+    from discover_collaborator_creators.py). Re-checking a username updates
+    its row.
+
+    status:
+      found            — result_count >= 1 branded-content results
+      not_found        — account found, 0 results in the date window
+      not_in_dropdown  — the username never appeared in the search dropdown
+      error            — the check failed (timeout, login wall, layout change);
+                         `error` holds the message
+    """
+    __tablename__ = "facebook_branded_content_checks"
+
+    id           = Column(Integer, primary_key=True)
+    username     = Column(Text, nullable=False, unique=True, index=True)
+    instagram_id = Column(Text)
+    status       = Column(Text, nullable=False, index=True)
+    result_count = Column(Integer)
+    error        = Column(Text)
+    start_date   = Column(Text)   # date window the check used (YYYY-MM-DD)
+    end_date     = Column(Text)
+    checked_at   = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __str__(self) -> str:
+        return f"@{self.username} {self.status} ({self.result_count})"
+
+
 class TestCreatorBrandPartnershipPost(Base):
     """
     Scratch/test table for content_creator_re evidence. One row per
