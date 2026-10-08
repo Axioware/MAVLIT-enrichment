@@ -14,7 +14,11 @@ in batches of 10 rows so progress is saved as it goes):
      content_creator_re (case-insensitive) or repeated in this run are skipped.
   2. Username-only LLM check: is this a creator (a person) or a
      brand/product/company? Brands stop here — nothing is saved for them.
-  3. For creators only: scrape 5 posts via Apify, then a second LLM call reads
+  2b. For creators only: check Meta's Branded Content Library
+     (facebook_branded_content_checker.py) for branded-content posts in its
+     date window. No result (0, or the account isn't in the search dropdown)
+     stops here — nothing is saved, no Apify cost.
+  3. For creators with >= 1 branded-content result: scrape 5 posts via Apify, then a second LLM call reads
      the profile + those posts to double-check creator vs brand AND pick the
      niche: Music, Beauty, Health, Fitness or Other.
   4. Save to content_creator_re:
@@ -25,7 +29,7 @@ in batches of 10 rows so progress is saved as it goes):
   5. Mark an instagram_users row collaborators_checked = true once every
      username in it has been handled, so the next run moves on.
 
-A username whose Apify scrape fails is left unhandled — its row stays
+A username whose Branded Content check or Apify scrape fails is left unhandled — its row stays
 collaborators_checked = false and it is retried on the next run.
 
 Only rows from confirmed partner creators are read:
@@ -53,6 +57,7 @@ Run from the project root:
 """
 
 import argparse
+import asyncio
 import json
 import logging
 import time
@@ -69,6 +74,7 @@ from pipeline.db import (
     TestCreatorBrandPartnershipPost,
 )
 from pipeline.enrichment.instagram_users import _profile_from_posts, _scrape_posts
+from pipeline.enrichment_re.facebook_branded_content_checker import CheckError, check_branded_content
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 
 logger = logging.getLogger(__name__)
@@ -80,7 +86,7 @@ _ROW_BATCH = 200  # instagram_users rows read per query while collecting usernam
 
 # Which instagram_users rows count as confirmed partner creators.
 _BRAND_POST_USER_TYPES = ("mention", "tagged_user", "coauthor_producer")
-_BRAND_POST_MIN_CONFIDENCE = 100   # instagram_posts.sponsorship_confidence
+_BRAND_POST_MIN_CONFIDENCE = 90   # instagram_posts.sponsorship_confidence
 _RE_USER_TYPE = "contentcreatorRE"
 _RE_MIN_CONFIDENCE = 90           # test_creator_brand_partnership_posts.sponsorship_confidence
 _USER_TYPES = (_RE_USER_TYPE,) + _BRAND_POST_USER_TYPES   # valid --user-type values
@@ -344,7 +350,23 @@ def _process_username(db: Session, username: str, summary: dict, tag: str) -> bo
         summary["brand_by_username"] += 1
         logger.info("%s: brand (username check) — skipped", tag)
         return True
-    logger.info("%s: creator (username check) — scraping %d posts", tag, POSTS_PER_CREATOR)
+
+    # Branded Content Library gate: only creators with at least one
+    # branded-content post in the checker's date window go on to Apify.
+    logger.info("%s: creator (username check) — checking Branded Content Library", tag)
+    try:
+        branded = asyncio.run(check_branded_content(username))
+    except CheckError as exc:
+        logger.warning("%s: Branded Content check failed (%s) — will retry next run", tag, exc)
+        return False
+    if branded.result_count < 1:
+        summary["no_branded_content"] += 1
+        logger.info(
+            "%s: no branded content (Instagram ID %s) — skipped",
+            tag, branded.instagram_id or "not in search dropdown",
+        )
+        return True
+    logger.info("%s: %d branded-content result(s) — scraping %d posts", tag, branded.result_count, POSTS_PER_CREATOR)
 
     posts = _scrape_posts(username, n=POSTS_PER_CREATOR)
     if posts is None:
@@ -384,8 +406,8 @@ def run(
         len(usernames), work_rows, len(rows) - work_rows,
     )
 
-    summary = {"usernames": len(usernames), "brand_by_username": 0, "brand_by_profile": 0,
-               "saved": {}, "failed": 0, "rows_checked": 0, "failed_row_ids": set()}
+    summary = {"usernames": len(usernames), "brand_by_username": 0, "no_branded_content": 0,
+               "brand_by_profile": 0, "saved": {}, "failed": 0, "rows_checked": 0, "failed_row_ids": set()}
     if dry_run:
         for username in usernames:
             logger.info("DRY RUN would classify @%s", username)
@@ -428,7 +450,7 @@ def run_all(
     Rows that fail are skipped for the rest of this run (so the loop can't
     spin on them) and stay unchecked for the next run.
     """
-    total = {"usernames": 0, "brand_by_username": 0, "brand_by_profile": 0,
+    total = {"usernames": 0, "brand_by_username": 0, "no_branded_content": 0, "brand_by_profile": 0,
              "saved": {}, "failed": 0, "rows_checked": 0}
     skip_row_ids: set[int] = set()
     batch_no = 0
@@ -439,7 +461,7 @@ def run_all(
         if not summary["usernames"]:
             break
         skip_row_ids |= summary["failed_row_ids"]
-        for key in ("usernames", "brand_by_username", "brand_by_profile", "failed", "rows_checked"):
+        for key in ("usernames", "brand_by_username", "no_branded_content", "brand_by_profile", "failed", "rows_checked"):
             total[key] += summary[key]
         for saved_niche, count in summary["saved"].items():
             total["saved"][saved_niche] = total["saved"].get(saved_niche, 0) + count
@@ -499,6 +521,7 @@ def main() -> int:
     print(f"usernames read:            {summary['usernames']}")
     if not args.dry_run:
         print(f"brand (username check):    {summary['brand_by_username']}")
+        print(f"no branded content (skipped): {summary['no_branded_content']}")
         print(f"brand (profile check):     {summary['brand_by_profile']}  (saved with niche Brand)")
         print(f"saved to content_creator_re: {sum(summary['saved'].values())}  {summary['saved']}")
         print(f"failed (retry next run):   {summary['failed']}")
