@@ -80,7 +80,7 @@ _ROW_BATCH = 200  # instagram_users rows read per query while collecting usernam
 
 # Which instagram_users rows count as confirmed partner creators.
 _BRAND_POST_USER_TYPES = ("mention", "tagged_user", "coauthor_producer")
-_BRAND_POST_MIN_CONFIDENCE = 95   # instagram_posts.sponsorship_confidence
+_BRAND_POST_MIN_CONFIDENCE = 100   # instagram_posts.sponsorship_confidence
 _RE_USER_TYPE = "contentcreatorRE"
 _RE_MIN_CONFIDENCE = 90           # test_creator_brand_partnership_posts.sponsorship_confidence
 _USER_TYPES = (_RE_USER_TYPE,) + _BRAND_POST_USER_TYPES   # valid --user-type values

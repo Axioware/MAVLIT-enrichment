@@ -67,6 +67,10 @@ Runs on every page load; designed to be cheap:
 
            Geo-reach filter: brands_raw.geo_reach_score must be 0-40
            (local/small-reach) or NULL (not geo-scored yet).
+
+           Avoided brand niches: brands whose brands_raw.niche is in
+           _EXCLUDED_BRAND_NICHES (e.g. "Band") are dropped for every
+           creator, on top of the creator's own excluded categories.
   Step B — Semantic shortlist: a single indexed pgvector cosine-distance
            query against the creator's embedding narrows the (already
            hard-filtered) pool nearest-first — every brand passing Step A
@@ -113,6 +117,9 @@ logger = logging.getLogger(__name__)
 
 _ACTIVITY_FLOOR = 0   # brands with a CONFIRMED score at or below this are dropped; unscored (NULL) brands are kept
 _FOLLOWER_TOLERANCE = 2   # +/-200% buffer beyond the brand's confirmed collaborator follower range
+# Brand categories always avoided, for every creator — brands_raw.niche values
+# (compared case-insensitively). Brands with no niche are kept.
+_EXCLUDED_BRAND_NICHES = ("band",)
 
 
 
@@ -139,6 +146,11 @@ def _hard_filtered_query(db: Session, creator: CreatorProfile, apply_gender_filt
     # Local/small-reach brands only (geo_reach_score 0-40); NULL = not
     # geo-scored yet, kept.
     query = query.filter(or_(BrandRaw.geo_reach_score.is_(None), BrandRaw.geo_reach_score.between(0, 40)))
+    # Hard-coded brand categories to avoid (brands_raw.niche), for everyone.
+    query = query.filter(or_(
+        BrandRaw.niche.is_(None),
+        ~func.lower(func.trim(BrandRaw.niche)).in_(_EXCLUDED_BRAND_NICHES),
+    ))
     # "Brand categories to avoid" are brands_niches.tags (picked on the
     # creator-profile page from the tags of their primary niche) — drop any
     # brand carrying one of them (exact tag, case-insensitive).
