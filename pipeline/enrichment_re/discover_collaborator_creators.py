@@ -5,8 +5,9 @@ Discover new creators for content_creator_re from the usernames stored in
 instagram_users.post_collaborators (the tagged users / mentions / co-authors
 / sponsors of each scraped creator post).
 
-For up to --limit usernames per run (no --limit = all remaining usernames,
-worked through in batches of 50 so progress is saved as it goes):
+For up to --limit instagram_users rows per run — each row with ALL of its
+comma-separated usernames (no --limit = all remaining rows, worked through
+in batches of 10 rows so progress is saved as it goes):
 
   1. Read usernames from instagram_users rows where post_collaborators is set
      and collaborators_checked = false. Usernames already in
@@ -137,13 +138,12 @@ def _collect_work(
 ) -> tuple[list[str], dict[int, list[str]]]:
     """
     Walk unchecked instagram_users rows in id order and collect up to `limit`
-    new usernames. Returns (usernames_to_process, {row_id: [usernames]}) —
-    every row in the map is fully covered, either by usernames being
-    processed now or ones that need no work (already in content_creator_re /
-    already queued this run). A row that would push past the limit is left
-    out entirely, so it stays unchecked for the next run — except the first
-    row, which is always taken (so a run can go over `limit` when that single
-    row has more new usernames than the limit). Rows in skip_row_ids (ones
+    rows that have at least one new username, each with ALL of its new
+    usernames. Returns (usernames_to_process, {row_id: [usernames]}) — every
+    row in the map is fully covered, either by usernames being processed now
+    or ones that need no work (already in content_creator_re / already queued
+    this run). Rows with no new usernames are included (so they get marked
+    checked) but don't count toward the limit. Rows in skip_row_ids (ones
     that already failed earlier in this run) are ignored. niche / gender
     restrict to rows whose instagram_users.niche / gender match
     (case-insensitive).
@@ -152,9 +152,10 @@ def _collect_work(
     queued: list[str] = []
     queued_keys: set[str] = set()
     rows: dict[int, list[str]] = {}
+    rows_with_work = 0
     last_id = 0
 
-    while len(queued) < limit:
+    while rows_with_work < limit:
         query = db.query(InstagramUser.id, InstagramUser.post_collaborators).filter(
             InstagramUser.collaborators_checked == False,  # noqa: E712
             InstagramUser.post_collaborators.isnot(None),
@@ -174,18 +175,14 @@ def _collect_work(
                 continue
             usernames = _split_usernames(value)
             new = [u for u in dict.fromkeys(usernames) if u.lower() not in known and u.lower() not in queued_keys]
-            # Rows are all-or-nothing (that's what collaborators_checked tracks),
-            # so stop before a row that would overshoot the limit — but always
-            # take at least the first row, or a row with more usernames than
-            # --limit would block every run forever.
-            if new and queued and len(queued) + len(new) > limit:
-                return queued, rows
             for username in new:
                 queued.append(username)
                 queued_keys.add(username.lower())
             rows[row_id] = usernames
-            if len(queued) >= limit:
-                return queued, rows
+            if new:
+                rows_with_work += 1
+                if rows_with_work >= limit:
+                    return queued, rows
     return queued, rows
 
 
@@ -289,7 +286,13 @@ def run(
     _ensure_columns(db)
     usernames, rows = _collect_work(db, limit, skip_row_ids, niche, gender)
     db.commit()  # end the read transaction before slow LLM/Apify work
-    logger.info("Collected %d new username(s) from %d instagram_users row(s)", len(usernames), len(rows))
+    queued_keys = {u.lower() for u in usernames}
+    work_rows = sum(1 for row_usernames in rows.values() if any(u.lower() in queued_keys for u in row_usernames))
+    logger.info(
+        "Collected %d distinct new username(s) from %d instagram_users row(s) "
+        "(+%d row(s) with no new usernames, just marked checked)",
+        len(usernames), work_rows, len(rows) - work_rows,
+    )
 
     summary = {"usernames": len(usernames), "brand_by_username": 0, "brand_by_profile": 0,
                "saved": {}, "failed": 0, "rows_checked": 0, "failed_row_ids": set()}
@@ -325,9 +328,9 @@ def run(
     return summary
 
 
-def run_all(db: Session, batch_size: int = 50, niche: str | None = None, gender: str | None = None) -> dict:
+def run_all(db: Session, batch_size: int = 10, niche: str | None = None, gender: str | None = None) -> dict:
     """
-    Process every remaining username, batch_size at a time, marking rows
+    Process every remaining row, batch_size rows at a time, marking rows
     checked after each batch so a crash mid-way keeps the finished batches.
     Rows that fail are skipped for the rest of this run (so the loop can't
     spin on them) and stay unchecked for the next run.
@@ -345,8 +348,8 @@ def run_all(db: Session, batch_size: int = 50, niche: str | None = None, gender:
         skip_row_ids |= summary["failed_row_ids"]
         for key in ("usernames", "brand_by_username", "brand_by_profile", "failed", "rows_checked"):
             total[key] += summary[key]
-        for niche, count in summary["saved"].items():
-            total["saved"][niche] = total["saved"].get(niche, 0) + count
+        for saved_niche, count in summary["saved"].items():
+            total["saved"][saved_niche] = total["saved"].get(saved_niche, 0) + count
         if not OPENAI_KEY or not APIFY_TOKEN:
             break
     return total
@@ -361,7 +364,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--limit", type=int, default=None,
-        help="Max new usernames to process this run. Omit to process ALL remaining usernames (in batches of 50).",
+        help="Max instagram_users rows to process this run, each with ALL its usernames. Omit to process ALL remaining rows (in batches of 10).",
     )
     parser.add_argument(
         "--niche", type=str, default=None,
