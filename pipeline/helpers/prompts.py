@@ -264,6 +264,16 @@ The score must represent the likelihood that THIS POST is a sponsored/commercial
 
 If the evidence suggests sponsorship with a different brand, or the commercial relationship is with a non-creator account (retailer, agency, photographer, another brand), the score should be very low.
 
+CREATOR-ONLY RULE (BRAND-TO-BRAND PARTNERSHIPS = 0):
+
+Only partnerships between THIS brand and an individual CONTENT CREATOR count (influencer, blogger, vlogger, YouTuber, streamer, artist, musician, athlete, model or any other individual person who creates content).
+
+A partnership between THIS brand and ANOTHER BRAND or business is NOT a creator partnership. This includes other brands, companies, co-branded or "Brand x Brand" collaborations, retailers, stores, stockists, distributors, marketplaces, agencies, media outlets, magazines, venues, restaurants, hotels, events, festivals, sports teams, leagues, clubs, charities, and other organizations.
+
+* If the ONLY partnership in the post is with another brand/business account, the confidence score MUST be 0, even if the paid partnership flag is true or the caption contains #ad, #sponsored, or #paidpartnership.
+* If the post references both a brand/business account and a content creator, ignore the brand/business account completely and score ONLY the evidence of a partnership with the content creator.
+* Judge whether an account is a creator or a brand from its username, how the caption describes it, and context. Usernames that look like company names, stores, shops, official accounts, or organizations are brands, not creators.
+
 Be skeptical when evaluating extremely large global brands (for example Marvel, Disney, Netflix, Coca-Cola, McDonald's, Apple, Nike, Adidas, Samsung, Amazon, etc.).
 
 A mention, tag, hashtag, product reference, fan content, repost, celebrity shout-out, event coverage, or general enthusiasm involving a major brand is NOT strong evidence of sponsorship.
@@ -286,7 +296,22 @@ Paid partnership = true
 Tagged users: footlocker
 
 Result:
-Low confidence because the paid partnership is with a retailer, not a creator.
+confidence_pct = 0 (the paid partnership is with a retailer/brand, not a content creator).
+
+Brand = Nike
+Caption: "Nike x @lego — build your own sneaker 🧱 #paidpartnership"
+Paid partnership = true
+Coauthor producers: lego
+
+Result:
+confidence_pct = 0 (brand-to-brand collaboration, no content creator involved).
+
+Brand = Nike
+Caption: "Nike x @lego with @sarahfit building the new set #ad"
+Tagged users: lego, sarahfit
+
+Result:
+High confidence (90+), scored only on the #ad partnership with the creator @sarahfit; @lego is ignored.
 
 Brand = Nike
 Caption: "Training day with @sarahfit #ad #sponsored. Use code SARAH15"
@@ -328,6 +353,7 @@ Scoring rubric:
 0-10:
 No evidence of sponsorship or commercial relationship.
 Ordinary mention, tag, repost, photo credit, event content, or unrelated account.
+Any partnership that is only with another brand/business (not a content creator) = EXACTLY 0.
 
 11-25:
 Creator appears but there is no meaningful evidence of a commercial relationship.
@@ -367,6 +393,7 @@ IMPORTANT SCORING RULES:
 * 90+ ONLY for a confirmed paid partnership (paid partnership flag or explicit #ad/#sponsored/#paidpartnership disclosure) with a referenced creator.
 * Weak mentions, tags, coauthors, reposts, product appearances, or shout-outs should remain below 60.
 * Evidence involving another brand or a non-creator account should not increase the score.
+* Partnership only with another brand/business (not a content creator) = EXACTLY 0, even with a paid partnership flag or #ad.
 * Do not infer sponsorship from brand popularity, creator fame, previous collaborations, or product ownership.
 
 Evaluate only the information provided below.
