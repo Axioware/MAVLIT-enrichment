@@ -35,6 +35,7 @@ import logging
 import re
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -68,6 +69,12 @@ DROPDOWN_TIMEOUT_MS = 20_000       # waiting for suggestions after typing
 RESULTS_SETTLE_TIMEOUT_MS = 30_000 # waiting for the results page to settle
 TYPE_DELAY_MS = 90                 # per-keystroke delay — the typeahead ignores instant fills
 
+# Rate limiting: Facebook temporarily blocks an IP that searches the library
+# "too fast". After every CHECKS_PER_BATCH checks in one process, pause for
+# BATCH_PAUSE_SECONDS before the next check.
+CHECKS_PER_BATCH = 35
+BATCH_PAUSE_SECONDS = 2 * 60 * 60
+
 # Instagram account IDs are long digit strings (e.g. 17841461241854325).
 _NUMERIC_ID = re.compile(r"^\d{6,}$")
 
@@ -98,6 +105,9 @@ _CONSENT_BUTTON_NAMES = (
 )
 
 _DEBUG_DIR = Path("logs")
+
+# Checks started in this process since the last pause (see _throttle).
+_checks_since_pause = 0
 
 
 class CheckError(RuntimeError):
@@ -270,9 +280,30 @@ async def _save_debug_screenshot(page: Page | None, username: str) -> None:
 # Main check
 # ---------------------------------------------------------------------------
 
+async def _throttle() -> None:
+    """
+    Count this check; once CHECKS_PER_BATCH checks have run since the last
+    pause, sleep BATCH_PAUSE_SECONDS first. The counter is per process, so it
+    spans every check a long run (e.g. discover_collaborator_creators.py)
+    makes, including failed ones.
+    """
+    global _checks_since_pause
+    if _checks_since_pause >= CHECKS_PER_BATCH:
+        resume_at = datetime.now() + timedelta(seconds=BATCH_PAUSE_SECONDS)
+        logger.info(
+            "Rate limit: %d checks done — pausing %d min to avoid a Facebook block (resuming ~%s)",
+            _checks_since_pause, BATCH_PAUSE_SECONDS // 60, resume_at.strftime("%Y-%m-%d %H:%M"),
+        )
+        await asyncio.sleep(BATCH_PAUSE_SECONDS)
+        _checks_since_pause = 0
+    _checks_since_pause += 1
+    logger.info("Facebook check %d/%d in this batch", _checks_since_pause, CHECKS_PER_BATCH)
+
+
 async def check_branded_content(username: str, headless: bool = True) -> CheckResult:
     """Run the full search -> ID extraction -> results check for one username."""
     username = username.strip().lstrip("@")
+    await _throttle()
     browser: Browser | None = None
     context: BrowserContext | None = None
     page: Page | None = None
