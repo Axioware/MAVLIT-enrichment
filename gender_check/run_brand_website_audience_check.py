@@ -497,7 +497,15 @@ def _audience_prompt(
     final: bool = False,
 ) -> str:
     history = "\n\n".join(page_history) if page_history else "No earlier website pages have been analyzed."
-    if final:
+    if final and not page_history:
+        crawl_instruction = (
+            "INSTAGRAM-ONLY PASS: the brand website could not be scraped, so no website text is available. "
+            "Make your best estimate from the Instagram bio, business category, Instagram posts, partner creators "
+            "and business description below. Do not lower confidence just because website text is missing, "
+            "but do not invent website evidence.\n\n"
+        )
+        website_text = "Not available - the website could not be scraped."
+    elif final:
         crawl_instruction = (
             "FINAL PASS: all available website pages have been reviewed. Make your final best estimate from the complete evidence below. "
             "There are no more pages to fetch.\n\n"
@@ -727,9 +735,14 @@ def main() -> int:
                     )
                     break
 
-            if not page_history:
-                logger.warning("No readable website text for brand_raw_id=%s; skipping.", brand["brand_raw_id"])
-                continue
+            # No readable website: fall back to the Instagram posts and partner
+            # creators alone, via the final pass below (stopped_early is False).
+            instagram_only = not page_history
+            if instagram_only:
+                logger.warning(
+                    "No readable website text for brand_raw_id=%s; using Instagram posts and creators only.",
+                    brand["brand_raw_id"],
+                )
 
             # Like geo_reach, run a final synthesis when the confidence gate
             # did not end the crawl early. All scraped page text is retained.
@@ -747,6 +760,11 @@ def main() -> int:
                     context=f"brand website audience final brand_raw_id={brand['brand_raw_id']}",
                     model=LLM_MODEL,
                 )
+                if instagram_only and not final_result:
+                    # Saving an all-null result would mark the brand as analysed
+                    # and drop it from later runs, so leave it pending instead.
+                    logger.warning("Instagram-only LLM call failed for brand_raw_id=%s; skipping save.", brand["brand_raw_id"])
+                    continue
                 final_metrics = _metrics(final_result)
                 metrics = _merge_metrics(metrics, final_metrics)
                 # The final pass has seen every page, so it decides the latest
@@ -773,6 +791,7 @@ def main() -> int:
                 "brand_name": brand["brand_name"],
                 "post_count": len(brand_posts),
                 "website_pages_scraped": pages_log,
+                "evidence_source": "instagram_only" if instagram_only else "website_and_instagram",
                 "stopped_early": stopped_early,
                 **metrics,
             }, ensure_ascii=True, default=str))
