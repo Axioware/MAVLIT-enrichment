@@ -6,12 +6,10 @@ Instagram profile — runs on any brands_raw row with an instagram_handle,
 whether or not it already has a name/website (e.g. from Wikidata).
 
 Two brand states, one resolution pipeline:
-  - Bare rows (name IS NULL) — the same third-tier fallback this module
-    always did, after pipeline/enrichment_re/brand_wikidata_lookup.py
-    already tried and failed to match one by instagram_handle
-    (instagram_wikidata_checked=True). See that gate in the query below —
-    it's kept so a bare row is still given the (more authoritative)
-    Wikidata reverse lookup a chance first, rather than racing it.
+  - Bare rows (name IS NULL) — name and website are resolved from the
+    profile. This no longer waits for pipeline/enrichment_re/
+    brand_wikidata_lookup.py to run first; run that lookup before this one if
+    you want Wikidata to get the first chance on bare rows.
   - Already-named rows (name IS NOT NULL, e.g. normally seeded from
     Wikidata) — the brand's existing name/website are passed into both LLM
     calls below as context, so the Instagram-derived evidence can either
@@ -67,9 +65,6 @@ website is eligible for correction here.
 
 Sets instagram_profile_checked=True whether or not anything changed, so a
 row isn't retried every run.
-
-Batch mode only picks brands with at least one
-test_creator_brand_partnership_posts row at sponsorship_confidence >= 90.
 """
 
 import json
@@ -79,12 +74,11 @@ from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
-from sqlalchemy import exists, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, SEARXNG_URL
-from pipeline.db import BrandRaw, Prompt, TestCreatorBrandPartnershipPost
+from pipeline.db import BrandRaw, Prompt
 from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.http import fetch_page_via_jina, fetch_page_with_jina_fallback
@@ -98,8 +92,6 @@ from pipeline.helpers.prompts import (
 from pipeline.helpers.social import normalize_handle
 
 logger = logging.getLogger(__name__)
-
-_MIN_PARTNERSHIP_CONFIDENCE = 90   # brand needs a test_creator_brand_partnership_posts row at/above this
 
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"  # same Instagram scraper used across the pipeline
 # Full browser-like header set — link-in-bio hosts (Linktree in particular,
@@ -680,19 +672,12 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
     resolution order and the "existing website is never blindly overwritten"
     rules.
 
-    Batch mode (no brand_id) processes:
-      - Any row with instagram_profile_checked=False and a name already set
-        (nothing to wait on — there's no Wikidata reverse-lookup step for
-        these, they're eligible immediately).
-      - A bare row (name IS NULL) only once brand_wikidata_lookup.py has
-        already tried and failed to match it (instagram_wikidata_checked=
-        True) — keeps that more authoritative lookup as the first attempt
-        for bare rows instead of racing it.
-    Either way, only brands with a test_creator_brand_partnership_posts row
-    at sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE.
+    Batch mode (no brand_id) processes every row with instagram_handle set
+    and instagram_profile_checked=False — named or bare, whether or not
+    brand_wikidata_lookup.py has run on it yet.
 
-    Pass brand_id to target one specific brand directly — bypasses all of
-    the above gates (and instagram_profile_checked) entirely.
+    Pass brand_id to target one specific brand directly — bypasses the
+    instagram_profile_checked filter.
 
     Returns number of brand rows processed (resolved, corrected, or not).
     """
@@ -704,17 +689,7 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:
-        query = query.filter(
-            BrandRaw.instagram_profile_checked == False,
-            or_(
-                BrandRaw.name.isnot(None),
-                BrandRaw.instagram_wikidata_checked == True,
-            ),
-            exists().where(
-                TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
-                TestCreatorBrandPartnershipPost.sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE,
-            ),
-        )
+        query = query.filter(BrandRaw.instagram_profile_checked == False)
 
     brands: list[BrandRaw] = query.limit(limit).all()
     if not brands:

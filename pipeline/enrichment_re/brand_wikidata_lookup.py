@@ -23,8 +23,10 @@ duplicated logic needed here.
 Marks instagram_wikidata_checked=True whether or not a match was found,
 so unresolvable handles aren't retried every run.
 
-Batch mode only picks brands with at least one
-test_creator_brand_partnership_posts row at sponsorship_confidence >= 90.
+Batch mode picks every brand with an instagram_handle that hasn't been
+looked up yet (instagram_wikidata_checked=False), named or not. Bare rows
+(name IS NULL) get every Wikidata field; named rows only get blank fields
+filled — nothing already set is overwritten.
 """
 
 import logging
@@ -32,11 +34,10 @@ import time
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import exists
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from pipeline.db import BrandRaw, TestCreatorBrandPartnershipPost
+from pipeline.db import BrandRaw
 from pipeline.helpers.normalize import normalize
 from pipeline.helpers.social import normalize_handle
 
@@ -173,7 +174,15 @@ SELECT ?ig ?entity ?entityLabel ?entityDescription ?website ?instanceOfLabel WHE
 
 
 def _apply_match(db: Session, brand: BrandRaw, data: dict, handle: str) -> None:
-    """Apply a confirmed Wikidata match to one bare brand row and commit."""
+    """
+    Apply a confirmed Wikidata match to one brand row and commit. A bare row
+    (no name) takes every Wikidata field; a row that already has a name only
+    gets its BLANK fields filled — existing name/website/description/etc.
+    are never overwritten.
+    """
+    if brand.name:
+        _fill_blank_fields(db, brand, data, handle)
+        return
     name = data["name"]
     website = data.get("website") or None
     brand.name              = name
@@ -209,47 +218,54 @@ def _apply_match(db: Session, brand: BrandRaw, data: dict, handle: str) -> None:
         )
 
 
-_MIN_PARTNERSHIP_CONFIDENCE = 90   # brand needs a test_creator_brand_partnership_posts row at/above this
-
-
-def _has_confident_partnership():
-    return exists().where(
-        TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
-        TestCreatorBrandPartnershipPost.sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE,
+def _fill_blank_fields(db: Session, brand: BrandRaw, data: dict, handle: str) -> None:
+    """Named brand: copy Wikidata values only into fields that are still empty."""
+    filled = []
+    if not brand.wikidata_id and data.get("wikidata_id"):
+        brand.wikidata_id = data["wikidata_id"]; filled.append("wikidata_id")
+    if not brand.entity_type and data.get("entity_type"):
+        brand.entity_type = data["entity_type"]; filled.append("entity_type")
+    if not brand.description and data.get("description"):
+        brand.description = data["description"]; filled.append("description")
+    website = data.get("website") or None
+    if not brand.website and website:
+        brand.website = website
+        brand.domain = brand.domain or _extract_domain(website) or None
+        brand.has_official_website = True
+        brand.website_source = "wikidata"
+        filled.append("website")
+    brand.instagram_wikidata_checked = True
+    db.commit()
+    logger.info(
+        "Brand Wikidata lookup: @%s (named '%s') → %s",
+        handle, brand.name, ("filled " + ", ".join(filled)) if filled else "nothing blank to fill",
     )
 
 
 def enrich_brand_wikidata_lookup(db: Session, limit: int = 50, brand_id: int | None = None) -> int:
     """
-    For brands_raw rows with name IS NULL and instagram_handle set,
-    reverse-lookup Wikidata by their Instagram handle and backfill name,
-    wikidata_id, entity_type, description, website, domain. niche is left
+    For brands_raw rows with instagram_handle set and
+    instagram_wikidata_checked=False, reverse-lookup Wikidata by their
+    Instagram handle. Bare rows (name IS NULL) get name, wikidata_id,
+    entity_type, description, website, domain; rows that already have a name
+    only get their blank fields filled (see _apply_match). niche is left
     untouched.
 
-    Batch mode only picks brands with a test_creator_brand_partnership_posts
-    row at sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE.
-
     Pass brand_id to target one specific brand directly — bypasses the
-    instagram_wikidata_checked and partnership-confidence filters.
+    instagram_wikidata_checked filter.
 
     Returns number of brand rows processed (matched or not).
     """
-    query = db.query(BrandRaw).filter(
-        BrandRaw.name.is_(None),
-        BrandRaw.instagram_handle.isnot(None),
-    )
+    query = db.query(BrandRaw).filter(BrandRaw.instagram_handle.isnot(None))
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:
-        query = query.filter(
-            BrandRaw.instagram_wikidata_checked == False,
-            _has_confident_partnership(),
-        )
+        query = query.filter(BrandRaw.instagram_wikidata_checked == False)
 
     brands: list[BrandRaw] = query.limit(limit).all()
 
     if not brands:
-        logger.info("Brand Wikidata lookup: no pending bare brands")
+        logger.info("Brand Wikidata lookup: no pending brands")
         return 0
 
     logger.info("Brand Wikidata lookup: processing %d brand(s)", len(brands))
