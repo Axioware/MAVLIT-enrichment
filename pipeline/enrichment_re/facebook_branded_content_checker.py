@@ -76,9 +76,14 @@ TYPE_DELAY_MS = 90                 # per-keystroke delay — the typeahead ignor
 # FACEBOOK_PROXIES (config / .env) — batch 1 uses proxy 1, batch 2 proxy 2,
 # ... Once every proxy has had its batch (one full round), pause for
 # ROUND_PAUSE_SECONDS instead, then start again from proxy 1.
-CHECKS_PER_BATCH = 35
+# Facebook starts serving a blank page to an IP after ~17-20 checks in a row,
+# so batches stay below that. If ROTATE_AFTER_FAILURES checks fail in a row
+# anyway, switch to the next proxy at once (no pause) and retry the username
+# that just failed on it.
+CHECKS_PER_BATCH = 15
 BATCH_PAUSE_SECONDS = 2 * 60 
 ROUND_PAUSE_SECONDS = 30 * 60
+ROTATE_AFTER_FAILURES = 2
 
 # Instagram account IDs are long digit strings (e.g. 17841461241854325).
 _NUMERIC_ID = re.compile(r"^\d{6,}$")
@@ -115,6 +120,7 @@ _DEBUG_DIR = Path("logs")
 # (0-based, picks the proxy) this process is on (see _throttle).
 _checks_since_pause = 0
 _batch_index = 0
+_consecutive_failures = 0
 
 
 def _parse_proxies(value: str) -> list[dict[str, str]]:
@@ -340,10 +346,48 @@ async def _throttle() -> None:
     )
 
 
+def _rotate_proxy_now() -> None:
+    """Move to the next proxy immediately — a fresh batch, no pause."""
+    global _checks_since_pause, _batch_index, _consecutive_failures
+    _batch_index += 1
+    _checks_since_pause = 0
+    _consecutive_failures = 0
+
+
 async def check_branded_content(username: str, headless: bool = True) -> CheckResult:
-    """Run the full search -> ID extraction -> results check for one username."""
+    """
+    Run the full search -> ID extraction -> results check for one username,
+    rate-limited and proxy-rotated (see _throttle). After
+    ROTATE_AFTER_FAILURES failed checks in a row, switches to the next proxy
+    straight away and retries this username once on it; otherwise a failure
+    is raised to the caller (which retries the username on its next run).
+    """
+    global _consecutive_failures
     username = username.strip().lstrip("@")
-    await _throttle()
+    retried = False
+    while True:
+        await _throttle()
+        try:
+            result = await _check_once(username, headless)
+        except Exception as exc:  # CheckError, proxy/network errors, browser crashes
+            _consecutive_failures += 1
+            if _consecutive_failures >= ROTATE_AFTER_FAILURES and _PROXIES and not retried:
+                failed_proxy = _current_proxy()["server"]
+                _rotate_proxy_now()
+                logger.warning(
+                    "%d checks failed in a row on %s (%s) — switching to proxy %d/%d %s now and retrying @%s",
+                    ROTATE_AFTER_FAILURES, failed_proxy, exc,
+                    _batch_index % len(_PROXIES) + 1, len(_PROXIES), _current_proxy()["server"], username,
+                )
+                retried = True
+                continue
+            raise
+        _consecutive_failures = 0
+        return result
+
+
+async def _check_once(username: str, headless: bool) -> CheckResult:
+    """One attempt at the check, through the current batch's proxy."""
     browser: Browser | None = None
     context: BrowserContext | None = None
     page: Page | None = None
