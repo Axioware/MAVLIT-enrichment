@@ -73,7 +73,7 @@ TYPE_DELAY_MS = 90                 # per-keystroke delay — the typeahead ignor
 # "too fast". After every CHECKS_PER_BATCH checks in one process, pause for
 # BATCH_PAUSE_SECONDS before the next check.
 CHECKS_PER_BATCH = 35
-BATCH_PAUSE_SECONDS = 2 * 60 * 60
+BATCH_PAUSE_SECONDS = 15 * 60 
 
 # Instagram account IDs are long digit strings (e.g. 17841461241854325).
 _NUMERIC_ID = re.compile(r"^\d{6,}$")
