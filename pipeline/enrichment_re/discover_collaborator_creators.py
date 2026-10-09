@@ -12,18 +12,20 @@ in batches of 10 rows so progress is saved as it goes):
   1. Read usernames from instagram_users rows where post_collaborators is set
      and collaborators_checked = false. Usernames already in
      content_creator_re (case-insensitive) or repeated in this run are skipped.
-  2. Username-only LLM check: is this a creator (a person) or a
-     brand/product/company? Brands stop here — nothing is saved for them.
-  2b. For creators only: check Meta's Branded Content Library
+  2. Check every username against Meta's Branded Content Library
      (facebook_branded_content_checker.py) for branded-content posts in its
      date window. No result (0, or the account isn't in the search dropdown)
-     stops here — nothing is saved, no Apify cost. Every check's outcome
-     (found / not_found / not_in_dropdown / error + result count) is saved
-     to facebook_branded_content_checks, one row per username.
-  3. For creators with >= 1 branded-content result: scrape 5 posts via Apify, then a second LLM call reads
-     the profile + those posts to double-check creator vs brand AND pick the
-     niche: Music, Beauty, Health, Fitness or Other.
-  4. Save to content_creator_re:
+     stops here — nothing is saved to content_creator_re, no LLM/Apify cost.
+     Every check's outcome (found / not_found / not_in_dropdown / error +
+     result count) is saved to facebook_branded_content_checks, one row per
+     username.
+  3. For accounts with >= 1 branded-content result: username-only LLM check —
+     creator (a person) or brand/product/company? A brand is saved straight
+     to content_creator_re as niche "Brand", is_scraped=True (no Apify).
+  4. For creators: scrape 5 posts via Apify, then a second LLM call reads the
+     profile + those posts to double-check creator vs brand AND pick the
+     niche: Music, Beauty, Health, Fitness or Other. Saved to
+     content_creator_re:
        - creator -> niche Music/Beauty/Health/Fitness/Other, is_scraped=False
          (content_creator_re.py picks it up on its next run)
        - brand (caught by the second check) -> niche "Brand", is_scraped=True
@@ -31,7 +33,7 @@ in batches of 10 rows so progress is saved as it goes):
   5. Mark an instagram_users row collaborators_checked = true once every
      username in it has been handled, so the next run moves on.
 
-A username whose Branded Content check or Apify scrape fails is left unhandled — its row stays
+A username whose Branded Content check, LLM call or Apify scrape fails is left unhandled — its row stays
 collaborators_checked = false and it is retried on the next run.
 
 Only rows from confirmed partner creators are read:
@@ -370,21 +372,12 @@ def _mark_rows_checked(db: Session, row_ids: list[int]) -> None:
 
 def _process_username(db: Session, username: str, summary: dict, tag: str) -> bool:
     """
-    Classify one username and save it if it's a creator (or a brand caught by
-    the profile check). Returns False when it should be retried next run.
+    Branded Content check first, then classify and save. Returns False when
+    the username should be retried next run.
     """
-    kind = _classify_username(username)
-    if kind is None:
-        logger.warning("%s: username check failed — will retry next run", tag)
-        return False
-    if kind == "brand":
-        summary["brand_by_username"] += 1
-        logger.info("%s: brand (username check) — skipped", tag)
-        return True
-
-    # Branded Content Library gate: only creators with at least one
-    # branded-content post in the checker's date window go on to Apify.
-    logger.info("%s: creator (username check) — checking Branded Content Library", tag)
+    # Step 1 — Branded Content Library gate, for every username: only accounts
+    # with at least one branded-content post in the checker's date window go on.
+    logger.info("%s: checking Branded Content Library", tag)
     try:
         branded = asyncio.run(check_branded_content(username))
     except Exception as exc:  # CheckError or any browser failure — record it, retry next run
@@ -403,8 +396,24 @@ def _process_username(db: Session, username: str, summary: dict, tag: str) -> bo
             tag, branded.instagram_id or "not in search dropdown",
         )
         return True
-    logger.info("%s: %d branded-content result(s) — scraping %d posts", tag, branded.result_count, POSTS_PER_CREATOR)
+    logger.info("%s: %d branded-content result(s)", tag, branded.result_count)
 
+    # Step 2 — cheap username-only check. Brands are saved straight away
+    # (niche Brand, is_scraped=True) — no Apify.
+    kind = _classify_username(username)
+    if kind is None:
+        logger.warning("%s: username check failed — will retry next run", tag)
+        return False
+    if kind == "brand":
+        _save_creator(db, username, BRAND_NICHE)
+        summary["brand_by_username"] += 1
+        summary["saved"][BRAND_NICHE] = summary["saved"].get(BRAND_NICHE, 0) + 1
+        logger.info("%s: brand (username check) — saved as %s", tag, BRAND_NICHE)
+        return True
+
+    # Step 3 — creators: scrape 5 posts, then the profile check confirms
+    # creator vs brand and picks the niche. Both outcomes are saved.
+    logger.info("%s: creator (username check) — scraping %d posts", tag, POSTS_PER_CREATOR)
     posts = _scrape_posts(username, n=POSTS_PER_CREATOR)
     if posts is None:
         logger.warning("%s: Apify scrape failed — will retry next run", tag)
@@ -557,8 +566,8 @@ def main() -> int:
     print("\n===== COLLABORATOR CREATOR DISCOVERY =====")
     print(f"usernames read:            {summary['usernames']}")
     if not args.dry_run:
-        print(f"brand (username check):    {summary['brand_by_username']}")
         print(f"no branded content (skipped): {summary['no_branded_content']}")
+        print(f"brand (username check):    {summary['brand_by_username']}  (saved with niche Brand)")
         print(f"brand (profile check):     {summary['brand_by_profile']}  (saved with niche Brand)")
         print(f"saved to content_creator_re: {sum(summary['saved'].values())}  {summary['saved']}")
         print(f"failed (retry next run):   {summary['failed']}")
