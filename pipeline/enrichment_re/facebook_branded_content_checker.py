@@ -39,6 +39,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
+from config import FACEBOOK_PROXIES
 from playwright.async_api import (
     Browser,
     BrowserContext,
@@ -71,9 +72,13 @@ TYPE_DELAY_MS = 90                 # per-keystroke delay — the typeahead ignor
 
 # Rate limiting: Facebook temporarily blocks an IP that searches the library
 # "too fast". After every CHECKS_PER_BATCH checks in one process, pause for
-# BATCH_PAUSE_SECONDS before the next check.
+# BATCH_PAUSE_SECONDS before the next check, and switch to the next proxy in
+# FACEBOOK_PROXIES (config / .env) — batch 1 uses proxy 1, batch 2 proxy 2,
+# ... Once every proxy has had its batch (one full round), pause for
+# ROUND_PAUSE_SECONDS instead, then start again from proxy 1.
 CHECKS_PER_BATCH = 35
-BATCH_PAUSE_SECONDS = 15 * 60 
+BATCH_PAUSE_SECONDS = 2 * 60 
+ROUND_PAUSE_SECONDS = 30 * 60
 
 # Instagram account IDs are long digit strings (e.g. 17841461241854325).
 _NUMERIC_ID = re.compile(r"^\d{6,}$")
@@ -106,8 +111,32 @@ _CONSENT_BUTTON_NAMES = (
 
 _DEBUG_DIR = Path("logs")
 
-# Checks started in this process since the last pause (see _throttle).
+# Checks started in this process since the last pause, and which batch
+# (0-based, picks the proxy) this process is on (see _throttle).
 _checks_since_pause = 0
+_batch_index = 0
+
+
+def _parse_proxies(value: str) -> list[dict[str, str]]:
+    """'ip:port:user:pass,ip:port,...' -> Playwright proxy settings."""
+    proxies: list[dict[str, str]] = []
+    for entry in (value or "").split(","):
+        parts = entry.strip().split(":")
+        if len(parts) == 2:
+            proxies.append({"server": f"http://{parts[0]}:{parts[1]}"})
+        elif len(parts) == 4:
+            proxies.append({"server": f"http://{parts[0]}:{parts[1]}", "username": parts[2], "password": parts[3]})
+        elif entry.strip():
+            logger.warning("Ignoring malformed FACEBOOK_PROXIES entry (expected ip:port[:user:pass])")
+    return proxies
+
+
+_PROXIES = _parse_proxies(FACEBOOK_PROXIES)
+
+
+def _current_proxy() -> dict[str, str] | None:
+    """Proxy for the current batch, or None (direct) when none are configured."""
+    return _PROXIES[_batch_index % len(_PROXIES)] if _PROXIES else None
 
 
 class CheckError(RuntimeError):
@@ -283,21 +312,32 @@ async def _save_debug_screenshot(page: Page | None, username: str) -> None:
 async def _throttle() -> None:
     """
     Count this check; once CHECKS_PER_BATCH checks have run since the last
-    pause, sleep BATCH_PAUSE_SECONDS first. The counter is per process, so it
-    spans every check a long run (e.g. discover_collaborator_creators.py)
-    makes, including failed ones.
+    pause, sleep first and move to the next proxy — BATCH_PAUSE_SECONDS
+    between proxies, ROUND_PAUSE_SECONDS after the last proxy's batch (all
+    proxies used once) before starting again from proxy 1. The counter is per
+    process, so it spans every check a long run (e.g.
+    discover_collaborator_creators.py) makes, including failed ones.
     """
-    global _checks_since_pause
+    global _checks_since_pause, _batch_index
     if _checks_since_pause >= CHECKS_PER_BATCH:
-        resume_at = datetime.now() + timedelta(seconds=BATCH_PAUSE_SECONDS)
+        round_done = bool(_PROXIES) and (_batch_index + 1) % len(_PROXIES) == 0
+        pause = ROUND_PAUSE_SECONDS if round_done else BATCH_PAUSE_SECONDS
+        resume_at = datetime.now() + timedelta(seconds=pause)
         logger.info(
-            "Rate limit: %d checks done — pausing %d min to avoid a Facebook block (resuming ~%s)",
-            _checks_since_pause, BATCH_PAUSE_SECONDS // 60, resume_at.strftime("%Y-%m-%d %H:%M"),
+            "Rate limit: %d checks done%s — pausing %d min to avoid a Facebook block (resuming ~%s)",
+            _checks_since_pause, f", all {len(_PROXIES)} proxies used" if round_done else "",
+            pause // 60, resume_at.strftime("%Y-%m-%d %H:%M"),
         )
-        await asyncio.sleep(BATCH_PAUSE_SECONDS)
+        await asyncio.sleep(pause)
         _checks_since_pause = 0
+        _batch_index += 1
     _checks_since_pause += 1
-    logger.info("Facebook check %d/%d in this batch", _checks_since_pause, CHECKS_PER_BATCH)
+    proxy = _current_proxy()
+    logger.info(
+        "Facebook check %d/%d in batch %d (%s)",
+        _checks_since_pause, CHECKS_PER_BATCH, _batch_index + 1,
+        f"proxy {_batch_index % len(_PROXIES) + 1}/{len(_PROXIES)} {proxy['server']}" if proxy else "no proxy",
+    )
 
 
 async def check_branded_content(username: str, headless: bool = True) -> CheckResult:
@@ -311,7 +351,9 @@ async def check_branded_content(username: str, headless: bool = True) -> CheckRe
     async with async_playwright() as playwright:
         try:
             # Step 1: launch Chromium with a normal desktop context.
-            browser = await playwright.chromium.launch(headless=headless)
+            # (through this batch's proxy, if any are configured)
+            proxy = _current_proxy()
+            browser = await playwright.chromium.launch(headless=headless, **({"proxy": proxy} if proxy else {}))
             context = await browser.new_context(
                 locale="en-US",
                 viewport={"width": 1366, "height": 900},

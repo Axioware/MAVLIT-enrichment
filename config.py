@@ -51,6 +51,11 @@ HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
 # Search API this replaced.
 SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8080")
 
+# Proxies for pipeline/enrichment_re/facebook_branded_content_checker.py —
+# comma-separated "ip:port:user:pass" (or "ip:port"); one is used per batch of
+# checks, rotating. Empty = connect directly.
+FACEBOOK_PROXIES = os.getenv("FACEBOOK_PROXIES", "")
+
 # LLM verification (Claude) — set ENABLE_LLM=true to activate
 ENABLE_LLM        = os.getenv("ENABLE_LLM", "false").strip().lower() == "true"
 

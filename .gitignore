@@ -41,3 +41,4 @@ data/seeds/*.csv
 searxng-settings.yml
 *.csv
 db_dumps
+logs/
