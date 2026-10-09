@@ -42,3 +42,8 @@ searxng-settings.yml
 *.csv
 db_dumps
 logs/
+
+# Production database dumps (scripts/db_download_local.sh) — never commit
+production_dump/
+*.dump
+*.sql.gz
