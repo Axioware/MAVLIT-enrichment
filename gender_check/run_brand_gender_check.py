@@ -46,8 +46,7 @@ BRAND_QUERY = text("""
         ON tcbp.content_creator_re_id = ccr.id
       JOIN brands_raw br
         ON br.id = tcbp.brand_raw_id
-      WHERE ccr.id BETWEEN 1 AND 208
-        AND ccr.niche IN ('Beauty', 'Music', 'Fitness', 'Health')
+      WHERE ccr.niche IN ('Beauty', 'Music', 'Fitness', 'Health')
         AND tcbp.sponsorship_confidence >= 90
         AND br.refferls = false
         AND br.target_audience_gender IS NULL
@@ -218,6 +217,18 @@ def _gender_metrics_result(result: dict) -> dict:
     }
 
 
+UNSURE_TARGET_GENDER_CONFIDENCE = 50
+
+
+def _default_target_gender(metrics: dict) -> dict:
+    """target_audience_gender is never saved NULL: when the LLM still gives
+    none, fall back to "both" at low confidence (the prompt's "not sure" rule)."""
+    if metrics.get("target_audience_gender") is None:
+        metrics["target_audience_gender"] = "both"
+        metrics["target_audience_gender_confidence"] = UNSURE_TARGET_GENDER_CONFIDENCE
+    return metrics
+
+
 def _ensure_gender_columns(db) -> None:
     db.execute(text("""
         ALTER TABLE brands_raw
@@ -356,7 +367,7 @@ def main() -> int:
                 context=f"brand gender check brand_raw_id={brand['brand_raw_id']}",
                 model=LLM_MODEL,
             )
-            gender_metrics = _gender_metrics_result(result)
+            gender_metrics = _default_target_gender(_gender_metrics_result(result))
             updated = (
                 db.query(BrandRaw)
                 .filter(BrandRaw.id == brand["brand_raw_id"])

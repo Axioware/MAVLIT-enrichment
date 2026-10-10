@@ -109,6 +109,11 @@ _MAX_PAGES = 5
 _PAGE_TEXT_LIMIT = 6000   # chars of cleaned page text sent to the LLM per page
 _MIN_TEXT_LEN = 40        # pages shorter than this are treated as "no useful info"
 
+# Only brands with a confirmed (>= 90) creator partnership post from 2026.
+_MIN_PARTNERSHIP_CONFIDENCE = 90
+_PARTNERSHIP_POST_FROM = "2026-01-01"
+_PARTNERSHIP_POST_TO   = "2027-01-01"
+
 # Tags that never carry useful body copy
 _NOISE_TAGS = ["script", "style", "nav", "header", "footer", "noscript", "iframe", "form", "aside", "svg"]
 
@@ -555,7 +560,9 @@ def enrich_geo_reach(
     creator_niche: str | None = None,
 ) -> int:
     """
-    Score geographic reach for pending brands_raw rows that have a website.
+    Score geographic reach for pending brands_raw rows that have a website,
+    refferls=False, and at least one test_creator_brand_partnership_posts
+    row (any creator) with sponsorship_confidence >= 90 posted in 2026.
 
     niche filters on the brand's OWN brands_raw.niche. creator_niche instead
     filters on the niche of the content_creator_re row(s) that discovered
@@ -580,6 +587,16 @@ def enrich_geo_reach(
         ),
         BrandRaw.website.isnot(None),
         BrandRaw.website != "",
+        BrandRaw.refferls.is_(False),
+        db.query(TestCreatorBrandPartnershipPost.id)
+        .filter(
+            TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
+            TestCreatorBrandPartnershipPost.sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE,
+            # post_timestamp is ISO-8601 text, so string comparison orders by date.
+            TestCreatorBrandPartnershipPost.post_timestamp >= _PARTNERSHIP_POST_FROM,
+            TestCreatorBrandPartnershipPost.post_timestamp < _PARTNERSHIP_POST_TO,
+        )
+        .exists(),
     )
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)

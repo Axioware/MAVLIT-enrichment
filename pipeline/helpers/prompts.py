@@ -201,27 +201,202 @@ Reply ONLY with valid JSON:
 """
 
 INSTAGRAM_POST_SPONSORSHIP_PROMPT_NAME = "instagram_post_sponsorship_confidence"
-INSTAGRAM_POST_SPONSORSHIP_DEFAULT_PROMPT = """You are an Instagram brand-collaboration verification system.
+INSTAGRAM_POST_SPONSORSHIP_DEFAULT_PROMPT = """You are an Instagram sponsorship verification system.
 
-Your task is to determine whether THIS SPECIFIC INSTAGRAM POST, published by the brand's own Instagram account, is evidence of a commercial collaboration between the brand and one or more referenced creator accounts.
+This post was published by the BRAND's own Instagram account and references one or more creator accounts (via sponsors, tagged users, mentions, or coauthor producers).
 
-Commercial collaborations include paid sponsorships, paid partnerships, influencer campaigns, ambassador relationships, affiliate relationships, gifted collaborations with disclosure, creator marketing campaigns, and brand-funded promotions.
+Your task is NOT to identify whether the brand and the referenced creators have ever worked together.
 
-Assume there is no commercial collaboration unless there is positive evidence. A tag, mention, coauthor relationship, or sponsor field alone is NOT sufficient evidence.
+Your task is ONLY to determine whether THIS SPECIFIC INSTAGRAM POST is evidence of a paid sponsorship, paid partnership, brand collaboration, ambassador promotion, affiliate promotion, gifted campaign with disclosure, or other commercial relationship between THIS brand and one or more referenced CREATOR accounts.
 
-Do not increase confidence simply because an account is famous, has many followers, appears in a photo, attended an event, purchased a product, or is a customer, employee, vendor, photographer, agency, retailer, distributor, or another business or brand.
+ASSUME THE POST IS NOT SPONSORED UNLESS THERE IS POSITIVE EVIDENCE.
 
-Strong evidence includes an Instagram paid-partnership label, explicit sponsorship disclosure, #ad, #sponsored, #paidpartnership, affiliate/referral/promo/creator codes, ambassador language, campaign language, or multiple signals directly linking a creator and the brand.
+Do NOT increase confidence simply because:
+- a creator is mentioned
+- a creator is tagged
+- a creator is listed as a coauthor producer
+- a creator is listed in the sponsors field without any other evidence
+- a creator appears in the photo or video
+- the brand reposts or shares creator content (UGC, photo credits, "📸 @creator", "via @creator")
+- the brand thanks, congratulates, or shouts out a creator
+- the creator uses or reviews the product
+- the creator attends an event
+- the creator is famous or has many followers
+- the referenced account is a photographer, model, agency, retailer, distributor, employee, or another business or brand
+- the brand and creator have partnered in the past
 
-Only evaluate evidence present in this post. The score must represent the likelihood that this post is evidence of a commercial collaboration, not whether the referenced account is famous or a creator.
+A tag, mention, coauthor relationship, sponsor field, or product reference alone is weak evidence.
+
+Strong evidence includes:
+- Instagram paid partnership label
+- explicit sponsorship disclosure (#ad, #sponsored, #paidpartnership, paid partnership, partner, advertisement)
+- explicit statement that the brand gifted the product to the creator, sent a PR package, gifted collaboration, or provided the product for free
+- creator affiliate/referral/discount code
+- ambassador language
+- language indicating a commercial relationship with the creator
+- direct promotional call-to-action tied to the creator
+- giveaway or campaign run jointly with the creator
+- clear indication the creator is representing the brand
+- multiple pieces of evidence pointing to the same creator
+
+IMPORTANT GIFTED CONTENT RULE:
+
+If the post clearly indicates that THIS brand gave the product/service for free to a referenced creator AND the post contains a disclosure or clear gifted/PR/collaboration indication, classify it as a GIFTED COMMERCIAL COLLABORATION.
+
+For a clearly disclosed gifted collaboration, the confidence score MUST be exactly 60.
+
+Examples of gifted evidence:
+
+* "We gifted @creator our new collection"
+* "PR package for @creator"
+* "Thanks @creator for trying the product we sent"
+* "Gifted collaboration with @creator"
+* "#gifted" when it clearly refers to a referenced creator and THIS brand's product
+* Clear disclosure that the creator received the product for free from the brand
+
+A gifted collaboration should NOT receive a score above 60 unless there is additional strong evidence that the relationship is also a PAID sponsorship or paid partnership.
+
+If the post only shows or mentions a creator with the product without indicating that it was gifted, DO NOT classify it as gifted.
+
+IMPORTANT:
+
+The score must represent the likelihood that THIS POST is a sponsored/commercial collaboration between THIS SPECIFIC BRAND and a referenced CREATOR.
+
+If the evidence suggests sponsorship with a different brand, or the commercial relationship is with a non-creator account (retailer, agency, photographer, another brand), the score should be very low.
+
+CREATOR-ONLY RULE (BRAND-TO-BRAND PARTNERSHIPS = 0):
+
+Only partnerships between THIS brand and an individual CONTENT CREATOR count (influencer, blogger, vlogger, YouTuber, streamer, artist, musician, athlete, model or any other individual person who creates content).
+
+A partnership between THIS brand and ANOTHER BRAND or business is NOT a creator partnership. This includes other brands, companies, co-branded or "Brand x Brand" collaborations, retailers, stores, stockists, distributors, marketplaces, agencies, media outlets, magazines, venues, restaurants, hotels, events, festivals, sports teams, leagues, clubs, charities, and other organizations.
+
+* If the ONLY partnership in the post is with another brand/business account, the confidence score MUST be 0, even if the paid partnership flag is true or the caption contains #ad, #sponsored, or #paidpartnership.
+* If the post references both a brand/business account and a content creator, ignore the brand/business account completely and score ONLY the evidence of a partnership with the content creator.
+* Judge whether an account is a creator or a brand from its username, how the caption describes it, and context. Usernames that look like company names, stores, shops, official accounts, or organizations are brands, not creators.
+
+Be skeptical when evaluating extremely large global brands (for example Marvel, Disney, Netflix, Coca-Cola, McDonald's, Apple, Nike, Adidas, Samsung, Amazon, etc.).
+
+A mention, tag, hashtag, product reference, fan content, repost, celebrity shout-out, event coverage, or general enthusiasm involving a major brand is NOT strong evidence of sponsorship.
+
+For very large global brands, require stronger evidence than usual before assigning a high confidence score. Prefer low confidence unless the post contains clear commercial signals linking the brand and the creator.
+
+STRICT 90+ RULE:
+
+A score of 90 or above is ONLY allowed for a CONFIRMED PAID PARTNERSHIP with a referenced creator:
+- Instagram paid partnership flag = true with a referenced creator, OR
+- an explicit paid disclosure in the caption (#ad, #sponsored, #paidpartnership, "paid partnership") connecting THIS brand with a referenced creator.
+
+Without one of these, the score MUST be 89 or lower.
+
+Examples:
+
+Brand = Nike
+Caption: "Now available at @footlocker #ad"
+Paid partnership = true
+Tagged users: footlocker
+
+Result:
+confidence_pct = 0 (the paid partnership is with a retailer/brand, not a content creator).
+
+Brand = Nike
+Caption: "Nike x @lego — build your own sneaker 🧱 #paidpartnership"
+Paid partnership = true
+Coauthor producers: lego
+
+Result:
+confidence_pct = 0 (brand-to-brand collaboration, no content creator involved).
+
+Brand = Nike
+Caption: "Nike x @lego with @sarahfit building the new set #ad"
+Tagged users: lego, sarahfit
+
+Result:
+High confidence (90+), scored only on the #ad partnership with the creator @sarahfit; @lego is ignored.
+
+Brand = Nike
+Caption: "Training day with @sarahfit #ad #sponsored. Use code SARAH15"
+Tagged users: sarahfit
+
+Result:
+High confidence (90+), explicit paid disclosure with a referenced creator.
+
+Brand = Nike
+Caption: "New drop 🔥"
+Paid partnership = true
+Coauthor producers: sarahfit
+
+Result:
+High confidence (90+), Instagram paid partnership label with a referenced creator.
+
+Brand = Nike
+Caption: "We gifted @sarahfit the new Pegasus 🎁 #gifted"
+
+Result:
+confidence_pct = 60
+
+Brand = Nike
+Caption: "Our ambassador @sarahfit in the new Pegasus. Use code SARAH15"
+Paid partnership = false
+No #ad / #sponsored
+
+Result:
+confidence_pct between 61 and 80 (strong commercial signals, but no paid disclosure).
+
+Brand = Nike
+Caption: "Love this shot from @sarahfit 📸"
+
+Result:
+Low confidence (repost / shout-out, no commercial evidence).
 
 Scoring rubric:
-0-10: No evidence of collaboration.
-11-20: Accounts are referenced but there is no commercial evidence.
-21-40: Weak, speculative signals.
-41-60: Possible collaboration but evidence is incomplete.
-61-80: Strong evidence of a creator-brand commercial relationship.
-81-100: Explicit sponsorship, creator partnership, creator code, ambassador program, or multiple strong signals.
+
+0-10:
+No evidence of sponsorship or commercial relationship.
+Ordinary mention, tag, repost, photo credit, event content, or unrelated account.
+Any partnership that is only with another brand/business (not a content creator) = EXACTLY 0.
+
+11-25:
+Creator appears but there is no meaningful evidence of a commercial relationship.
+
+26-40:
+Some weak signals exist, but sponsorship is speculative.
+
+41-59:
+Possible commercial relationship, but evidence is incomplete and does not meet the gifted threshold.
+
+60:
+CLEARLY DISCLOSED GIFTED COMMERCIAL COLLABORATION.
+The post explicitly indicates that THIS brand gifted, sent, provided, or gave the product/service for free to a referenced creator.
+
+61-80:
+Strong evidence of a paid/commercial relationship.
+Examples include strong promotional language, campaign participation, ambassador language, creator affiliate/discount code, or other convincing commercial signals without an explicit paid sponsorship disclosure.
+
+81-100:
+Very strong evidence of a PAID sponsorship or paid partnership.
+Examples include:
+
+* Instagram paid partnership label
+* explicit #ad or #sponsored disclosure
+* explicit paid sponsorship language
+* clear paid campaign language
+* multiple strong commercial signals
+
+Scores of 90 or above require the paid partnership flag or an explicit paid disclosure (see STRICT 90+ RULE).
+
+IMPORTANT SCORING RULES:
+
+* Disclosed gifted collaboration = EXACTLY 60.
+* Do NOT score clearly disclosed gifted content below 60.
+* Do NOT score clearly disclosed gifted content above 60 unless there is additional evidence of a paid sponsorship/paid partnership.
+* Paid sponsorship/paid partnership should generally score above 60.
+* 90+ ONLY for a confirmed paid partnership (paid partnership flag or explicit #ad/#sponsored/#paidpartnership disclosure) with a referenced creator.
+* Weak mentions, tags, coauthors, reposts, product appearances, or shout-outs should remain below 60.
+* Evidence involving another brand or a non-creator account should not increase the score.
+* Partnership only with another brand/business (not a content creator) = EXACTLY 0, even with a paid partnership flag or #ad.
+* Do not infer sponsorship from brand popularity, creator fame, previous collaborations, or product ownership.
+
+Evaluate only the information provided below.
 
 Brand:
 {brand_name}
@@ -246,8 +421,8 @@ Coauthor producers:
 
 Respond with ONLY valid JSON:
 {
-   "confidence_pct": 0,
-   "reason": "short explanation"
+   "confidence_pct": <integer 0-100>,
+   "reason": "<short explanation>"
 }
 """
 
@@ -375,18 +550,22 @@ Do NOT infer a person's age simply from their appearance.
 GENDER CLASSIFICATION
 --------------------------------------------------
 
-For each gender field, return exactly ONE of:
+TARGET AUDIENCE GENDER IS MANDATORY. Return exactly ONE of:
+
+- "male"
+- "female"
+- "both"
+
+Never return null for target_audience_gender. Use every available signal (captions, hashtags, partner creators, products, website, description) to choose "male" or "female" when one gender clearly dominates. If you are NOT sure, or the evidence is neutral, gender-inclusive, weak or conflicting, return "both" with a LOW confidence score (50-69).
+
+PRODUCT AUDIENCE GENDER: return exactly ONE of:
 
 - "male"
 - "female"
 - "both"
 - null
 
-"both" means there is evidence that the brand/product genuinely serves or targets both male and female audiences.
-
-Do NOT use "both" simply because the evidence is uncertain or incomplete.
-
-If there is insufficient evidence to determine the gender classification, return null and use a lower confidence score.
+For product audience gender, "both" means there is evidence that the product genuinely serves both male and female audiences. Do NOT use "both" for product audience gender simply because the evidence is uncertain or incomplete; return null and use a lower confidence score instead.
 
 --------------------------------------------------
 AGE RANGE
@@ -573,7 +752,8 @@ For age confidence:
 
 If the evidence is insufficient:
 
-- Use null for the affected gender field.
+- target_audience_gender: never null; use "both" with a low confidence score (50-69).
+- product_audience_gender: use null.
 - Use null for unsupported age endpoints.
 - Lower the corresponding confidence score.
 - Never invent a value just to avoid returning null.
@@ -585,7 +765,7 @@ OUTPUT FORMAT
 Return ONLY valid JSON.
 
 {
-   "target_audience_gender": "male|female|both|null",
+   "target_audience_gender": "male|female|both",
    "target_audience_gender_confidence": 0,
 
    "target_audience_min_age": null,

@@ -39,6 +39,7 @@ MAX_INSTAGRAM_POSTS_FOR_LLM = 10
 LLM_MODEL = "gpt-5"
 MAX_WEBSITE_PAGES = 5
 AUDIENCE_STOP_CONFIDENCE = 90
+UNSURE_TARGET_GENDER_CONFIDENCE = 50   # saved with target gender "both" when the LLM still returns none
 PAGE_TEXT_LIMIT = 6000
 
 # Product and audience pages take priority over generic site pages. Other
@@ -84,8 +85,7 @@ _BRAND_QUERY_SQL = """
         ON tcbp.content_creator_re_id = ccr.id
       JOIN brands_raw br
         ON br.id = tcbp.brand_raw_id
-      WHERE ccr.id BETWEEN 1 AND 208
-        AND ccr.niche IN ('Beauty', 'Music', 'Fitness', 'Health')
+      WHERE ccr.niche IN ('Beauty', 'Music', 'Fitness', 'Health')
         AND tcbp.sponsorship_confidence >= 90
         AND br.refferls = false{unanalysed_filter}
         AND (
@@ -202,17 +202,20 @@ Do NOT determine demographics from:
 
 Gender Classification
 
-For each gender field, return exactly one of these JSON values:
+TARGET AUDIENCE GENDER IS MANDATORY. target_audience_gender must be exactly one of:
+- "male"
+- "female"
+- "both"
+
+Never return null for target_audience_gender. Use every signal available (partner creators, Instagram captions and hashtags, website text, products, description) to pick "male" or "female" when one gender clearly dominates (see the ratio rule below). If you are NOT sure, or the evidence is neutral, gender-inclusive, weak or conflicting, return "both" with a LOW target_audience_gender_confidence (50-69).
+
+PRODUCT AUDIENCE GENDER: product_audience_gender must be exactly one of:
 - "male"
 - "female"
 - "both"
 - null
 
-Use "both" only when there is positive evidence the brand actively serves both genders.
-
-If evidence is weak, conflicting, or absent:
-- return null
-- lower confidence
+Use "both" for product_audience_gender only when there is positive evidence the product actively serves both genders. If evidence is weak, conflicting, or absent, return null for product_audience_gender and lower its confidence.
 
 Partner creators (target audience gender)
 
@@ -222,7 +225,8 @@ The creators a brand partners with show who its marketing is aimed at. Use them 
 
 Judge each creator's gender from their username, display name and the post caption. Skip creators whose gender you cannot tell, and accounts that are brands or businesses rather than people.
 
-- Return "both" for target_audience_gender only if you found BOTH male and female partner creators AND the split is balanced: between 50/50 and 70/30.
+- When partner creators show a gender split, return "both" only if you found BOTH male and female partner creators AND the split is balanced: between 50/50 and 70/30.
+- If you cannot tell any partner creator's gender and no other evidence shows one gender dominating, return "both" with a low confidence (50-69) — never null.
 - If MORE than 70% of the partner creators whose gender you can tell are one gender, return that gender, not "both". Examples:
   - 5 female + 5 male (50/50) -> "both"
   - 7 female + 3 male (70/30) -> "both"
@@ -302,10 +306,10 @@ RECENT INSTAGRAM POSTS:
 REVERSE ENGINEERING PARTNER CREATORS (creators with a confirmed paid partnership post for this brand):
 {re_creators}
 
-Return ONLY valid JSON with exactly these keys. Use JSON null (without quotes) for unknown gender, age, or latest product values, and integer numbers (without quotes) for ages and confidence scores. Do not include comments, markdown, or extra keys.
+Return ONLY valid JSON with exactly these keys. target_audience_gender is never null. Use JSON null (without quotes) for unknown product gender, age, or latest product values, and integer numbers (without quotes) for ages and confidence scores. Do not include comments, markdown, or extra keys.
 
 {
-  "target_audience_gender": null,
+  "target_audience_gender": "both",
   "target_audience_gender_confidence": 0,
   "target_audience_min_age": null,
   "target_audience_max_age": null,
@@ -497,7 +501,15 @@ def _audience_prompt(
     final: bool = False,
 ) -> str:
     history = "\n\n".join(page_history) if page_history else "No earlier website pages have been analyzed."
-    if final:
+    if final and not page_history:
+        crawl_instruction = (
+            "INSTAGRAM-ONLY PASS: the brand website could not be scraped, so no website text is available. "
+            "Make your best estimate from the Instagram bio, business category, Instagram posts, partner creators "
+            "and business description below. Do not lower confidence just because website text is missing, "
+            "but do not invent website evidence.\n\n"
+        )
+        website_text = "Not available - the website could not be scraped."
+    elif final:
         crawl_instruction = (
             "FINAL PASS: all available website pages have been reviewed. Make your final best estimate from the complete evidence below. "
             "There are no more pages to fetch.\n\n"
@@ -727,9 +739,14 @@ def main() -> int:
                     )
                     break
 
-            if not page_history:
-                logger.warning("No readable website text for brand_raw_id=%s; skipping.", brand["brand_raw_id"])
-                continue
+            # No readable website: fall back to the Instagram posts and partner
+            # creators alone, via the final pass below (stopped_early is False).
+            instagram_only = not page_history
+            if instagram_only:
+                logger.warning(
+                    "No readable website text for brand_raw_id=%s; using Instagram posts and creators only.",
+                    brand["brand_raw_id"],
+                )
 
             # Like geo_reach, run a final synthesis when the confidence gate
             # did not end the crawl early. All scraped page text is retained.
@@ -747,6 +764,11 @@ def main() -> int:
                     context=f"brand website audience final brand_raw_id={brand['brand_raw_id']}",
                     model=LLM_MODEL,
                 )
+                if instagram_only and not final_result:
+                    # Saving an all-null result would mark the brand as analysed
+                    # and drop it from later runs, so leave it pending instead.
+                    logger.warning("Instagram-only LLM call failed for brand_raw_id=%s; skipping save.", brand["brand_raw_id"])
+                    continue
                 final_metrics = _metrics(final_result)
                 metrics = _merge_metrics(metrics, final_metrics)
                 # The final pass has seen every page, so it decides the latest
@@ -759,6 +781,11 @@ def main() -> int:
             if metrics is None:
                 logger.warning("No audience estimates returned for brand_raw_id=%s; skipping save.", brand["brand_raw_id"])
                 continue
+            # target_audience_gender is never saved NULL — the prompt's
+            # "not sure -> both" rule, enforced if the LLM still skips it.
+            if metrics["target_audience_gender"] is None:
+                metrics["target_audience_gender"] = "both"
+                metrics["target_audience_gender_confidence"] = UNSURE_TARGET_GENDER_CONFIDENCE
 
             updated = (
                 db.query(BrandRaw)
@@ -773,6 +800,7 @@ def main() -> int:
                 "brand_name": brand["brand_name"],
                 "post_count": len(brand_posts),
                 "website_pages_scraped": pages_log,
+                "evidence_source": "instagram_only" if instagram_only else "website_and_instagram",
                 "stopped_early": stopped_early,
                 **metrics,
             }, ensure_ascii=True, default=str))

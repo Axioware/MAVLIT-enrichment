@@ -55,6 +55,7 @@ from pipeline.db import (
     CreatorBrandLlmV3Ranking,
     CreatorNiche,
     CreatorProfile,
+    FacebookBrandedContentCheck,
     InitialBrandScore,
     InstagramCreatorCommenter,
     InstagramPost,
@@ -786,6 +787,22 @@ class TestCreatorBrandPartnershipPostAdmin(ModelView, model=TestCreatorBrandPart
     page_size = 15
 
 
+class FacebookBrandedContentCheckAdmin(ModelView, model=FacebookBrandedContentCheck):
+    name         = "Facebook Branded Content Check"
+    name_plural  = "Facebook Branded Content Checks"
+    category     = "Test"
+    icon         = "fa-brands fa-facebook"
+    column_list  = "__all__"
+    column_searchable_list = [
+        FacebookBrandedContentCheck.username,
+        FacebookBrandedContentCheck.instagram_id,
+        FacebookBrandedContentCheck.status,
+    ]
+    column_sortable_list = [c.name for c in FacebookBrandedContentCheck.__table__.columns]
+    column_default_sort  = [(FacebookBrandedContentCheck.checked_at, True)]
+    page_size = 15
+
+
 class CreatorNicheAdmin(ModelView, model=CreatorNiche):
     name         = "Creator Niche"
     name_plural  = "Creator Niches"
@@ -1154,6 +1171,7 @@ admin.add_view(InstagramPostAdmin)
 admin.add_view(TestBrandsWithInstagramPostsAdmin)
 admin.add_view(TestNicheAdmin)
 admin.add_view(TestCreatorBrandPartnershipPostAdmin)
+admin.add_view(FacebookBrandedContentCheckAdmin)
 admin.add_view(CreatorNicheAdmin)
 admin.add_view(InstagramUserAdmin)
 admin.add_view(ContentCreatorREAdmin)

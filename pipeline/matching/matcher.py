@@ -64,10 +64,17 @@ Runs on every page load; designed to be cheap:
                test partnership post with sponsorship_confidence >= 90
            e.g. a male creator never sees a female-audience brand unless
            that brand has sponsored at least one male creator.
+
+           Geo-reach filter: brands_raw.geo_reach_score must be 0-40
+           (local/small-reach) or NULL (not geo-scored yet).
+
+           Avoided brand niches: brands whose brands_raw.niche is in
+           _EXCLUDED_BRAND_NICHES (e.g. "Band") are dropped for every
+           creator, on top of the creator's own excluded categories.
   Step B — Semantic shortlist: a single indexed pgvector cosine-distance
            query against the creator's embedding narrows the (already
-           hard-filtered) pool to the top _SHORTLIST_SIZE candidates —
-           fast because embeddings are precomputed.
+           hard-filtered) pool nearest-first — every brand passing Step A
+           is kept, so the frontend can page through all of them.
   Step C — Score each shortlisted candidate from its "why it's a match"
            taglines (pipeline.matching.match_text.collect_match_reasons):
            every applicable tagline earns its priority as points, scaled
@@ -108,9 +115,11 @@ from pipeline.matching.scoring import score_match
 
 logger = logging.getLogger(__name__)
 
-_SHORTLIST_SIZE = 100
 _ACTIVITY_FLOOR = 0   # brands with a CONFIRMED score at or below this are dropped; unscored (NULL) brands are kept
 _FOLLOWER_TOLERANCE = 2   # +/-200% buffer beyond the brand's confirmed collaborator follower range
+# Brand categories always avoided, for every creator — brands_raw.niche values
+# (compared case-insensitively). Brands with no niche are kept.
+_EXCLUDED_BRAND_NICHES = ("band",)
 
 
 
@@ -134,6 +143,14 @@ def _hard_filtered_query(db: Session, creator: CreatorProfile, apply_gender_filt
     query = query.filter(
         or_(BrandProfile.sponsorship_activity_score.is_(None), BrandProfile.sponsorship_activity_score > _ACTIVITY_FLOOR)
     )
+    # Local/small-reach brands only (geo_reach_score 0-40); NULL = not
+    # geo-scored yet, kept.
+    query = query.filter(or_(BrandRaw.geo_reach_score.is_(None), BrandRaw.geo_reach_score.between(0, 40)))
+    # Hard-coded brand categories to avoid (brands_raw.niche), for everyone.
+    query = query.filter(or_(
+        BrandRaw.niche.is_(None),
+        ~func.lower(func.trim(BrandRaw.niche)).in_(_EXCLUDED_BRAND_NICHES),
+    ))
     # "Brand categories to avoid" are brands_niches.tags (picked on the
     # creator-profile page from the tags of their primary niche) — drop any
     # brand carrying one of them (exact tag, case-insensitive).
@@ -348,7 +365,7 @@ def get_matches(
     total = query.count()
 
     # Step B — semantic shortlist (single indexed pgvector query)
-    query = query.order_by(distance_expr).limit(_SHORTLIST_SIZE)
+    query = query.order_by(distance_expr)
     shortlist = query.all()
 
     if not shortlist:
