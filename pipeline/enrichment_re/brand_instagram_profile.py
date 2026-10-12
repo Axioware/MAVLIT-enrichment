@@ -74,11 +74,12 @@ from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
+from sqlalchemy import exists, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, SEARXNG_URL
-from pipeline.db import BrandRaw, Prompt
+from pipeline.db import BrandRaw, Prompt, TestCreatorBrandPartnershipPost
 from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.http import fetch_page_via_jina, fetch_page_with_jina_fallback
@@ -92,6 +93,11 @@ from pipeline.helpers.prompts import (
 from pipeline.helpers.social import normalize_handle
 
 logger = logging.getLogger(__name__)
+
+# Brands found by content_creator_re that never reached this confidence are
+# skipped; brands not in test_creator_brand_partnership_posts at all (e.g.
+# Facebook Branded Content finds) are still processed.
+_MIN_PARTNERSHIP_CONFIDENCE = 90
 
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"  # same Instagram scraper used across the pipeline
 # Full browser-like header set — link-in-bio hosts (Linktree in particular,
@@ -674,7 +680,10 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
 
     Batch mode (no brand_id) processes every row with instagram_handle set
     and instagram_profile_checked=False — named or bare, whether or not
-    brand_wikidata_lookup.py has run on it yet.
+    brand_wikidata_lookup.py has run on it yet — EXCEPT brands that are in
+    test_creator_brand_partnership_posts only with sponsorship_confidence
+    < _MIN_PARTNERSHIP_CONFIDENCE. A brand qualifies if it has at least one
+    row there at >= _MIN_PARTNERSHIP_CONFIDENCE, or no row there at all.
 
     Pass brand_id to target one specific brand directly — bypasses the
     instagram_profile_checked filter.
@@ -689,7 +698,17 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:
-        query = query.filter(BrandRaw.instagram_profile_checked == False)
+        partnership = TestCreatorBrandPartnershipPost
+        query = query.filter(
+            BrandRaw.instagram_profile_checked == False,
+            or_(
+                exists().where(
+                    partnership.brand_raw_id == BrandRaw.id,
+                    partnership.sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE,
+                ),
+                ~exists().where(partnership.brand_raw_id == BrandRaw.id),
+            ),
+        )
 
     brands: list[BrandRaw] = query.limit(limit).all()
     if not brands:
