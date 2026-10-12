@@ -70,7 +70,7 @@ logger = logging.getLogger(__name__)
 
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"
 # Only instagram_posts rows with a partnership (sponsorship) confidence at or above this are processed.
-_MIN_SPONSORSHIP_CONFIDENCE = 95
+_MIN_SPONSORSHIP_CONFIDENCE = 90
 
 #  Prompt helpers
 
@@ -539,7 +539,7 @@ def enrich_instagram_users(
     brand_raw_id: int | None = None,
 ) -> int:
     """
-    Process up to `limit` instagram_posts with sponsorship_confidence >= 95
+    Process up to `limit` instagram_posts with sponsorship_confidence >= 90
     (_MIN_SPONSORSHIP_CONFIDENCE)
     where is_users_scraped=False. Returns number of posts processed.
 
