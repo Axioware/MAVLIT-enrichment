@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 _ACTOR_ID     = "shu8hvrXbJbY3Eb9W"
 _POSTS_LIMIT  = 40   # last N posts, regardless of how far back that goes
 _RESULTS_TYPE = "posts"
-_MIN_PARTNERSHIP_CONFIDENCE = 90   # brand needs a test_creator_brand_partnership_posts row at/above this
+_MIN_PARTNERSHIP_CONFIDENCE = 90   # brands in test_creator_brand_partnership_posts only below this are skipped
 
 #  Prompt helpers
 
@@ -352,9 +352,10 @@ def enrich_instagram_posts(
     """
     For each brand with instagram_handle set, instagram_checked=False,
     refferls=False, geo_reach_score 0-40 (NULL = not geo-scored yet is
-    skipped), and at least one
-    test_creator_brand_partnership_posts row with sponsorship_confidence
-    >= 90 (an official website is not required):
+    skipped), and either at least one test_creator_brand_partnership_posts
+    row with sponsorship_confidence >= 90 or no row there at all (brands that
+    are only there below 90 are skipped; an official website is not
+    required):
       1. Scrape posts via Apify
     2. Apply LLM filtering to all creator signals
         3. Store every fetched post with a post ID in instagram_posts, keeping
@@ -386,8 +387,9 @@ def enrich_instagram_posts(
         logger.warning("APIFY_TOKEN not set — skipping Instagram enrichment")
         return 0
 
-    # Only brands with at least one confirmed (>= 90) creator partnership
-    # from the reverse-engineering evidence table.
+    # Brands with a confirmed (>= 90) creator partnership in the
+    # reverse-engineering evidence table, or not in that table at all (e.g.
+    # Facebook Branded Content finds). Brands only there below 90 are skipped.
     has_confident_partnership = (
         db.query(TestCreatorBrandPartnershipPost.id)
         .filter(
@@ -396,11 +398,16 @@ def enrich_instagram_posts(
         )
         .exists()
     )
+    in_partnership_table = (
+        db.query(TestCreatorBrandPartnershipPost.id)
+        .filter(TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id)
+        .exists()
+    )
     query = db.query(BrandRaw).filter(
         BrandRaw.instagram_handle.isnot(None),
         BrandRaw.refferls.is_(False),
         BrandRaw.geo_reach_score.between(0, 40),   # NULL (not geo-scored yet) is skipped
-        has_confident_partnership,
+        or_(has_confident_partnership, ~in_partnership_table),
     )
     if brand_id is not None:
         query = query.filter(
