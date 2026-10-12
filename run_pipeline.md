@@ -361,6 +361,23 @@ enrich_content_creator_re(db, limit=1, niche='fitness')
 db.close()
 "
 
+OR (parallel — run several creators' Apify scrapes at the same time; LLM calls and DB writes
+still run one creator at a time. workers=1 is the default sequential behaviour; 3-5 is a good start)
+
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment_re.content_creator_re import enrich_content_creator_re
+db = SessionLocal()
+enrich_content_creator_re(db, limit=20, niche='fitness', workers=4)
+db.close()
+"
+
+OR (same, as a CLI command)
+
+python -m pipeline.enrichment_re.content_creator_re --limit 20 --niche fitness --workers 4
+
 ## refresh_content_creator_re (re-scrape already-scraped creators for NEW partnerships)
 Picks creators with is_scraped = true, currenttime older than --days (default 30), and at least one
 test_creator_brand_partnership_posts row with sponsorship_confidence >= 90. Scrapes their latest 40 posts,

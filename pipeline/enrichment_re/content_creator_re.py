@@ -38,6 +38,7 @@ import logging
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 if __package__ in (None, ""):
@@ -311,7 +312,7 @@ def _record_llm_partnership_post(
 
 def enrich_content_creator_re(
     db: Session, limit: int = 1, creator_ids: list[int] | None = None,
-    niche: str | None = None, skip_seen_posts: bool = False,
+    niche: str | None = None, skip_seen_posts: bool = False, workers: int = 1,
 ) -> tuple[int, set[int]]:
     """
     Process up to `limit` content_creator_re rows where is_scraped=False.
@@ -328,6 +329,13 @@ def enrich_content_creator_re(
     confirmed collab post pointed at), for callers that want to chain
     further enrichment onto exactly the brands this call touched rather
     than sweeping the whole brands_raw table.
+
+    Pass workers > 1 to run that many creators' 40-post Apify scrapes at the
+    same time (the slow part) — same pattern as instagram_posts.py. Only the
+    Apify calls run in parallel threads; LLM calls, commenter scrapes and
+    every DB write still happen one creator at a time in this thread (the
+    Session is not thread-safe), in the order scrapes finish. workers=1
+    (default) behaves exactly like the original sequential loop.
     """
     if not APIFY_TOKEN:
         logger.warning("APIFY_TOKEN not set — skipping content_creator_re enrichment")
@@ -356,10 +364,10 @@ def enrich_content_creator_re(
     processed = 0
     all_confirmed_brand_ids: set[int] = set()
 
+    # Rows with no username can't be scraped — mark them done up front.
+    scrapable: list[tuple[ContentCreatorRE, str]] = []
     for row in rows:
         username = normalize_handle(row.username or "")
-        niche = row.niche
-
         if not username:
             logger.warning("Content creator RE: row id=%d has no username — skipping", row.id)
             row.is_scraped = True
@@ -367,213 +375,230 @@ def enrich_content_creator_re(
             db.commit()
             processed += 1
             continue
+        scrapable.append((row, username))
 
+    # End any open read transaction before slow Apify/LLM work — locks held
+    # across it block every ALTER TABLE (API startup migrations, other
+    # scripts) and everything queued behind them. Loaded ORM objects stay
+    # usable (expire_on_commit=False).
+    db.commit()
+
+    # The 40-post creator scrapes run in parallel threads (they never touch
+    # the Session); everything below runs here, one creator at a time, in
+    # the order the scrapes finish.
+    workers = max(1, int(workers or 1))
+    logger.info("Content creator RE: %d parallel Apify scrape(s)", workers)
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="ccre-apify")
+    futures = {}
+    for row, username in scrapable:
         logger.info("Content creator RE: scraping @%s", username)
+        futures[pool.submit(_scrape_posts, username, 40)] = (row, username)
+    try:
+        for future in as_completed(futures):
+            row, username = futures[future]
+            niche = row.niche
+            raw_posts = future.result()   # re-raises ApifyQuotaExceeded etc. from the worker
 
-        # End any open read transaction before slow Apify/LLM work — locks held
-        # across it block every ALTER TABLE (API startup migrations, other
-        # scripts) and everything queued behind them. Loaded ORM objects stay
-        # usable (expire_on_commit=False).
-        db.commit()
+            if raw_posts is None:
+                logger.warning(
+                    "Content creator RE: Apify scrape failed for @%s (actor limit reached, "
+                    "network error, etc.) — leaving is_scraped=False so this row is retried",
+                    username,
+                )
+                time.sleep(0.5)
+                continue
+            if not raw_posts:
+                logger.warning("Content creator RE: no posts returned for @%s", username)
+                row.is_scraped = True
+                row.currenttime = datetime.now(timezone.utc)  # last scraped (refresh_content_creator_re.py uses it)
+                db.commit()
+                processed += 1
+                continue
 
-        #  Scrape top 5 posts (addParentData gets profile info too)
-        raw_posts = _scrape_posts(username, n=40)
-        if raw_posts is None:
-            logger.warning(
-                "Content creator RE: Apify scrape failed for @%s (actor limit reached, "
-                "network error, etc.) — leaving is_scraped=False so this row is retried",
-                username,
+            # Set once any commenter _scrape_posts() call below fails (actor
+            # limit reached, network error, etc.) — gates is_scraped at the end
+            # so a failed Apify run isn't silently treated as fully processed.
+            scrape_failed = False
+
+            #  Extract profile data + classify demographics via LLM
+            profile = _profile_from_posts(raw_posts)
+            demo = _classify_demographics(db, username, profile)
+            time.sleep(0.3)
+
+            # Refresh runs: posts already stored for this creator were brand-checked
+            # on an earlier scrape. Read them BEFORE this scrape is upserted below.
+            seen_post_ids: set[str] = set()
+            if skip_seen_posts:
+                seen_post_ids = {
+                    str(post_id) for (post_id,) in db.query(InstagramUser.post_id).filter(
+                        InstagramUser.username == username,
+                        InstagramUser.user_type == "contentcreatorRE",
+                        InstagramUser.post_id.isnot(None),
+                    )
+                }
+
+            #  Store creator — one row per post, niche from content_creator_re.niche
+            creator_rows = [
+                _build_post_row(
+                    username, "contentcreatorRE", profile, demo, item,
+                    niche=niche, is_content_creator_re=True,
+                )
+                for item in raw_posts
+                if item.get("id")
+            ]
+            # Re-scraped posts already exist — refresh post_collaborators on them.
+            upsert_rows(db, InstagramUser, creator_rows, ["post_id"], update_columns=["post_collaborators"])
+
+            logger.info(
+                "Content creator RE: @%s stored — gender=%s country=%s age=%s niche=%s followers=%s",
+                username, demo["gender"], demo["country"], demo["age_group"], niche,
+                profile.get("followersCount"),
             )
-            time.sleep(0.5)
-            continue
-        if not raw_posts:
-            logger.warning("Content creator RE: no posts returned for @%s", username)
+
+            #  Check each post's collaboration signals for real brand accounts.
+            #  Keep post-specific brand IDs so commenter scraping/linking only
+            #  runs for posts where the LLM confirmed a brand partnership.
+            confirmed_brand_ids: set[int] = set()
+            branded_posts: list[tuple[dict, set[int]]] = []
+            if skip_seen_posts:
+                logger.info(
+                    "Content creator RE: @%s — %d of %d scraped post(s) are new and will be brand-checked",
+                    username, sum(1 for item in raw_posts if str(item.get("id")) not in seen_post_ids), len(raw_posts),
+                )
+            for item in raw_posts:
+                if skip_seen_posts and str(item.get("id")) in seen_post_ids:
+                    continue
+                db.commit()  # release brands_raw locks from the previous post before the LLM call
+                brand_matches = _check_post_for_brands(db, username, profile.get("fullName"), item)
+                if brand_matches:
+                    time.sleep(0.3)
+                post_brand_ids: set[int] = set()
+                for brand_match in brand_matches:
+                    brand_username = brand_match["username"]
+                    brand_id = _get_or_create_brand_id(db, brand_username)
+                    if brand_id:
+                        _mark_brand_referral(db, brand_id, brand_match.get("has_referral_code", False))
+                        _record_llm_partnership_post(
+                            db,
+                            brand_id=brand_id,
+                            brand_username=brand_username,
+                            creator_row_id=row.id,
+                            creator_username=username,
+                            creator_name=profile.get("fullName"),
+                            item=item,
+                        )
+                        post_brand_ids.add(brand_id)
+                        confirmed_brand_ids.add(brand_id)
+                if post_brand_ids:
+                    branded_posts.append((item, post_brand_ids))
+
+            for brand_id in confirmed_brand_ids:
+                _link_to_brand(db, brand_id, username)
+
+            if confirmed_brand_ids:
+                logger.info(
+                    "Content creator RE: @%s linked to %d brand(s)",
+                    username, len(confirmed_brand_ids),
+                )
+
+            #  Collect unique commenters only from posts with confirmed brands
+            #  (up to 5/post). Each record carries the brand IDs confirmed on
+            #  that same post so links stay scoped to the evidence source.
+            commenter_links: list[tuple[dict, set[int]]] = []
+            for item, post_brand_ids in branded_posts:
+                for record in _collect_commenter_records([item], n_per_post=5):
+                    commenter_links.append((record, post_brand_ids))
+
+            commenter_usernames = sorted({record["username"] for record, _ in commenter_links})
+
+            if commenter_usernames:
+                existing_c = {
+                    r.username for r in
+                    db.query(InstagramUser.username)
+                    .filter(InstagramUser.username.in_(commenter_usernames))
+                    .all()
+                }
+                new_commenters = [u for u in commenter_usernames if u not in existing_c]
+
+                logger.info(
+                    "Content creator RE: @%s has %d unique commenter(s) (%d new)",
+                    username, len(commenter_usernames), len(new_commenters),
+                )
+
+                #  Scrape 1 post per new commenter for profile data
+                for commenter in new_commenters:
+                    logger.info("Content creator RE:   commenter @%s", commenter)
+
+                    db.commit()  # release locks before the slow Apify scrape
+                    c_posts = _scrape_posts(commenter, n=1)
+                    if c_posts is None:
+                        logger.warning(
+                            "Content creator RE: Apify scrape failed for commenter @%s — will retry",
+                            commenter,
+                        )
+                        scrape_failed = True
+                        time.sleep(0.5)
+                        continue
+                    if not c_posts:
+                        time.sleep(0.5)
+                        continue
+
+                    c_profile = _profile_from_posts(c_posts)
+                    c_demo = _classify_demographics(db, commenter, c_profile)
+                    time.sleep(0.3)
+
+                    if c_posts[0].get("id"):
+                        # No conflict target: this row could violate EITHER the
+                        # partial username-where-commenter index OR the global
+                        # post_id unique constraint (this commenter's own most
+                        # recent post may already be stored under a different
+                        # username's creator row) — see upsert_rows' docstring.
+                        upsert_rows(db, InstagramUser, [
+                            _build_post_row(
+                                commenter, "commenter", c_profile, c_demo, c_posts[0],
+                                is_content_creator_re=True,
+                            )
+                        ], None)
+
+                    logger.info(
+                        "Content creator RE:   commenter @%s stored — gender=%s country=%s",
+                        commenter, c_demo["gender"], c_demo["country"],
+                    )
+                    time.sleep(1.0)
+
+                #  Link every commenter (existing + new) to every confirmed
+                #  brand on the same post, plus creator <-> commenter itself
+                #  (instagram_creator_commenters) scoped per confirmed brand.
+                for record, post_brand_ids in commenter_links:
+                    commenter = record.get("username")
+                    if not commenter:
+                        continue
+                    for brand_id in post_brand_ids:
+                        _link_to_brand(db, brand_id, commenter)
+                        _link_commenter_to_creator(db, brand_id, username, record)
+
+            all_confirmed_brand_ids |= confirmed_brand_ids
+
+            if scrape_failed:
+                db.commit()  # keep whatever rows/links were already stored above
+                logger.warning(
+                    "Content creator RE: @%s — at least one commenter Apify scrape failed — "
+                    "leaving is_scraped=False so this row is retried instead of being "
+                    "treated as fully processed",
+                    username,
+                )
+                continue
+
             row.is_scraped = True
+
             row.currenttime = datetime.now(timezone.utc)  # last scraped (refresh_content_creator_re.py uses it)
             db.commit()
             processed += 1
-            continue
+            logger.info("Content creator RE: @%s done", username)
 
-        # Set once any commenter _scrape_posts() call below fails (actor
-        # limit reached, network error, etc.) — gates is_scraped at the end
-        # so a failed Apify run isn't silently treated as fully processed.
-        scrape_failed = False
-
-        #  Extract profile data + classify demographics via LLM
-        profile = _profile_from_posts(raw_posts)
-        demo = _classify_demographics(db, username, profile)
-        time.sleep(0.3)
-
-        # Refresh runs: posts already stored for this creator were brand-checked
-        # on an earlier scrape. Read them BEFORE this scrape is upserted below.
-        seen_post_ids: set[str] = set()
-        if skip_seen_posts:
-            seen_post_ids = {
-                str(post_id) for (post_id,) in db.query(InstagramUser.post_id).filter(
-                    InstagramUser.username == username,
-                    InstagramUser.user_type == "contentcreatorRE",
-                    InstagramUser.post_id.isnot(None),
-                )
-            }
-
-        #  Store creator — one row per post, niche from content_creator_re.niche
-        creator_rows = [
-            _build_post_row(
-                username, "contentcreatorRE", profile, demo, item,
-                niche=niche, is_content_creator_re=True,
-            )
-            for item in raw_posts
-            if item.get("id")
-        ]
-        # Re-scraped posts already exist — refresh post_collaborators on them.
-        upsert_rows(db, InstagramUser, creator_rows, ["post_id"], update_columns=["post_collaborators"])
-
-        logger.info(
-            "Content creator RE: @%s stored — gender=%s country=%s age=%s niche=%s followers=%s",
-            username, demo["gender"], demo["country"], demo["age_group"], niche,
-            profile.get("followersCount"),
-        )
-
-        #  Check each post's collaboration signals for real brand accounts.
-        #  Keep post-specific brand IDs so commenter scraping/linking only
-        #  runs for posts where the LLM confirmed a brand partnership.
-        confirmed_brand_ids: set[int] = set()
-        branded_posts: list[tuple[dict, set[int]]] = []
-        if skip_seen_posts:
-            logger.info(
-                "Content creator RE: @%s — %d of %d scraped post(s) are new and will be brand-checked",
-                username, sum(1 for item in raw_posts if str(item.get("id")) not in seen_post_ids), len(raw_posts),
-            )
-        for item in raw_posts:
-            if skip_seen_posts and str(item.get("id")) in seen_post_ids:
-                continue
-            db.commit()  # release brands_raw locks from the previous post before the LLM call
-            brand_matches = _check_post_for_brands(db, username, profile.get("fullName"), item)
-            if brand_matches:
-                time.sleep(0.3)
-            post_brand_ids: set[int] = set()
-            for brand_match in brand_matches:
-                brand_username = brand_match["username"]
-                brand_id = _get_or_create_brand_id(db, brand_username)
-                if brand_id:
-                    _mark_brand_referral(db, brand_id, brand_match.get("has_referral_code", False))
-                    _record_llm_partnership_post(
-                        db,
-                        brand_id=brand_id,
-                        brand_username=brand_username,
-                        creator_row_id=row.id,
-                        creator_username=username,
-                        creator_name=profile.get("fullName"),
-                        item=item,
-                    )
-                    post_brand_ids.add(brand_id)
-                    confirmed_brand_ids.add(brand_id)
-            if post_brand_ids:
-                branded_posts.append((item, post_brand_ids))
-
-        for brand_id in confirmed_brand_ids:
-            _link_to_brand(db, brand_id, username)
-
-        if confirmed_brand_ids:
-            logger.info(
-                "Content creator RE: @%s linked to %d brand(s)",
-                username, len(confirmed_brand_ids),
-            )
-
-        #  Collect unique commenters only from posts with confirmed brands
-        #  (up to 5/post). Each record carries the brand IDs confirmed on
-        #  that same post so links stay scoped to the evidence source.
-        commenter_links: list[tuple[dict, set[int]]] = []
-        for item, post_brand_ids in branded_posts:
-            for record in _collect_commenter_records([item], n_per_post=5):
-                commenter_links.append((record, post_brand_ids))
-
-        commenter_usernames = sorted({record["username"] for record, _ in commenter_links})
-
-        if commenter_usernames:
-            existing_c = {
-                r.username for r in
-                db.query(InstagramUser.username)
-                .filter(InstagramUser.username.in_(commenter_usernames))
-                .all()
-            }
-            new_commenters = [u for u in commenter_usernames if u not in existing_c]
-
-            logger.info(
-                "Content creator RE: @%s has %d unique commenter(s) (%d new)",
-                username, len(commenter_usernames), len(new_commenters),
-            )
-
-            #  Scrape 1 post per new commenter for profile data
-            for commenter in new_commenters:
-                logger.info("Content creator RE:   commenter @%s", commenter)
-
-                db.commit()  # release locks before the slow Apify scrape
-                c_posts = _scrape_posts(commenter, n=1)
-                if c_posts is None:
-                    logger.warning(
-                        "Content creator RE: Apify scrape failed for commenter @%s — will retry",
-                        commenter,
-                    )
-                    scrape_failed = True
-                    time.sleep(0.5)
-                    continue
-                if not c_posts:
-                    time.sleep(0.5)
-                    continue
-
-                c_profile = _profile_from_posts(c_posts)
-                c_demo = _classify_demographics(db, commenter, c_profile)
-                time.sleep(0.3)
-
-                if c_posts[0].get("id"):
-                    # No conflict target: this row could violate EITHER the
-                    # partial username-where-commenter index OR the global
-                    # post_id unique constraint (this commenter's own most
-                    # recent post may already be stored under a different
-                    # username's creator row) — see upsert_rows' docstring.
-                    upsert_rows(db, InstagramUser, [
-                        _build_post_row(
-                            commenter, "commenter", c_profile, c_demo, c_posts[0],
-                            is_content_creator_re=True,
-                        )
-                    ], None)
-
-                logger.info(
-                    "Content creator RE:   commenter @%s stored — gender=%s country=%s",
-                    commenter, c_demo["gender"], c_demo["country"],
-                )
-                time.sleep(1.0)
-
-            #  Link every commenter (existing + new) to every confirmed
-            #  brand on the same post, plus creator <-> commenter itself
-            #  (instagram_creator_commenters) scoped per confirmed brand.
-            for record, post_brand_ids in commenter_links:
-                commenter = record.get("username")
-                if not commenter:
-                    continue
-                for brand_id in post_brand_ids:
-                    _link_to_brand(db, brand_id, commenter)
-                    _link_commenter_to_creator(db, brand_id, username, record)
-
-        all_confirmed_brand_ids |= confirmed_brand_ids
-
-        if scrape_failed:
-            db.commit()  # keep whatever rows/links were already stored above
-            logger.warning(
-                "Content creator RE: @%s — at least one commenter Apify scrape failed — "
-                "leaving is_scraped=False so this row is retried instead of being "
-                "treated as fully processed",
-                username,
-            )
-            continue
-
-        row.is_scraped = True
-
-        row.currenttime = datetime.now(timezone.utc)  # last scraped (refresh_content_creator_re.py uses it)
-        db.commit()
-        processed += 1
-        logger.info("Content creator RE: @%s done", username)
+    finally:
+        # Stop scrapes that haven't started if processing bailed out early.
+        pool.shutdown(wait=False, cancel_futures=True)
 
     logger.info(
         "Content creator RE: %d row(s) processed, %d brand(s) confirmed",
@@ -634,12 +659,17 @@ def main() -> None:
         dest="creator_ids",
         help="Re-run this content_creator_re id even if already scraped. Repeat for several ids (--limit is ignored).",
     )
+    parser.add_argument(
+        "--workers", type=int, default=1,
+        help="Creators' Apify scrapes to run at the same time (default 1 = sequential).",
+    )
     args = parser.parse_args()
 
     db = SessionLocal()
     try:
         processed, brand_ids = enrich_content_creator_re(
             db, limit=args.limit, creator_ids=args.creator_ids, niche=args.niche,
+            workers=args.workers,
         )
         print(
             f"content_creator_re processed={processed}; "
