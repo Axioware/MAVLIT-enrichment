@@ -92,7 +92,7 @@ from pipeline.db import (
     TestCreatorBrandPartnershipPost,
 )
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
-from pipeline.helpers.http import fetch_html_with_jina_fallback
+from pipeline.helpers.http import fetch_page_with_jina_fallback, fetch_via_jina
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,7 @@ _TIMEOUT = 12
 _MAX_PAGES = 5
 _PAGE_TEXT_LIMIT = 6000   # chars of cleaned page text sent to the LLM per page
 _MIN_TEXT_LEN = 40        # pages shorter than this are treated as "no useful info"
+_FINAL_EXCERPT_CHARS = 1500   # per read page, passed to the final decision call
 
 # Only brands with a confirmed (>= 90) creator partnership post from 2026.
 _MIN_PARTNERSHIP_CONFIDENCE = 90
@@ -270,6 +271,9 @@ Instagram bio: {bio}
 
 All location/reach signals found across the scraped pages: {accumulated_locations}
 
+Excerpts of the scraped page text (use these when the signals above are "none found"):
+{page_excerpts}
+
 Score using EXACTLY one of these values:
 
 """ + _RUBRIC_TEXT + """
@@ -277,7 +281,8 @@ Score using EXACTLY one of these values:
 Reminders:
 - Country-of-origin / "Made in X" / manufacturing-location claims, and a company's registered legal/HQ address, are NOT evidence of reach — ignore any such signals in the list above when scoring. Only actual sell/ship/operate/service evidence counts.
 - If these signals came mainly from a "store locator" style page, they may only be a nearby/default subset rather than the brand's full footprint — weigh that possibility, but you must still pick your best-supported answer now.
-- If there is truly no usable reach evidence at all once origin/HQ-only signals are discounted, set "score" to null instead of guessing.
+- If no explicit locations were found, judge from the page excerpts what kind of business this is. An online-only / digital product or service (app, software, streaming, SaaS, online platform, AI tool) with no stated country restriction is available worldwide — score 0 (global). An online store that only says it ships within the US is 40 (nationwide_us); one that ships internationally is 20 or 0 depending on how broad. Use the brand's own wording (shipping/availability/supported countries pages, language and currency options) as evidence.
+- If there is truly no usable reach evidence at all — no locations AND the excerpts don't show what kind of business it is or where it sells — set "score" to null instead of guessing.
 - Return "country_codes" as a JSON array of uppercase ISO alpha-2 country codes for every country where the brand operates. If the evidence is a city/state/province, infer and output that location's country code. If the score is 0/global, return ["GLOBAL"]. Return [] only when there is no usable reach evidence.
 
 Respond with ONLY valid JSON:
@@ -296,10 +301,24 @@ def _normalize_origin(website: str) -> str:
 def _fetch_page(url: str) -> str | None:
     """
     Direct GET, falling back to Jina Reader if the site blocks or errors
-    (see fetch_html_with_jina_fallback). Jina returns the rendered page
+    (see fetch_page_with_jina_fallback). Jina returns the rendered page
     HTML, so link discovery and text cleaning below work unchanged.
+
+    A direct GET that "succeeds" but yields almost no readable text is
+    usually a JavaScript app shell (e.g. bandlab.com) — that page is
+    re-fetched rendered through Jina, and the rendered HTML is used when it
+    has more text.
     """
-    return fetch_html_with_jina_fallback(url, _HEADERS, _TIMEOUT)
+    page = fetch_page_with_jina_fallback(url, _HEADERS, _TIMEOUT)
+    if page is None:
+        return None
+    if page.via_jina or len(_clean_page_text(page.html)) >= _MIN_TEXT_LEN:
+        return page.html
+    rendered = fetch_via_jina(url)
+    if rendered and len(_clean_page_text(rendered)) > len(_clean_page_text(page.html)):
+        logger.info("geo_reach: %s had no readable text directly — using Jina-rendered page", url)
+        return rendered
+    return page.html
 
 
 def _clean_page_text(html: str) -> str:
@@ -453,13 +472,17 @@ def _call_geo_llm_page(brand: BrandRaw, bio: str, accumulated: list[str], page_u
     return result if isinstance(result, dict) else {}
 
 
-def _call_geo_llm_final(brand: BrandRaw, bio: str, accumulated: list[str]) -> dict:
+def _call_geo_llm_final(
+    brand: BrandRaw, bio: str, accumulated: list[str], page_excerpts: list[tuple[str, str]] | None = None,
+) -> dict:
+    excerpts = "\n\n".join(f"[{url}]\n{text}" for url, text in (page_excerpts or [])) or "none"
     prompt = fill_template(
         GEO_REACH_FINAL_PROMPT,
         brand_name=brand.name or "unknown",
         niche=brand.niche or "unknown",
         bio=bio or "none provided",
         accumulated_locations=", ".join(accumulated) if accumulated else "none found",
+        page_excerpts=excerpts,
     )
     result = call_gpt_json(prompt, context=f"geo reach final decision for brand_id={brand.id}")
     return result if isinstance(result, dict) else {}
@@ -473,6 +496,7 @@ def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None,
     accumulated: list[str] = []
     country_codes: list[str] = []
     pages_log: list[dict] = []
+    page_excerpts: list[tuple[str, str]] = []   # (url, text) of every page actually read
     final_score: int | None = None
 
     while queue and len(visited) < _MAX_PAGES:
@@ -500,6 +524,7 @@ def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None,
             pages_log.append({"url": url, "status": "no_text"})
             continue
 
+        page_excerpts.append((url, text[:_FINAL_EXCERPT_CHARS]))
         result = _call_geo_llm_page(brand, bio, accumulated, url, text)
         new_locs = _merge_locations([], result.get("locations_found") or [])
         accumulated = _merge_locations(accumulated, new_locs)
@@ -524,8 +549,11 @@ def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None,
             final_score = page_score
             break
 
-    if final_score is None and accumulated:
-        result = _call_geo_llm_final(brand, bio, accumulated)
+    # Final decision whenever any page was read — also when no explicit
+    # location was found (online-only brands rarely list one; the excerpts let
+    # the LLM recognise them instead of leaving the score NULL).
+    if final_score is None and (accumulated or page_excerpts):
+        result = _call_geo_llm_final(brand, bio, accumulated, page_excerpts)
         final_score = _normalize_score(result.get("score"))
         final_country_codes = _normalize_country_codes(result.get("country_codes"), final_score)
         if final_country_codes or final_score == 0:

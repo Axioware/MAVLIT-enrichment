@@ -83,6 +83,11 @@ def fetch_page_via_jina(url: str) -> FetchedPage | None:
         "Accept":          "application/json",
         "X-Return-Format": "html",
         "X-Timeout":       str(_JINA_TIMEOUT),
+        # Without these Jina can return an old cached copy or the bare HTML
+        # shell of a JavaScript site (e.g. bandlab.com: 7 chars of text vs
+        # 4,352 rendered).
+        "X-No-Cache":      "true",
+        "X-Engine":        "browser",
     }
     if JINA_API_KEY:
         headers["Authorization"] = f"Bearer {JINA_API_KEY}"

@@ -37,7 +37,7 @@ APIFY_TOKEN       = os.getenv("APIFY_TOKEN", "")
 # Jina AI Reader (https://r.jina.ai) — fallback page fetcher used by
 # pipeline/enrichment/shopify_detect.py when a direct fetch is blocked or
 # errors. Optional: works without a key on the free tier (~20 req/min).
-JINA_API_KEY = os.getenv("JINA_API_KEY", "")
+JINA_API_KEY = os.getenv("JINA_API_KEY") or os.getenv("JINAAI_API_KEY", "")   # either name works in .env
 
 # Hunter.io Email Verifier — pipeline/enrichment/hunter_verify.py, checks
 # deliverability of emails Apollo already found and saved in brand_contacts.
