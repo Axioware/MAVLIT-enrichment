@@ -21,16 +21,17 @@ in batches of 10 rows so progress is saved as it goes):
      result count) is saved to facebook_branded_content_checks, one row per
      username.
   3. For accounts with >= 1 branded-content result: username-only LLM check —
-     creator (a person) or brand/product/company? A brand is saved straight
-     to content_creator_re as niche "Brand", is_scraped=True (no Apify).
+     creator (a person) or brand/product/company? A brand is added straight
+     to brands_raw (bare row: instagram_handle URL, refferls=False — the
+     brand enrichment steps fill in the rest) — no Apify, and nothing in
+     content_creator_re.
   4. For creators: scrape 5 posts via Apify, then a second LLM call reads the
      profile + those posts to double-check creator vs brand AND pick the
-     niche: Music, Beauty, Health, Fitness or Other. Saved to
-     content_creator_re:
-       - creator -> niche Music/Beauty/Health/Fitness/Other, is_scraped=False
-         (content_creator_re.py picks it up on its next run)
-       - brand (caught by the second check) -> niche "Brand", is_scraped=True
-         (so content_creator_re.py never scrapes it as a creator)
+     niche: Music, Beauty, Health, Fitness or Other.
+       - creator -> saved to content_creator_re with that niche,
+         is_scraped=False (content_creator_re.py picks it up on its next run)
+       - brand (caught by the second check) -> added to brands_raw, same as
+         step 3
   5. Mark an instagram_users row collaborators_checked = true once every
      username in it has been handled, so the next run moves on.
 
@@ -377,6 +378,19 @@ def _save_creator(db: Session, username: str, niche: str) -> None:
     db.commit()
 
 
+def _save_brand(db: Session, username: str) -> bool:
+    """
+    Add a brand to brands_raw as a bare row (instagram_handle URL,
+    refferls=False) unless its handle is already there. Returns True if a row
+    was added.
+    """
+    if username.strip().lstrip("@").lower() in _existing_brand_usernames(db):
+        return False
+    db.add(BrandRaw(instagram_handle=f"https://www.instagram.com/{username.strip().lstrip('@')}", refferls=False))
+    db.commit()
+    return True
+
+
 def _mark_rows_checked(db: Session, row_ids: list[int]) -> None:
     if row_ids:
         db.query(InstagramUser).filter(InstagramUser.id.in_(row_ids)).update(
@@ -413,21 +427,21 @@ def _process_username(db: Session, username: str, summary: dict, tag: str) -> bo
         return True
     logger.info("%s: %d branded-content result(s)", tag, branded.result_count)
 
-    # Step 2 — cheap username-only check. Brands are saved straight away
-    # (niche Brand, is_scraped=True) — no Apify.
+    # Step 2 — cheap username-only check. Brands go straight to brands_raw
+    # — no Apify, nothing in content_creator_re.
     kind = _classify_username(username)
     if kind is None:
         logger.warning("%s: username check failed — will retry next run", tag)
         return False
     if kind == "brand":
-        _save_creator(db, username, BRAND_NICHE)
+        added = _save_brand(db, username)
         summary["brand_by_username"] += 1
-        summary["saved"][BRAND_NICHE] = summary["saved"].get(BRAND_NICHE, 0) + 1
-        logger.info("%s: brand (username check) — saved as %s", tag, BRAND_NICHE)
+        logger.info("%s: brand (username check) — %s", tag, "added to brands_raw" if added else "already in brands_raw")
         return True
 
     # Step 3 — creators: scrape 5 posts, then the profile check confirms
-    # creator vs brand and picks the niche. Both outcomes are saved.
+    # creator vs brand and picks the niche. Creators -> content_creator_re,
+    # brands -> brands_raw.
     logger.info("%s: creator (username check) — scraping %d posts", tag, POSTS_PER_CREATOR)
     posts = _scrape_posts(username, n=POSTS_PER_CREATOR)
     if posts is None:
@@ -442,8 +456,11 @@ def _process_username(db: Session, username: str, summary: dict, tag: str) -> bo
         logger.warning("%s: niche check failed — will retry next run", tag)
         return False
     if kind == "brand":
-        niche = BRAND_NICHE
+        added = _save_brand(db, username)
         summary["brand_by_profile"] += 1
+        logger.info("%s: brand (profile check) — %s", tag, "added to brands_raw" if added else "already in brands_raw")
+        time.sleep(0.5)
+        return True
 
     _save_creator(db, username, niche)
     summary["saved"][niche] = summary["saved"].get(niche, 0) + 1
@@ -582,8 +599,8 @@ def main() -> int:
     print(f"usernames read:            {summary['usernames']}")
     if not args.dry_run:
         print(f"no branded content (skipped): {summary['no_branded_content']}")
-        print(f"brand (username check):    {summary['brand_by_username']}  (saved with niche Brand)")
-        print(f"brand (profile check):     {summary['brand_by_profile']}  (saved with niche Brand)")
+        print(f"brand (username check):    {summary['brand_by_username']}  (added to brands_raw)")
+        print(f"brand (profile check):     {summary['brand_by_profile']}  (added to brands_raw)")
         print(f"saved to content_creator_re: {sum(summary['saved'].values())}  {summary['saved']}")
         print(f"failed (retry next run):   {summary['failed']}")
         print(f"instagram_users rows marked collaborators_checked: {summary['rows_checked']}")
