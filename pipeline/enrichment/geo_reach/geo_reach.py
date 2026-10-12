@@ -316,7 +316,7 @@ def _fetch_page(url: str) -> str | None:
         return page.html
     rendered = fetch_via_jina(url)
     if rendered and len(_clean_page_text(rendered)) > len(_clean_page_text(page.html)):
-        logger.info("geo_reach: %s had no readable text directly — using Jina-rendered page", url)
+        logger.info("geo_reach: %s had no readable text directly — using the rendered page (fallback fetcher)", url)
         return rendered
     return page.html
 

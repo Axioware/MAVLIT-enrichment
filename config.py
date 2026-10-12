@@ -39,6 +39,13 @@ APIFY_TOKEN       = os.getenv("APIFY_TOKEN", "")
 # errors. Optional: works without a key on the free tier (~20 req/min).
 JINA_API_KEY = os.getenv("JINA_API_KEY") or os.getenv("JINAAI_API_KEY", "")   # either name works in .env
 
+# Firecrawl (https://firecrawl.dev) — temporary replacement for Jina as the
+# rendered-page fallback fetcher (pipeline/helpers/http.py). When
+# FIRECRAWL_API_KEY is set it is used instead of Jina; set FETCH_FALLBACK=jina
+# (or remove the key) to switch back.
+FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
+FETCH_FALLBACK = (os.getenv("FETCH_FALLBACK") or ("firecrawl" if FIRECRAWL_API_KEY else "jina")).strip().lower()
+
 # Hunter.io Email Verifier — pipeline/enrichment/hunter_verify.py, checks
 # deliverability of emails Apollo already found and saved in brand_contacts.
 HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")

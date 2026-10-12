@@ -72,12 +72,64 @@ class FetchedPage:
     via_jina: bool
 
 
+_FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
+_FIRECRAWL_TIMEOUT_MS = 60_000
+
+
+def _fetch_page_via_firecrawl(url: str) -> FetchedPage | None:
+    """
+    Fetch url's rendered HTML (JavaScript run) through Firecrawl's scrape
+    API. Returns None if Firecrawl fails or reports the target page itself
+    returned an error status.
+    """
+    from config import FIRECRAWL_API_KEY
+
+    try:
+        resp = httpx.post(
+            _FIRECRAWL_SCRAPE_URL,
+            headers={"Authorization": f"Bearer {FIRECRAWL_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "url": url,
+                "formats": ["rawHtml"],      # full rendered page — callers discover links + clean text themselves
+                "onlyMainContent": False,
+                "waitFor": 1000,
+                "timeout": _FIRECRAWL_TIMEOUT_MS,
+                "proxy": "auto",
+            },
+            timeout=_FIRECRAWL_TIMEOUT_MS / 1000 + 15,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+    except Exception as exc:
+        _logger.debug("Firecrawl fetch failed for %s: %s", url, exc)
+        return None
+    if not body.get("success"):
+        _logger.debug("Firecrawl: %s not scraped: %s", url, body.get("error"))
+        return None
+    data = body.get("data") or {}
+    meta = data.get("metadata") or {}
+    target_status = meta.get("statusCode")
+    if isinstance(target_status, int) and target_status >= 400:
+        _logger.debug("Firecrawl: %s returned HTTP %d", url, target_status)
+        return None
+    html = data.get("rawHtml") or data.get("html")
+    if not html:
+        return None
+    return FetchedPage(html=html, url=meta.get("url") or meta.get("sourceURL") or url, via_jina=True)
+
+
 def fetch_page_via_jina(url: str) -> FetchedPage | None:
     """
-    Fetch url's rendered HTML through Jina Reader. Returns None if Jina
-    fails or reports the target page itself returned an error status.
+    Fetch url's rendered HTML through the fallback fetcher — Firecrawl when
+    FIRECRAWL_API_KEY is set (config.FETCH_FALLBACK == "firecrawl"),
+    otherwise Jina Reader. Returns None if it fails or reports the target
+    page itself returned an error status. (Name kept so callers don't change;
+    via_jina on the result means "came from the fallback fetcher".)
     """
-    from config import JINA_API_KEY
+    from config import FETCH_FALLBACK, JINA_API_KEY
+
+    if FETCH_FALLBACK == "firecrawl":
+        return _fetch_page_via_firecrawl(url)
 
     headers = {
         "Accept":          "application/json",
@@ -133,10 +185,12 @@ def fetch_page_with_jina_fallback(url: str, headers: dict, timeout: float) -> Fe
     except Exception as exc:
         reason = type(exc).__name__
 
-    _logger.info("Direct fetch failed for %s (%s) — retrying via Jina Reader", url, reason)
+    from config import FETCH_FALLBACK
+    provider = "Firecrawl" if FETCH_FALLBACK == "firecrawl" else "Jina Reader"
+    _logger.info("Direct fetch failed for %s (%s) — retrying via %s", url, reason, provider)
     page = fetch_page_via_jina(url)
     if page:
-        _logger.info("Jina Reader fetched %s (%d chars)", url, len(page.html))
+        _logger.info("%s fetched %s (%d chars)", provider, url, len(page.html))
     return page
 
 
