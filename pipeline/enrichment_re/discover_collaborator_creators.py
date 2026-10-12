@@ -11,7 +11,8 @@ in batches of 10 rows so progress is saved as it goes):
 
   1. Read usernames from instagram_users rows where post_collaborators is set
      and collaborators_checked = false. Usernames already in
-     content_creator_re (case-insensitive) or repeated in this run are skipped.
+     content_creator_re, already a brand in brands_raw (by instagram_handle),
+     or repeated in this run are skipped (case-insensitive).
   2. Check every username against Meta's Branded Content Library
      (facebook_branded_content_checker.py) for branded-content posts in its
      date window. No result (0, or the account isn't in the search dropdown)
@@ -73,6 +74,7 @@ from sqlalchemy.orm import Session
 from config import APIFY_TOKEN, OPENAI_KEY
 from pipeline.db import (
     Base,
+    BrandRaw,
     ContentCreatorRE,
     FacebookBrandedContentCheck,
     InstagramPost,
@@ -88,6 +90,7 @@ from pipeline.enrichment_re.facebook_branded_content_checker import (
     check_branded_content,
 )
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.helpers.social import normalize_handle
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +260,17 @@ def _existing_creator_usernames(db: Session) -> set[str]:
     }
 
 
+def _existing_brand_usernames(db: Session) -> set[str]:
+    """Lower-cased Instagram usernames of brands already in brands_raw."""
+    return {
+        normalize_handle(handle).lower() for (handle,) in
+        db.query(BrandRaw.instagram_handle)
+        .filter(BrandRaw.instagram_handle.isnot(None), BrandRaw.instagram_handle != "")
+        .all()
+        if normalize_handle(handle)
+    }
+
+
 def _collect_work(
     db: Session, limit: int, skip_row_ids: set[int] | None = None,
     niche: str | None = None, gender: str | None = None, user_type: str | None = None,
@@ -273,7 +287,8 @@ def _collect_work(
     restrict to rows whose instagram_users.niche / gender match
     (case-insensitive); user_type restricts to one instagram_users.user_type.
     """
-    known = _existing_creator_usernames(db)
+    # Already handled: in content_creator_re, or already a brand in brands_raw.
+    known = _existing_creator_usernames(db) | _existing_brand_usernames(db)
     qualifying_creator = _qualifying_creator_filter(db)
     queued: list[str] = []
     queued_keys: set[str] = set()
