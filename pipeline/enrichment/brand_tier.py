@@ -9,9 +9,12 @@ Values:
 - midlower-range
 - midhigher-range
 - higher-range
+- extreme
 
-Examples of higher-range brands include major global brands such as Amazon,
-Sony Music, or other large premium-market businesses.
+extreme = Fortune 500 / household-name global brands (Amazon, Nike, Apple,
+Coca-Cola, ...) that mostly partner with celebrities and very large creators.
+higher-range = large, well-known companies that are hard but not impossible
+for an independent creator to reach.
 
 Safe to re-run — rows with brand_tier IS NULL are processed, and rows with an
 existing value are skipped.
@@ -41,6 +44,7 @@ Choose exactly one value:
 - midlower-range
 - midhigher-range
 - higher-range
+- extreme
 
 Definitions:
 
@@ -64,16 +68,22 @@ midhigher-range:
 - Creator outreach is possible but increasingly competitive.
 
 higher-range:
-- Large corporations, multinational companies, major entertainment companies, major record labels, major sports organizations, major retailers, public companies, Fortune 500 companies, major consumer brands, major technology companies, major media companies, government organizations, universities, major nonprofits, or globally recognized brands.
+- Large corporations, multinational companies, major entertainment companies, major record labels, major sports organizations, major retailers, public companies, major consumer brands, major technology companies, major media companies, government organizations, universities, major nonprofits, or widely recognized brands that are NOT household names at Fortune 500 scale.
 - Usually have dedicated marketing, PR, sponsorship, talent, or agency teams.
 - Partnerships are typically managed through formal processes, agencies, or existing networks.
 - Most independent creators cannot easily secure partnerships through cold outreach.
 
+extreme:
+- Fortune 500 companies and their flagship consumer brands, and other extremely well-known household-name global brands (recognized by almost everyone, in almost every country).
+- Their influencer marketing mostly goes to celebrities, athletes, musicians with huge followings, and mega creators (millions of followers), usually through agencies and large campaigns.
+- An independent creator with 10K–1M followers realistically has almost no chance of a direct sponsorship.
+
 Important rules:
 
-- Be highly skeptical of assigning anything except higher-range to globally recognized brands.
-- Brands such as Amazon, Apple, Google, Microsoft, Sony, Sony Music, Disney, Marvel, Netflix, Adidas, Nike, Coca-Cola, Samsung, Universal Music, Warner Music, BMW, Mercedes-Benz, Spotify, TikTok, Meta, YouTube, and similar organizations are always higher-range.
-- Large parent companies, major subsidiaries, and major corporate brands should generally be higher-range.
+- Be highly skeptical of assigning anything below higher-range to globally recognized brands.
+- Brands such as Amazon, Apple, Google, Microsoft, Sony, Disney, Netflix, Adidas, Nike, Coca-Cola, Pepsi, McDonald's, Samsung, BMW, Mercedes-Benz, Visa, Mastercard, Walmart, Target, Spotify, TikTok, Meta, and YouTube are extreme.
+- Use extreme ONLY for Fortune 500 / household-name brands that mostly partner with celebrities and very large creators. Large but less famous companies, major subsidiaries, and well-known niche leaders are higher-range, not extreme.
+- Large parent companies, major subsidiaries, and major corporate brands should generally be higher-range (or extreme if they are Fortune 500 household names).
 - Government agencies, universities, major hospitals, museums, sports leagues, and major public institutions should generally be higher-range.
 - If information is limited, estimate based on brand name, website, description, and likely commercial scale.
 - If you are genuinely unsure, do not force a tier. Set "brand_tier" to null instead of guessing.
@@ -100,6 +110,8 @@ _NORMALIZED_VALUES = {
     "higher-range": "higher-range",
     "higher range": "higher-range",
     "higherrange": "higher-range",
+    "extreme": "extreme",
+    "extreme-range": "extreme",
 }
 NO_TIER_SENTINEL = "null"
 
