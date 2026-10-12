@@ -1110,21 +1110,40 @@ Beauty creator:
 
 BRAND_NICHE_TAGS_PROMPT_NAME = "brand_niche_tags"
 BRAND_NICHE_TAGS_DEFAULT_PROMPT = """\
-You are analyzing a brand's own website description to extract its real brand name, niche category, and specific sub-niche/category tags for a brand-creator sponsorship matching platform.
+You are analyzing a brand's own website description and its recent Instagram posts to extract its real brand name, niche category, and specific sub-niche/category tags for a brand-creator sponsorship matching platform.
 
 Brand: {brand_name}
 Niche: {niche}
 Website description: {description}
 
+Brand's Instagram bio and up to 5 recent Instagram posts (caption + hashtags), or "none" if not available:
+{instagram_posts}
+
 If Brand above is "unknown", determine the brand's real, clean company/brand name from the website description — what the business actually calls itself, not a generic phrase pulled from the text. If Brand is already known (not "unknown"), treat it as a likely-correct hint — repeat it back unchanged if the description supports it or doesn't contradict it, but correct it to the accurate name instead if the description clearly shows it's wrong.
 
-If Niche above is "unknown", determine the single best-fit broad niche category for this brand from the description (e.g. "fashion", "beauty", "food_beverage", "tech", "fitness", "home_goods", "pets", "toys", "automotive", "travel"). If Niche is already known (not "unknown"), just repeat that same value back unchanged — do not second-guess it.
+If Niche above is "unknown", determine the single best-fit niche for this brand from the website description AND the Instagram bio/posts together:
+- FIRST decide whether this account is really a brand/business at all:
+  - If it is a music band or group (a band, duo, choir, orchestra or other musical act — e.g. bio/posts about the band's songs, albums, tours, members, gigs) rather than a company, return exactly "Band".
+  - If it is an individual person rather than a business — a content creator, influencer, solo artist/musician, athlete, coach, blogger or personal account — return exactly "Creator".
+  - A company that makes or sells music products (instruments, audio gear, music software, labels, streaming services, festivals) is a brand, NOT a band — classify it with the niches below.
+- For a real brand/business, check whether it belongs to one of these four core niches, and if it does, return exactly that word:
+  - "Fitness": workout, training, gym, sports performance, activewear/athletic gear, fitness equipment or apps, sports nutrition for training
+  - "Health": nutrition, wellness, supplements, vitamins, healthy food/drinks, medical, mental health, sleep, personal health products
+  - "Music": music products and services, instruments, audio gear (microphones, headphones, speakers, interfaces), music production software/plugins, labels, streaming, concerts/festivals
+  - "Beauty": makeup, cosmetics, skincare, haircare, nails, fragrance, beauty tools/services
+- ONLY if the brand clearly does not fit any of those four, return the single best-fit broad niche it actually belongs to (e.g. "fashion", "food_beverage", "tech", "home_goods", "pets", "toys", "automotive", "travel", "entertainment", "finance", "education").
+- The four core niches ALWAYS win over a broader category when the brand's products or content mainly serve that area — do NOT pick "tech", "fashion", "food_beverage" or "entertainment" when a core niche fits. Examples:
+  - music production software/apps, AI music tools, plugins, studio monitors, microphones, audio interfaces, instruments -> "Music" (not "tech")
+  - gym wear, activewear, running/training shoes and gear -> "Fitness" (not "fashion")
+  - supplements, vitamins, protein, functional/health drinks -> "Health" (not "food_beverage")
+  - cosmetics retailers, beauty schools, salons, skincare devices -> "Beauty" (not "fashion" or "tech")
+If Niche is already known (not "unknown"), just repeat that same value back unchanged — do not second-guess it.
 
 Extract specific, concrete sub-niche tags/keywords that describe what this brand actually does or sells, beyond its broad niche category (e.g. for a "fashion" brand: "sustainable clothing", "streetwear", "plus-size fashion"; for a "tech" brand: "smart home devices", "gaming laptops", "wireless earbuds").
 
 Reply ONLY with this JSON object, no extra text:
 {"name": "...", "niche": "...", "tags": ["...", "..."]}
-Use an empty list for tags if the description doesn't give enough information — do not invent tags not supported by the input. If you truly cannot determine a niche from the description either, use "unknown" for niche. If you truly cannot determine a real brand name from the description, use "unknown" for name.\
+Use an empty list for tags if the description and Instagram posts don't give enough information — do not invent tags not supported by the input. If you truly cannot determine a niche from the description or the Instagram posts, use "unknown" for niche. If you truly cannot determine a real brand name from the description or the Instagram bio/posts, use "unknown" for name.\
 """
 
 

@@ -50,6 +50,7 @@ Sets shopify_checked=True for every processed brand.
 Only runs for brands that have a website (has_official_website=True).
 """
 
+import json
 import logging
 import re
 import time
@@ -61,7 +62,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from config import OPENAI_KEY
-from pipeline.db import BrandNiche, BrandRaw, Prompt, normalize_niche
+from pipeline.db import BrandNiche, BrandRaw, InstagramPost, Prompt, normalize_niche
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.http import fetch_html_with_jina_fallback
 from pipeline.helpers.normalize import normalize
@@ -247,12 +248,39 @@ def _get_brand_niche_tags_prompt(db: Session) -> str:
     return row.content if row else BRAND_NICHE_TAGS_DEFAULT_PROMPT
 
 
+_INSTAGRAM_POSTS_FOR_NICHE = 5   # brand's own recent posts sent with the website description
+
+
+def _instagram_evidence(db: Session, brand_id: int) -> str:
+    """
+    The brand's Instagram bio + its _INSTAGRAM_POSTS_FOR_NICHE most recent
+    posts (caption + hashtags) from instagram_posts, as JSON for the niche
+    prompt — "none" when the brand has no stored posts.
+    """
+    rows = (
+        db.query(InstagramPost.caption, InstagramPost.hashtags, InstagramPost.biography)
+        .filter(InstagramPost.brand_raw_id == brand_id, InstagramPost.post_id.isnot(None))
+        .order_by(InstagramPost.timestamp.desc().nullslast())
+        .limit(_INSTAGRAM_POSTS_FOR_NICHE)
+        .all()
+    )
+    if not rows:
+        return "none"
+    bio = next((r.biography for r in rows if r.biography), None)
+    posts = [
+        {"caption": (r.caption or "")[:600], "hashtags": r.hashtags or []}
+        for r in rows if r.caption or r.hashtags
+    ]
+    return json.dumps({"bio": (bio or "")[:600], "recent_posts": posts}, ensure_ascii=False)
+
+
 def _extract_brand_niche_and_tags(
     db: Session, brand: BrandRaw, description: str,
 ) -> tuple[str | None, str | None, list[str]]:
     """
     Ask the LLM for concrete sub-niche/category tags from a brand's scraped
-    description, and — only when the corresponding field is currently unset
+    description plus its Instagram bio and recent posts (instagram_posts),
+    and — only when the corresponding field is currently unset
     — a best-fit name and/or broad niche guess too (the prompt is told to
     just echo back an already-known value unchanged, so this never
     overwrites either one). Returns (None, None, []) on any failure or if
@@ -266,6 +294,7 @@ def _extract_brand_niche_and_tags(
         brand_name=brand.name or "unknown",
         niche=brand.niche or "unknown",
         description=description,
+        instagram_posts=_instagram_evidence(db, brand.id),
     )
     result = call_gpt_json(prompt, context=f"brand niche tags for {brand.name}")
     if not isinstance(result, dict):

@@ -133,11 +133,11 @@ ORDER BY niche ASC, brand_name ASC;
 SELECT DISTINCT niche
 FROM brands_niches;
 
--- sudo -u postgres psql
--- \c mavlit_enrichment_test
+sudo -u postgres psql
+\c mavlit_enrichment_test
 
--- sudo systemctl restart mavlit
--- sudo systemctl status mavlit
+sudo systemctl restart mavlit
+sudo systemctl status mavlit
 
 
 SELECT niche
