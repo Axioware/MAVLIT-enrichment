@@ -1,6 +1,8 @@
 import logging
 import random
+import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 
 import httpx
@@ -74,6 +76,31 @@ class FetchedPage:
 
 _FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
 _FIRECRAWL_TIMEOUT_MS = 60_000
+_FIRECRAWL_429_RETRIES = 3
+
+# Sliding-window rate limiter shared by every Firecrawl call in this process:
+# never more than config.FIRECRAWL_RATE_PER_MIN requests in any 60 s (the free
+# plan allows 10/min). One brand can need several Firecrawl fetches (geo_reach
+# reads up to 5 pages), so the limit lives here rather than as a per-brand delay.
+_firecrawl_calls: deque[float] = deque()
+_firecrawl_lock = threading.Lock()
+
+
+def _wait_for_firecrawl_slot() -> None:
+    from config import FIRECRAWL_RATE_PER_MIN
+
+    limit = max(1, FIRECRAWL_RATE_PER_MIN)
+    with _firecrawl_lock:
+        while True:
+            now = time.monotonic()
+            while _firecrawl_calls and now - _firecrawl_calls[0] >= 60:
+                _firecrawl_calls.popleft()
+            if len(_firecrawl_calls) < limit:
+                _firecrawl_calls.append(now)
+                return
+            wait = 60 - (now - _firecrawl_calls[0]) + 0.1
+            _logger.info("Firecrawl rate limit (%d/min) — waiting %.0fs", limit, wait)
+            time.sleep(wait)
 
 
 def _fetch_page_via_firecrawl(url: str) -> FetchedPage | None:
@@ -85,19 +112,26 @@ def _fetch_page_via_firecrawl(url: str) -> FetchedPage | None:
     from config import FIRECRAWL_API_KEY
 
     try:
-        resp = httpx.post(
-            _FIRECRAWL_SCRAPE_URL,
-            headers={"Authorization": f"Bearer {FIRECRAWL_API_KEY}", "Content-Type": "application/json"},
-            json={
-                "url": url,
-                "formats": ["rawHtml"],      # full rendered page — callers discover links + clean text themselves
-                "onlyMainContent": False,
-                "waitFor": 1000,
-                "timeout": _FIRECRAWL_TIMEOUT_MS,
-                "proxy": "auto",
-            },
-            timeout=_FIRECRAWL_TIMEOUT_MS / 1000 + 15,
-        )
+        for attempt in range(_FIRECRAWL_429_RETRIES + 1):
+            _wait_for_firecrawl_slot()
+            resp = httpx.post(
+                _FIRECRAWL_SCRAPE_URL,
+                headers={"Authorization": f"Bearer {FIRECRAWL_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "url": url,
+                    "formats": ["rawHtml"],      # full rendered page — callers discover links + clean text themselves
+                    "onlyMainContent": False,
+                    "waitFor": 1000,
+                    "timeout": _FIRECRAWL_TIMEOUT_MS,
+                    "proxy": "auto",
+                },
+                timeout=_FIRECRAWL_TIMEOUT_MS / 1000 + 15,
+            )
+            if resp.status_code != 429 or attempt == _FIRECRAWL_429_RETRIES:
+                break
+            # Still rate-limited (e.g. another process shares the key) — back off and retry.
+            _logger.info("Firecrawl 429 for %s — waiting 60s before retry %d", url, attempt + 1)
+            time.sleep(60)
         resp.raise_for_status()
         body = resp.json()
     except Exception as exc:

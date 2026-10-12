@@ -44,6 +44,7 @@ JINA_API_KEY = os.getenv("JINA_API_KEY") or os.getenv("JINAAI_API_KEY", "")   # 
 # FIRECRAWL_API_KEY is set it is used instead of Jina; set FETCH_FALLBACK=jina
 # (or remove the key) to switch back.
 FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
+FIRECRAWL_RATE_PER_MIN = int(os.getenv("FIRECRAWL_RATE_PER_MIN", "10"))   # free plan: 10 requests/minute
 FETCH_FALLBACK = (os.getenv("FETCH_FALLBACK") or ("firecrawl" if FIRECRAWL_API_KEY else "jina")).strip().lower()
 
 # Hunter.io Email Verifier — pipeline/enrichment/hunter_verify.py, checks
