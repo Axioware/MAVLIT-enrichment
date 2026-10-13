@@ -6,7 +6,10 @@ Fetches each brand's homepage to:
   2. Detect WooCommerce (wp-content/plugins/woocommerce fingerprint) → is_woocommerce
   3. Extract full social media profile URLs → instagram_handle,
      facebook_page, youtube_channel_id, linkedin_id
-  4. Scrape the brand's about page → description
+  4. Description → the homepage meta description; if there is none, follow
+     real about / our-story / company links found on the homepage (up to 3
+     pages, each page's own links queued next, like geo_reach's crawler),
+     else the homepage's own text. No about-page URLs are guessed.
   5. Send that description to the LLM (brand_niche_tags) to extract
      sub-niche/category tags, stored in brands_niches.tags — and, for any of
      brands_raw.name / .niche that's currently unset (bare brands created by
@@ -54,7 +57,7 @@ import json
 import logging
 import re
 import time
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 from sqlalchemy import func, or_
@@ -103,8 +106,7 @@ def _fetch_page(url: str) -> str | None:
     Direct GET, falling back to Jina Reader if the site blocks or errors
     (see fetch_html_with_jina_fallback). Jina returns the rendered page
     HTML, so the Shopify/WooCommerce markers, <a href> socials and <meta>
-    descriptions parsed below work unchanged. A 404/410 (common for the
-    _ABOUT_PATHS guesses) never falls back.
+    descriptions parsed below work unchanged. A 404/410 never falls back.
     """
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
@@ -171,7 +173,17 @@ def _extract_socials(html: str) -> dict[str, str]:
     return found
 
 
-_ABOUT_PATHS = ["/about", "/about-us", "/pages/about", "/pages/about-us", "/our-story", "/pages/our-story"]
+# About-style pages are found by following REAL links on the homepage (like
+# geo_reach's crawler) — never guessed paths. A link qualifies when its path or
+# anchor text contains one of these.
+_ABOUT_LINK_KEYWORDS = (
+    "about", "our-story", "our story", "story", "who-we-are", "who we are", "mission",
+    "company", "history", "heritage", "philosophy", "values", "brand", "founder",
+    # German / French / Spanish / Italian / Portuguese
+    "ueber-uns", "über-uns", "uber-uns", "unternehmen", "a-propos", "à-propos", "qui-sommes-nous",
+    "notre-histoire", "quienes-somos", "nosotros", "sobre", "chi-siamo", "la-nostra-storia", "sobre-nos",
+)
+_ABOUT_MAX_PAGES = 3   # about-style pages fetched per brand (bounds Firecrawl use on blocked sites)
 _ABOUT_MIN_LEN = 80
 _ABOUT_MAX_LEN = 1000
 
@@ -224,23 +236,84 @@ def _extract_about_text(html: str) -> str | None:
     return None
 
 
-def _fetch_about_text(website: str) -> str | None:
-    """Try common about-page paths for a brand's website; return first usable body text."""
+def _same_site(netloc_a: str, netloc_b: str) -> bool:
+    """True when two hosts share a registrable domain (shop.brand.com ~ www.brand.com)."""
+    def base(netloc: str) -> str:
+        parts = netloc.lower().split(":")[0].split(".")
+        if len(parts) >= 3 and parts[-2] in ("co", "com", "net", "org", "ac", "ne", "or"):
+            return ".".join(parts[-3:])
+        return ".".join(parts[-2:])
+    return bool(netloc_a) and base(netloc_a) == base(netloc_b)
+
+
+def _discover_about_links(html: str, page_url: str) -> list[str]:
+    """
+    Real same-site links on this page whose path or anchor text looks like an
+    about / our-story / company page, best match first. Nothing is invented.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    origin_netloc = urlparse(page_url).netloc
+    scored: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        parsed = urlparse(urljoin(page_url, href))
+        if parsed.scheme not in ("http", "https") or not _same_site(parsed.netloc, origin_netloc):
+            continue
+        path = parsed.path.rstrip("/") or "/"
+        if path == "/":
+            continue
+        key = f"{parsed.netloc.lower()}{path}"
+        if key in seen:
+            continue
+        seen.add(key)
+        haystack = f"{path.lower()} {a.get_text(' ', strip=True).lower()}"
+        score = sum(1 for kw in _ABOUT_LINK_KEYWORDS if kw in haystack)
+        if score:
+            scored.append((score, f"{parsed.scheme}://{parsed.netloc}{path}"))
+    scored.sort(key=lambda t: -t[0])   # stable: equal scores keep page order
+    return [url for _, url in scored]
+
+
+def _fetch_about_text(website: str, homepage_html: str | None = None) -> str | None:
+    """
+    Description text when the homepage has no meta description. Like
+    geo_reach's crawler, it follows REAL about-style links found on the
+    homepage (and on each page it opens) — up to _ABOUT_MAX_PAGES pages —
+    and returns the first usable text. If none of those pages has any, the
+    homepage's own body text is used. No about-page URLs are guessed.
+    """
     if not website.startswith(("http://", "https://")):
         website = "https://" + website
-    p = urlparse(website)
-    origin = f"{p.scheme}://{p.netloc}"
+    if homepage_html is None:
+        homepage_html = _fetch_page(website)
+    if not homepage_html:
+        return None
 
-    for path in _ABOUT_PATHS:
-        html = _fetch_page(origin + path)
+    queue = _discover_about_links(homepage_html, website)
+    visited: set[str] = set()
+    while queue and len(visited) < _ABOUT_MAX_PAGES:
+        url = queue.pop(0)
+        if url in visited:
+            continue
+        visited.add(url)
+        html = _fetch_page(url)
         if html is None:
             continue
         text = _extract_about_text(html)
         if text:
-            logger.debug("About body text found at %s%s (%d chars)", origin, path, len(text))
+            logger.debug("About text found at %s (%d chars)", url, len(text))
             return text
+        for link in _discover_about_links(html, url):   # the next pages, from this page's own links
+            if link not in visited and link not in queue:
+                queue.append(link)
 
-    return None
+    text = _extract_about_text(homepage_html)
+    if text:
+        logger.debug("About text taken from the homepage %s (%d chars)", website, len(text))
+    return text
 
 
 def _get_brand_niche_tags_prompt(db: Session) -> str:
@@ -453,9 +526,9 @@ def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None, bran
             # Description — always overwrite with freshly scraped text
             # 1st: meta tags from homepage (no extra request, works on SPAs)
             about_text = _extract_meta_description(html)
-            # 2nd: body text from common about-page paths (fallback for older sites)
+            # 2nd: about-style pages linked from the homepage, else the homepage's own text
             if not about_text:
-                about_text = _fetch_about_text(brand.website)
+                about_text = _fetch_about_text(brand.website, homepage_html=html)
             if about_text:
                 brand.description = about_text
                 about_count += 1
