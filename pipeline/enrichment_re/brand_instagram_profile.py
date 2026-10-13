@@ -83,6 +83,7 @@ from pipeline.db import BrandRaw, Prompt, TestCreatorBrandPartnershipPost
 from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.http import fetch_page_via_jina, fetch_page_with_jina_fallback
+from pipeline.helpers.link_pages import embedded_json_urls, final_url, is_link_page, is_link_page_url, is_own_domain
 from pipeline.helpers.normalize import normalize
 from pipeline.helpers.prompts import (
     LINK_CLASSIFY_DEFAULT_PROMPT,
@@ -352,6 +353,7 @@ def _outbound_links_from_html(html: str, page_url: str) -> list[str]:
 
     candidate_hrefs = [a["href"].strip() for a in soup.find_all("a", href=True)]
     candidate_hrefs += _extract_jsonld_sameas_links(html)
+    candidate_hrefs += embedded_json_urls(html)
 
     seen: set[str] = set()
     links: list[str] = []
@@ -376,12 +378,28 @@ def _resolve_from_profile(
     if not external_url:
         return None, None, ""
 
-    category, name = _classify_link(db, handle, full_name, bio, external_url, known_name, existing_website)
-    if category == "website":
+    # Never save a shortener / link-in-bio URL (bit.ly, linktr.ee, a short.io
+    # custom domain like qob.uz) as the website. A shortener that redirects
+    # to the real site is replaced by where it lands; a link page (detected
+    # by domain or page fingerprint) goes down the linktree path, and if no
+    # real brand link is on it the caller falls back to the search tier.
+    landed, landed_html = final_url(external_url)
+    own = is_own_domain([handle, full_name, known_name], landed) or is_own_domain([handle, full_name, known_name], external_url)
+    if not own and (is_link_page_url(external_url) or is_link_page(landed, landed_html)):
+        if landed_html and not is_link_page(landed, landed_html):
+            external_url = landed
+            category, name = _classify_link(db, handle, full_name, bio, external_url, known_name, existing_website)
+        else:
+            category, name = "linktree", ""
+    else:
+        category, name = _classify_link(db, handle, full_name, bio, external_url, known_name, existing_website)
+    if category == "website" and (own or not is_link_page_url(external_url)):
         return external_url, "instagram_bio", name
 
     if category == "linktree":
-        for link in _scrape_outbound_links(external_url):
+        for link in _scrape_outbound_links(landed if is_link_page(landed, landed_html) else external_url):
+            if is_link_page_url(link):
+                continue
             link_category, link_name = _classify_link(db, handle, full_name, bio, link, known_name, existing_website)
             if link_category == "website":
                 return link, "instagram_linktree", link_name
@@ -469,6 +487,7 @@ def _rank_domain_candidates(handle: str, results: list[dict]) -> list[dict]:
     filtered = [
         r for r in results
         if _extract_domain(r["url"]) not in _PLATFORM_DOMAINS
+        and not is_link_page_url(r["url"])
         and not _is_free_hosting_domain(_extract_domain(r["url"]))
     ]
     logger.info(

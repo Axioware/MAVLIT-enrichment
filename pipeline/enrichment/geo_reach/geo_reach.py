@@ -70,8 +70,10 @@ Reader (r.jina.ai), which renders it in a headless browser on Jina's side
 and returns the page HTML. Set JINA_API_KEY in .env for higher rate limits.
 
 Safe to re-run — rows with a non-null geo_reach_score are skipped. Only
-brands with a website are eligible. Rows where scraping cannot establish a
-score remain eligible for a later retry.
+brands with a website are eligible. If pages were read but no reach evidence
+was found, an online/digital brand is treated as worldwide (score 0,
+["GLOBAL"]); a physical-goods brand stays NULL. Rows where no page could be
+read, or the LLM call failed, also stay NULL for a later retry.
 """
 
 import argparse
@@ -93,6 +95,7 @@ from pipeline.db import (
 )
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.http import fetch_page_with_jina_fallback, fetch_via_jina
+from pipeline.helpers.link_pages import is_link_page, is_own_domain, resolve_link_page
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +119,7 @@ _PARTNERSHIP_POST_FROM = "2026-01-01"
 _PARTNERSHIP_POST_TO   = "2027-01-01"
 
 # Tags that never carry useful body copy
-_NOISE_TAGS = ["script", "style", "nav", "header", "footer", "noscript", "iframe", "form", "aside", "svg"]
+_NOISE_TAGS = ["script", "style", "nav", "header", "footer", "noscript", "iframe", "form", "aside", "svg", "template"]
 
 # Keywords used to rank homepage links by how likely they are to carry
 # geographic-reach evidence (store locators, shipping/service-area pages, ...).
@@ -144,6 +147,20 @@ _LINK_KEYWORDS = (
     "contacto", "envio", "envío", "spedizione", "sobre-nosotros", "chi-siamo",
     "tiendas", "negozi", "paises", "países",
 )
+
+# Subset of _LINK_KEYWORDS that point straight at reach evidence (where the
+# brand ships / sells / has stores). These count double, so a shipping or
+# store-locator page is read before about/contact pages within the 5-page
+# budget.
+_STRONG_LINK_KEYWORDS = (
+    "store-locator", "storelocator", "find-a-store", "find-store", "our-stores",
+    "where-to-buy", "wheretobuy", "stockist", "retail-store", "find-a-retailer",
+    "location", "shipping", "delivery", "international", "worldwide", "countr",
+    "versand", "lieferung", "laender", "länder", "standort", "filiale",
+    "livraison", "pays", "magasins", "boutiques",
+    "envio", "envío", "spedizione", "tiendas", "negozi", "paises", "países",
+)
+_ALL_LINK_KEYWORDS = tuple(dict.fromkeys(_LINK_KEYWORDS + _STRONG_LINK_KEYWORDS))
 
 _ALLOWED_SCORES = {100, 90, 80, 70, 60, 40, 20, 0}
 _SCORE_LABELS = {
@@ -282,11 +299,12 @@ Reminders:
 - Country-of-origin / "Made in X" / manufacturing-location claims, and a company's registered legal/HQ address, are NOT evidence of reach — ignore any such signals in the list above when scoring. Only actual sell/ship/operate/service evidence counts.
 - If these signals came mainly from a "store locator" style page, they may only be a nearby/default subset rather than the brand's full footprint — weigh that possibility, but you must still pick your best-supported answer now.
 - If no explicit locations were found, judge from the page excerpts what kind of business this is. An online-only / digital product or service (app, software, streaming, SaaS, online platform, AI tool) with no stated country restriction is available worldwide — score 0 (global). An online store that only says it ships within the US is 40 (nationwide_us); one that ships internationally is 20 or 0 depending on how broad. Use the brand's own wording (shipping/availability/supported countries pages, language and currency options) as evidence.
-- If there is truly no usable reach evidence at all — no locations AND the excerpts don't show what kind of business it is or where it sells — set "score" to null instead of guessing.
+- Set "business_type" to "online_digital" when the brand is an online-only / digital product or service (app, software, streaming, music/audio platform, SaaS, online platform, AI tool, digital content), "physical_products" when it sells physical goods (supplements, clothing, food, cosmetics, equipment, ...) or runs physical locations, or "unknown" if the excerpts don't show it.
+- If there is no usable reach evidence at all — no locations AND the excerpts don't show where it sells: for "online_digital" score 0 (global) with country_codes ["GLOBAL"]; for "physical_products" or "unknown" set "score" to null — do NOT assume a physical-goods store is global.
 - Return "country_codes" as a JSON array of uppercase ISO alpha-2 country codes for every country where the brand operates. If the evidence is a city/state/province, infer and output that location's country code. If the score is 0/global, return ["GLOBAL"]. Return [] only when there is no usable reach evidence.
 
 Respond with ONLY valid JSON:
-{"score": null, "country_codes": [], "reasoning": ""}
+{"score": null, "country_codes": [], "business_type": "unknown", "reasoning": ""}
 """
 
 
@@ -325,7 +343,25 @@ def _clean_page_text(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     for tag in soup(_NOISE_TAGS):
         tag.decompose()
-    text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True)).strip()
+    # Drop inline JSON config blobs (e.g. Shopify nav settings in a hidden
+    # div) — on some themes they fill the whole _PAGE_TEXT_LIMIT before any
+    # real page copy (seen on gaiaherbs.com shipping/store-locator pages).
+    def _strings(node) -> list[str]:
+        return [
+            t for t in node.stripped_strings
+            if not (len(t) > 200 and t[0] in "{[" and t[-1] in "}]")
+        ]
+
+    # Page's <main> content first, everything else after it — mega-menus
+    # outside <nav> can otherwise push the real copy (e.g. "we do not ship
+    # internationally") past _PAGE_TEXT_LIMIT.
+    main = soup.find("main") or soup.find(attrs={"role": "main"})
+    parts: list[str] = []
+    if main is not None:
+        parts = _strings(main)
+        main.extract()
+    parts += _strings(soup)
+    text = re.sub(r"\s+", " ", " ".join(parts)).strip()
     return text[:_PAGE_TEXT_LIMIT]
 
 
@@ -342,7 +378,11 @@ def _registrable_domain(netloc: str) -> str:
     return ".".join(parts[-2:]) if len(parts) >= 2 else netloc
 
 
-def _discover_location_links(html: str, origin: str) -> list[str]:
+def _keyword_weight(text: str) -> int:
+    return sum(2 if kw in _STRONG_LINK_KEYWORDS else 1 for kw in _ALL_LINK_KEYWORDS if kw in text)
+
+
+def _discover_location_links(html: str, origin: str) -> list[tuple[int, str]]:
     """
     Real, same-brand internal links found on THIS page — never a path we
     invent ourselves. Links whose path/anchor text look location-relevant
@@ -373,16 +413,18 @@ def _discover_location_links(html: str, origin: str) -> list[str]:
             continue
         seen_paths.add(dedupe_key)
 
+        # The URL path counts double the anchor text: promo banners like
+        # "Free shipping on orders $64+ | Shop now" link to /collections/all
+        # and must not outrank a real /pages/shipping-information link.
         link_text = a.get_text(" ", strip=True).lower()
-        haystack = f"{path.lower()} {link_text}"
-        score = sum(1 for kw in _LINK_KEYWORDS if kw in haystack)
+        score = 2 * _keyword_weight(path.lower()) + _keyword_weight(link_text)
         scored.append((score, f"{parsed.scheme}://{parsed.netloc}{path}"))
 
     # Stable sort: keyword-relevant links first, but same-score links (incl.
     # score 0) keep their original document order — so unmatched real links
     # still end up in the queue as a fallback, just behind the likelier ones.
     scored.sort(key=lambda t: -t[0])
-    return [url for _, url in scored]
+    return scored
 
 
 def _merge_locations(existing: list[str], new: list) -> list[str]:
@@ -492,7 +534,12 @@ def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None,
     origin = _normalize_origin(brand.website)
 
     visited: set[str] = set()
-    queue: list[str] = [origin]
+    # Priority queue of real links: (link score, discovery order, url). The
+    # best-scoring link found on ANY page read so far is crawled next, so a
+    # shipping page found on page 2 beats a 0-score homepage link.
+    queue: list[tuple[int, int, str]] = [(0, 0, origin)]
+    seq = 1
+    link_page_resolved = False
     accumulated: list[str] = []
     country_codes: list[str] = []
     pages_log: list[dict] = []
@@ -500,7 +547,8 @@ def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None,
     final_score: int | None = None
 
     while queue and len(visited) < _MAX_PAGES:
-        url = queue.pop(0)
+        best = min(range(len(queue)), key=lambda i: (-queue[i][0], queue[i][1]))
+        url = queue.pop(best)[2]
         key = url.rstrip("/")
         if key in visited:
             continue
@@ -511,13 +559,38 @@ def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None,
             pages_log.append({"url": url, "status": "fetch_failed"})
             continue
 
+        # Stored website is a link shortener / link-in-bio page (bit.ly,
+        # linktr.ee, a short.io domain like qob.uz) — not the brand's site.
+        # Swap in the real brand site behind it, save it on the row, and
+        # crawl that instead. Unresolvable -> nothing read, score stays NULL.
+        names = [brand.name or "", brand.instagram_handle or ""]
+        if (url == origin and not link_page_resolved and is_link_page(url, html)
+                and not is_own_domain(names, url)):
+            link_page_resolved = True
+            visited.discard(key)
+            real = resolve_link_page(url, names, html)
+            pages_log.append({"url": url, "status": "link_page", "resolved_to": real})
+            if not real or _normalize_origin(real) == origin:
+                logger.info("geo_reach: %s is a link page — no brand website found behind it", url)
+                break
+            logger.info("geo_reach: %s is a link page — using the brand site %s", url, real)
+            brand.website = real
+            brand.domain = urlparse(real).netloc.lower().removeprefix("www.")
+            brand.website_source = "geo_reach_link_page"
+            origin = _normalize_origin(real)
+            queue = [(0, 0, origin)]
+            continue
+
         # Save this page's own real links as candidates for the next pages —
         # never a path we invent ourselves. Location-relevant links (store
         # locator, contact, shipping, about, ...) are queued first; every
         # other real internal link found on the page follows as a fallback.
-        for link in _discover_location_links(html, origin):
-            if link.rstrip("/") not in visited and link not in queue:
-                queue.append(link)
+        queued = {u for _, _, u in queue}
+        for link_score, link in _discover_location_links(html, origin):
+            if link.rstrip("/") not in visited and link not in queued:
+                queue.append((link_score, seq, link))
+                queued.add(link)
+                seq += 1
 
         text = _clean_page_text(html)
         if len(text) < _MIN_TEXT_LEN:
@@ -555,6 +628,14 @@ def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None,
     if final_score is None and (accumulated or page_excerpts):
         result = _call_geo_llm_final(brand, bio, accumulated, page_excerpts)
         final_score = _normalize_score(result.get("score"))
+        # Pages were read but the LLM still gave no score: an online/digital
+        # brand with no stated restriction is available worldwide. Physical-
+        # goods brands stay NULL (a missed shipping page must not become
+        # "global"), and so does an empty result (the OpenAI call failed).
+        business_type = str(result.get("business_type") or "").strip().lower()
+        if final_score is None and business_type == "online_digital" and page_excerpts:
+            final_score = 0
+            result["country_codes"] = ["GLOBAL"]
         final_country_codes = _normalize_country_codes(result.get("country_codes"), final_score)
         if final_country_codes or final_score == 0:
             country_codes = final_country_codes
