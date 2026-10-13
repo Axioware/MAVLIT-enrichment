@@ -24,7 +24,8 @@ is_scraped=False:
      commenters for that post only, scrape 1 post each for profile data, store
      them in instagram_users (user_type="commenter") with
      is_content_creator_re=True, and link those commenters only to the brand(s)
-     confirmed on that same source post.
+     confirmed on that same source post. Only when SCRAPE_COMMENTERS (below) /
+     scrape_commenters=True — off by default.
   5. Mark content_creator_re.is_scraped=True and set currenttime=now() — the
      "last scraped" time refresh_content_creator_re.py uses to pick creators
      due for a re-scrape.
@@ -81,6 +82,13 @@ from pipeline.helpers.prompts import BRAND_CHECK_DEFAULT_PROMPT, BRAND_CHECK_PRO
 from pipeline.helpers.social import normalize_handle
 
 logger = logging.getLogger(__name__)
+
+# Step 4 (commenters) on/off. False = never collect or scrape commenters (no
+# extra Apify scrapes / LLM calls for them); True = collect up to 5 commenters
+# per confirmed partnership post and scrape them, exactly as before.
+# Override per call with enrich_content_creator_re(..., scrape_commenters=True)
+# or --scrape-commenters on the command line.
+SCRAPE_COMMENTERS = False
 
 
 def _ensure_partnership_evidence_table() -> None:
@@ -313,6 +321,7 @@ def _record_llm_partnership_post(
 def enrich_content_creator_re(
     db: Session, limit: int = 1, creator_ids: list[int] | None = None,
     niche: str | None = None, skip_seen_posts: bool = False, workers: int = 1,
+    scrape_commenters: bool | None = None,
 ) -> tuple[int, set[int]]:
     """
     Process up to `limit` content_creator_re rows where is_scraped=False.
@@ -336,7 +345,13 @@ def enrich_content_creator_re(
     every DB write still happen one creator at a time in this thread (the
     Session is not thread-safe), in the order scrapes finish. workers=1
     (default) behaves exactly like the original sequential loop.
+
+    scrape_commenters controls step 4 (collect + scrape commenters of
+    confirmed partnership posts). None (default) uses the module setting
+    SCRAPE_COMMENTERS; True/False overrides it for this call.
     """
+    if scrape_commenters is None:
+        scrape_commenters = SCRAPE_COMMENTERS
     if not APIFY_TOKEN:
         logger.warning("APIFY_TOKEN not set — skipping content_creator_re enrichment")
         return 0, set()
@@ -504,10 +519,13 @@ def enrich_content_creator_re(
             #  Collect unique commenters only from posts with confirmed brands
             #  (up to 5/post). Each record carries the brand IDs confirmed on
             #  that same post so links stay scoped to the evidence source.
+            #  Skipped entirely when scrape_commenters is off — commenter_links
+            #  stays empty, so nothing below scrapes, stores or links commenters.
             commenter_links: list[tuple[dict, set[int]]] = []
-            for item, post_brand_ids in branded_posts:
-                for record in _collect_commenter_records([item], n_per_post=5):
-                    commenter_links.append((record, post_brand_ids))
+            if scrape_commenters:
+                for item, post_brand_ids in branded_posts:
+                    for record in _collect_commenter_records([item], n_per_post=5):
+                        commenter_links.append((record, post_brand_ids))
 
             commenter_usernames = sorted({record["username"] for record, _ in commenter_links})
 
@@ -663,13 +681,18 @@ def main() -> None:
         "--workers", type=int, default=1,
         help="Creators' Apify scrapes to run at the same time (default 1 = sequential).",
     )
+    parser.add_argument(
+        "--scrape-commenters", action="store_true", default=None,
+        help=f"Also collect and scrape commenters of confirmed partnership posts "
+             f"(default: SCRAPE_COMMENTERS = {SCRAPE_COMMENTERS}).",
+    )
     args = parser.parse_args()
 
     db = SessionLocal()
     try:
         processed, brand_ids = enrich_content_creator_re(
             db, limit=args.limit, creator_ids=args.creator_ids, niche=args.niche,
-            workers=args.workers,
+            workers=args.workers, scrape_commenters=args.scrape_commenters,
         )
         print(
             f"content_creator_re processed={processed}; "
