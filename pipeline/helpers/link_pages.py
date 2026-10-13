@@ -43,7 +43,7 @@ _HEADERS = {
 LINK_PAGE_DOMAINS = frozenset([
     # shorteners
     "bit.ly", "bitly.com", "short.io", "short.gy", "tinyurl.com", "t.co", "ow.ly",
-    "buff.ly", "rebrand.ly", "rb.gy", "cutt.ly", "is.gd", "goo.gl", "tiny.cc",
+    "buff.ly", "rebrand.ly", "rebrandly.com", "rb.gy", "cutt.ly", "is.gd", "goo.gl", "tiny.cc",
     "shorturl.at", "s.id", "t.ly", "bl.ink", "shor.by", "dub.sh", "dub.co",
     # link-in-bio
     "linktr.ee", "linktree.com", "lnk.bio", "linkin.bio", "beacons.ai", "bio.link",
@@ -64,7 +64,7 @@ LINK_PAGE_DOMAINS = frozenset([
 _LINK_PAGE_HTML_MARKERS = (
     "js.short.io", "shortiougc.com", "assets.production.linktr.ee", "linktr.ee/",
     "cdn.beacons.ai", "bio.link/", "lnk.bio/", "taplink.cc", "linkfire.com",
-    "rebrandly", "bitly.com",
+    "rebrandly", "rb.routing", "bitly.com",
 )
 
 # Never a brand's own website either (link candidates are filtered by these).
@@ -172,7 +172,11 @@ def _name_matches_domain(names: list[str], url: str) -> bool:
         return False
     for n in names:
         c = _compact(n)
-        if len(c) >= 3 and (c in label or (len(label) >= 4 and label in c)):
+        # Full name in the domain (qobuz -> qobuz.com, gaiaherbs ->
+        # gaiaherbs.com), or a domain that is most of the name (sugarfactory
+        # for "Sugar Factory at Home") — but not a short common word inside
+        # it ("quest" for "Quest Nutrition" is quest.com, Quest Software).
+        if len(c) >= 3 and (c in label or (len(label) >= 4 and label in c and len(label) >= 0.6 * len(c))):
             return True
     return False
 
@@ -192,12 +196,15 @@ def is_own_domain(names: list[str], url: str) -> bool:
 
 
 def pick_brand_link(links: list[str], names: list[str]) -> str | None:
-    """The link whose domain carries the brand name — or the only candidate."""
-    candidates = [l for l in links if _is_candidate(l)]
-    for link in candidates:
-        if _name_matches_domain(names, link):
+    """
+    The link whose domain carries the brand name. Never "the only link" — on
+    a custom short domain that is usually the link service's own homepage
+    (onaquest.co's only link is rebrandly.com).
+    """
+    for link in links:
+        if _is_candidate(link) and _name_matches_domain(names, link):
             return link
-    return candidates[0] if len(candidates) == 1 else None
+    return None
 
 
 def search_brand_site(names: list[str]) -> str | None:

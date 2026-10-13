@@ -317,7 +317,13 @@ def _normalize_origin(website: str) -> str:
 
 
 def _fetch_page(url: str) -> str | None:
+    return _fetch_page_with_url(url)[0]
+
+
+def _fetch_page_with_url(url: str) -> tuple[str | None, str]:
     """
+    (html, final URL after redirects) — see below; (None, url) on failure.
+
     Direct GET, falling back to Jina Reader if the site blocks or errors
     (see fetch_page_with_jina_fallback). Jina returns the rendered page
     HTML, so link discovery and text cleaning below work unchanged.
@@ -329,14 +335,67 @@ def _fetch_page(url: str) -> str | None:
     """
     page = fetch_page_with_jina_fallback(url, _HEADERS, _TIMEOUT)
     if page is None:
-        return None
+        return None, url
+    final = page.url or url
     if page.via_jina or len(_clean_page_text(page.html)) >= _MIN_TEXT_LEN:
-        return page.html
+        return page.html, final
     rendered = fetch_via_jina(url)
     if rendered and len(_clean_page_text(rendered)) > len(_clean_page_text(page.html)):
         logger.info("geo_reach: %s had no readable text directly — using the rendered page (fallback fetcher)", url)
-        return rendered
-    return page.html
+        return rendered, final
+    return page.html, final
+
+
+# The server sits in Germany, so sites that pick a locale by visitor IP
+# redirect the homepage to e.g. /de-de/ (qobuz.com, zespri.com) — the crawl
+# then reads only the German storefront and scores the brand "outside US".
+# When the homepage lands on a non-US locale path, the US variant of that
+# path is tried; if the site serves it, the crawl uses it, and every
+# discovered link under the foreign locale is rewritten to the US one.
+_LOCALE_LANGS = frozenset(
+    "de fr es it nl pt sv da no nb fi pl cs sk hu ro el tr ru uk ja ko zh ar he th vi id ms en".split()
+)
+_LOCALE_SEG_RE = re.compile(r"^([a-z]{2})(?:([-_])([a-z]{2}))?$", re.I)
+
+
+def _locale_segment(url: str) -> str | None:
+    seg = urlparse(url).path.lstrip("/").split("/", 1)[0]
+    m = _LOCALE_SEG_RE.match(seg)
+    if not m:
+        return None
+    a, b = m.group(1).lower(), (m.group(3) or "").lower()
+    if not b and a not in _LOCALE_LANGS:
+        return None
+    if b and a not in _LOCALE_LANGS and b not in _LOCALE_LANGS:
+        return None
+    return seg
+
+
+def _us_locale_variants(url: str) -> list[str]:
+    """US versions of a non-US locale URL (/de-de/x -> /en-us/x, /us-en/x); [] if not a foreign locale."""
+    seg = _locale_segment(url)
+    if not seg:
+        return []
+    m = _LOCALE_SEG_RE.match(seg)
+    a, sep, b = m.group(1).lower(), m.group(2) or "-", (m.group(3) or "").lower()
+    if "us" in (a, b) or (not b and a == "en"):
+        return []
+    if b:
+        upper = m.group(3).isupper()
+        variants = [f"en{sep}{'US' if upper else 'us'}", f"us{sep}en"]
+    else:
+        variants = ["en-us", "us", "en"]
+    parsed = urlparse(url)
+    rest = parsed.path.lstrip("/")[len(seg):]
+    return [parsed._replace(path=f"/{v}{rest}").geturl() for v in variants]
+
+
+def _swap_locale(url: str, from_seg: str, to_seg: str) -> str:
+    parsed = urlparse(url)
+    parts = parsed.path.lstrip("/").split("/", 1)
+    if parts[0].lower() != from_seg.lower():
+        return url
+    return parsed._replace(path="/" + "/".join([to_seg] + parts[1:])).geturl()
 
 
 def _clean_page_text(html: str) -> str:
@@ -540,6 +599,7 @@ def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None,
     queue: list[tuple[int, int, str]] = [(0, 0, origin)]
     seq = 1
     link_page_resolved = False
+    locale_swap: tuple[str, str] | None = None   # (foreign locale seg, US locale seg)
     accumulated: list[str] = []
     country_codes: list[str] = []
     pages_log: list[dict] = []
@@ -554,7 +614,7 @@ def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None,
             continue
         visited.add(key)
 
-        html = _fetch_page(url)
+        html, landed = _fetch_page_with_url(url)
         if html is None:
             pages_log.append({"url": url, "status": "fetch_failed"})
             continue
@@ -581,12 +641,27 @@ def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None,
             queue = [(0, 0, origin)]
             continue
 
+        # Homepage redirected to a foreign locale (IP-based, see
+        # _us_locale_variants) — use the site's US version if it has one.
+        if url == origin and locale_swap is None:
+            for candidate in _us_locale_variants(landed):
+                us_html, us_landed = _fetch_page_with_url(candidate)
+                us_seg = _locale_segment(candidate)
+                if us_html and (_locale_segment(us_landed) or "").lower() == (us_seg or "").lower():
+                    locale_swap = (_locale_segment(landed), us_seg)
+                    logger.info("geo_reach: %s redirected to %s — using the US version %s", url, landed, us_landed)
+                    html, url = us_html, us_landed
+                    visited.add(url.rstrip("/"))
+                    break
+
         # Save this page's own real links as candidates for the next pages —
         # never a path we invent ourselves. Location-relevant links (store
         # locator, contact, shipping, about, ...) are queued first; every
         # other real internal link found on the page follows as a fallback.
         queued = {u for _, _, u in queue}
         for link_score, link in _discover_location_links(html, origin):
+            if locale_swap:
+                link = _swap_locale(link, *locale_swap)
             if link.rstrip("/") not in visited and link not in queued:
                 queue.append((link_score, seq, link))
                 queued.add(link)
