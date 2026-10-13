@@ -408,6 +408,7 @@ def enrich_instagram_posts(
         BrandRaw.refferls.is_(False),
         BrandRaw.geo_reach_score.between(0, 40),   # NULL (not geo-scored yet) is skipped
         or_(has_confident_partnership, ~in_partnership_table),
+        or_(BrandRaw.brand_tier.is_(None), BrandRaw.brand_tier != "extreme"),  # never Fortune-500 / household-name brands (brand_tier.py 'extreme')
     )
     if brand_id is not None:
         query = query.filter(

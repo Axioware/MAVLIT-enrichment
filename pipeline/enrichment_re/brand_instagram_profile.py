@@ -694,7 +694,10 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
         logger.warning("APIFY_TOKEN not set — skipping brand_instagram_profile enrichment")
         return 0
 
-    query = db.query(BrandRaw).filter(BrandRaw.instagram_handle.isnot(None))
+    query = db.query(BrandRaw).filter(
+        BrandRaw.instagram_handle.isnot(None),
+        or_(BrandRaw.brand_tier.is_(None), BrandRaw.brand_tier != "extreme"),  # never Fortune-500 / household-name brands (brand_tier.py 'extreme')
+    )
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:

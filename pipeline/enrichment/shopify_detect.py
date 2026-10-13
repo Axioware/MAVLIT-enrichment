@@ -57,7 +57,7 @@ import time
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -407,6 +407,7 @@ def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None, bran
     query = db.query(BrandRaw).filter(
         BrandRaw.website.isnot(None),
         BrandRaw.has_official_website.is_(True),
+        or_(BrandRaw.brand_tier.is_(None), BrandRaw.brand_tier != "extreme"),  # never Fortune-500 / household-name brands (brand_tier.py 'extreme')
     )
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)

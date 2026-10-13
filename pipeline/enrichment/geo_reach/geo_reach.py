@@ -80,7 +80,7 @@ import re
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from config import OPENAI_KEY
@@ -616,6 +616,7 @@ def enrich_geo_reach(
         BrandRaw.website.isnot(None),
         BrandRaw.website != "",
         BrandRaw.refferls.is_(False),
+        or_(BrandRaw.brand_tier.is_(None), BrandRaw.brand_tier != "extreme"),  # never Fortune-500 / household-name brands (brand_tier.py 'extreme')
         db.query(TestCreatorBrandPartnershipPost.id)
         .filter(
             TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
