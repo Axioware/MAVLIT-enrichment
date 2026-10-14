@@ -60,6 +60,12 @@ Run from the project root:
     python -m pipeline.enrichment_re.discover_collaborator_creators --niche music --gender female --limit 1
     python -m pipeline.enrichment_re.discover_collaborator_creators --niche music --gender female --user-type contentcreatorRE --limit 10
     python -m pipeline.enrichment_re.discover_collaborator_creators            # all
+    python -m pipeline.enrichment_re.discover_collaborator_creators --beach-brands-only --dry-run
+    python -m pipeline.enrichment_re.discover_collaborator_creators --beach-brands-only
+
+--beach-brands-only limits the run to instagram_users rows (creators) that were
+found through a brand with brands_raw.beach_brands = true — i.e. rows linked to
+such a brand in brand_instagram_users (written by instagram_users.py).
 """
 
 import argparse
@@ -75,6 +81,7 @@ from sqlalchemy.orm import Session
 from config import APIFY_TOKEN, OPENAI_KEY
 from pipeline.db import (
     Base,
+    BrandInstagramUser,
     BrandRaw,
     ContentCreatorRE,
     FacebookBrandedContentCheck,
@@ -275,6 +282,7 @@ def _existing_brand_usernames(db: Session) -> set[str]:
 def _collect_work(
     db: Session, limit: int, skip_row_ids: set[int] | None = None,
     niche: str | None = None, gender: str | None = None, user_type: str | None = None,
+    beach_brands_only: bool = False,
 ) -> tuple[list[str], dict[int, list[str]]]:
     """
     Walk unchecked instagram_users rows in id order and collect up to `limit`
@@ -286,7 +294,9 @@ def _collect_work(
     checked) but don't count toward the limit. Rows in skip_row_ids (ones
     that already failed earlier in this run) are ignored. niche / gender
     restrict to rows whose instagram_users.niche / gender match
-    (case-insensitive); user_type restricts to one instagram_users.user_type.
+    (case-insensitive); user_type restricts to one instagram_users.user_type;
+    beach_brands_only restricts to rows linked (brand_instagram_users) to a
+    brand with brands_raw.beach_brands = true.
     """
     # Already handled: in content_creator_re, or already a brand in brands_raw.
     known = _existing_creator_usernames(db) | _existing_brand_usernames(db)
@@ -311,6 +321,12 @@ def _collect_work(
             query = query.filter(func.lower(func.trim(InstagramUser.gender)) == gender.strip().lower())
         if user_type:
             query = query.filter(InstagramUser.user_type == user_type)
+        if beach_brands_only:
+            query = query.filter(InstagramUser.id.in_(
+                db.query(BrandInstagramUser.instagram_user_id)
+                .join(BrandRaw, BrandRaw.id == BrandInstagramUser.brand_raw_id)
+                .filter(BrandRaw.beach_brands.is_(True))
+            ))
         batch = query.order_by(InstagramUser.id).limit(_ROW_BATCH).all()
         if not batch:
             break
@@ -472,9 +488,10 @@ def _process_username(db: Session, username: str, summary: dict, tag: str) -> bo
 def run(
     db: Session, limit: int, dry_run: bool = False, skip_row_ids: set[int] | None = None,
     niche: str | None = None, gender: str | None = None, user_type: str | None = None,
+    beach_brands_only: bool = False,
 ) -> dict:
     _ensure_columns(db)
-    usernames, rows = _collect_work(db, limit, skip_row_ids, niche, gender, user_type)
+    usernames, rows = _collect_work(db, limit, skip_row_ids, niche, gender, user_type, beach_brands_only)
     db.commit()  # end the read transaction before slow LLM/Apify work
     queued_keys = {u.lower() for u in usernames}
     work_rows = sum(1 for row_usernames in rows.values() if any(u.lower() in queued_keys for u in row_usernames))
@@ -532,6 +549,7 @@ def run(
 def run_all(
     db: Session, batch_size: int = 10,
     niche: str | None = None, gender: str | None = None, user_type: str | None = None,
+    beach_brands_only: bool = False,
 ) -> dict:
     """
     Process every remaining row, batch_size rows at a time, marking rows
@@ -546,7 +564,8 @@ def run_all(
     while True:
         batch_no += 1
         logger.info("===== batch %d =====", batch_no)
-        summary = run(db, batch_size, skip_row_ids=skip_row_ids, niche=niche, gender=gender, user_type=user_type)
+        summary = run(db, batch_size, skip_row_ids=skip_row_ids, niche=niche, gender=gender, user_type=user_type,
+                      beach_brands_only=beach_brands_only)
         if not summary["usernames"]:
             break
         skip_row_ids |= summary["failed_row_ids"]
@@ -582,6 +601,10 @@ def main() -> int:
         "--user-type", type=str, default=None, dest="user_type",
         help="Only rows of one creator user_type: " + ", ".join(_USER_TYPES) + " (case/underscore-insensitive, e.g. content_creator_re).",
     )
+    parser.add_argument(
+        "--beach-brands-only", action="store_true", dest="beach_brands_only",
+        help="Only rows (creators) found through a brand with brands_raw.beach_brands = true.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="List the usernames that would be processed; no LLM/Apify/writes.")
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
@@ -598,11 +621,14 @@ def main() -> int:
     try:
         if args.limit is not None:
             summary = run(db, args.limit, dry_run=args.dry_run,
-                          niche=args.niche, gender=args.gender, user_type=args.user_type)
+                          niche=args.niche, gender=args.gender, user_type=args.user_type,
+                          beach_brands_only=args.beach_brands_only)
         elif args.dry_run:  # list everything, write nothing
-            summary = run(db, 10**9, dry_run=True, niche=args.niche, gender=args.gender, user_type=args.user_type)
+            summary = run(db, 10**9, dry_run=True, niche=args.niche, gender=args.gender, user_type=args.user_type,
+                          beach_brands_only=args.beach_brands_only)
         else:
-            summary = run_all(db, niche=args.niche, gender=args.gender, user_type=args.user_type)
+            summary = run_all(db, niche=args.niche, gender=args.gender, user_type=args.user_type,
+                              beach_brands_only=args.beach_brands_only)
     finally:
         db.close()
 
