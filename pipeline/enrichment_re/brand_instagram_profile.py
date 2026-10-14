@@ -1,9 +1,23 @@
 """
 pipeline/enrichment_re/brand_instagram_profile.py
 
+RUN CONDITIONS — a brands_raw row is processed (batch mode) only when ALL hold:
+  1. instagram_handle is set.
+  2. brand_tier is one of lower-range / midlower-range / midhigher-range.
+     NOT run for: brand_tier NULL / empty (not classified yet — run
+     pipeline/enrichment/brand_tier.py first), the text 'null', higher-range
+     or extreme.
+  3. instagram_profile_checked = false (not processed before).
+  4. Partnership evidence is not weak: the brand has at least one
+     test_creator_brand_partnership_posts row with sponsorship_confidence
+     >= 90, or no row there at all. A brand with posts ONLY below 90 is skipped.
+Requires APIFY_TOKEN. Passing brand_id targets one brand and skips 3 and 4
+(1 and 2 still apply). Rows whose Apify scrape fails stay unchecked and are
+retried on the next run.
+
 Name/website resolution AND verification straight from a brand's own
-Instagram profile — runs on any brands_raw row with an instagram_handle,
-whether or not it already has a name/website (e.g. from Wikidata).
+Instagram profile — runs on any brands_raw row that meets the conditions
+above, whether or not it already has a name/website (e.g. from Wikidata).
 
 Two brand states, one resolution pipeline:
   - Bare rows (name IS NULL) — name and website are resolved from the
@@ -99,6 +113,7 @@ logger = logging.getLogger(__name__)
 # skipped; brands not in test_creator_brand_partnership_posts at all (e.g.
 # Facebook Branded Content finds) are still processed.
 _MIN_PARTNERSHIP_CONFIDENCE = 90
+_ELIGIBLE_BRAND_TIERS = ("lower-range", "midlower-range", "midhigher-range")
 
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"  # same Instagram scraper used across the pipeline
 # Full browser-like header set — link-in-bio hosts (Linktree in particular,
@@ -697,8 +712,10 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
     resolution order and the "existing website is never blindly overwritten"
     rules.
 
-    Batch mode (no brand_id) processes every row with instagram_handle set
-    and instagram_profile_checked=False — named or bare, whether or not
+    Batch mode (no brand_id) processes every row with instagram_handle set,
+    brand_tier in _ELIGIBLE_BRAND_TIERS (lower-range / midlower-range /
+    midhigher-range — never NULL, higher-range or extreme) and
+    instagram_profile_checked=False — named or bare, whether or not
     brand_wikidata_lookup.py has run on it yet — EXCEPT brands that are in
     test_creator_brand_partnership_posts only with sponsorship_confidence
     < _MIN_PARTNERSHIP_CONFIDENCE. A brand qualifies if it has at least one
@@ -715,7 +732,10 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
 
     query = db.query(BrandRaw).filter(
         BrandRaw.instagram_handle.isnot(None),
-        or_(BrandRaw.brand_tier.is_(None), BrandRaw.brand_tier != "extreme"),  # never Fortune-500 / household-name brands (brand_tier.py 'extreme')
+        # Only the tiers a creator can realistically reach. Excludes NULL /
+        # 'null' (not classified yet), higher-range and extreme (Fortune-500 /
+        # household-name brands) — see brand_tier.py.
+        BrandRaw.brand_tier.in_(_ELIGIBLE_BRAND_TIERS),
     )
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
