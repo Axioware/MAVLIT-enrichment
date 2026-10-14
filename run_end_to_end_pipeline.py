@@ -75,6 +75,7 @@ from pipeline.db import (
 # — a `from...import` of just the function wouldn't see later changes to
 # that module attribute.
 from pipeline.enrichment import youtube_sponsorship
+from pipeline.helpers.gpt_llm import LLMUnavailableError
 from pipeline.enrichment.apollo_contacts import run_apollo_contacts
 from pipeline.enrichment.brand_signals import run_brand_signals
 from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
@@ -245,6 +246,8 @@ def drain_pending_step(label: str, fn, db, batch_limit: int, **kwargs) -> None:
         logger.info("[%s] batch %d — starting, limit=%d", label, batch_num, batch_limit)
         try:
             processed = fn(db, limit=batch_limit, **kwargs)
+        except LLMUnavailableError:
+            raise   # OpenAI is out of credits / unavailable — stop the whole run, not just this step
         except Exception:
             logger.exception("[%s] batch %d — failed, stopping this step", label, batch_num)
             break
@@ -319,6 +322,8 @@ def drain_youtube_sponsorships(label: str, db, batch_limit: int = 50) -> None:
         for bid in brand_ids:
             try:
                 total_processed += enrich_youtube_sponsorships(db, brand_id=bid)
+            except LLMUnavailableError:
+                raise
             except Exception:
                 logger.exception("[%s] brand_id=%d — failed, continuing", label, bid)
 
@@ -355,6 +360,8 @@ def drain_brand_signals(label: str, db, batch_limit: int = 500) -> None:
         for bid in brand_ids:
             try:
                 total_processed += run_brand_signals(db, brand_id=bid)
+            except LLMUnavailableError:
+                raise
             except Exception:
                 logger.exception("[%s] brand_id=%d — failed, continuing", label, bid)
 

@@ -54,7 +54,7 @@ from pipeline.enrichment_re.discover_collaborator_creators import (
     _existing_creator_usernames,
     _save_creator,
 )
-from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.helpers.gpt_llm import LLMUnavailableError, call_gpt_json, fill_template
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +173,8 @@ def run(
             _save_creator(db, username, saved_niche)
             summary["saved"][saved_niche] = summary["saved"].get(saved_niche, 0) + 1
             logger.info("%s: saved as %s", tag, saved_niche)
+        except LLMUnavailableError:
+            raise   # OpenAI unavailable — stop the run; this username stays unpromoted
         except Exception:
             logger.exception("%s: unexpected error — will retry next run", tag)
             db.rollback()

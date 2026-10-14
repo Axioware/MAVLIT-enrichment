@@ -59,6 +59,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from pipeline.db import BrandRaw, SessionLocal
+from pipeline.helpers.gpt_llm import LLMUnavailableError
 from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 from pipeline.enrichment.instagram_posts import enrich_instagram_posts
 from pipeline.enrichment.instagram_users import enrich_instagram_users
@@ -111,6 +112,8 @@ def run_content_creator_re_fully(db, batch_limit: int = 1) -> set[int]:
         logger.info("[%s] batch %d — calling enrich_content_creator_re(limit=%d)", label, batch_num, batch_limit)
         try:
             processed, brand_ids = enrich_content_creator_re(db, limit=batch_limit)
+        except LLMUnavailableError:
+            raise   # OpenAI is out of credits / unavailable — stop the whole run, not just this step
         except Exception:
             logger.exception("[%s] batch %d failed — stopping this step", label, batch_num)
             break
@@ -143,6 +146,8 @@ def run_score_post_sponsorship_per_brand(label: str, db, brand_ids: set[int], ba
             batch_num += 1
             try:
                 processed = score_post_sponsorship(db, brand_raw_id=bid, limit=batch_limit)
+            except LLMUnavailableError:
+                raise
             except Exception:
                 logger.exception(
                     "[%s] brand_id=%d batch %d — failed, moving to the next brand",
@@ -219,6 +224,8 @@ def run_instagram_users_per_brand(label: str, db, brand_ids: set[int], batch_lim
             batch_num += 1
             try:
                 processed = enrich_instagram_users(db, brand_raw_id=bid, limit=batch_limit)
+            except LLMUnavailableError:
+                raise
             except Exception:
                 logger.exception(
                     "[%s] brand_id=%d batch %d — failed, moving to the next brand",

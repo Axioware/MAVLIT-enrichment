@@ -8,12 +8,15 @@ Orchestrates all signal enrichment steps in order:
   4. meta_ads            — store raw ad data from Meta Ad Library
   5. youtube             — detect brands being sponsored in YouTube videos
 
-Each step is independent; a failure in one doesn't abort the others.
+Each step is independent; a failure in one doesn't abort the others — except
+LLMUnavailableError (OpenAI out of credits / unavailable), which stops the run.
 """
 
 import logging
 
 from sqlalchemy.orm import Session
+
+from pipeline.helpers.gpt_llm import LLMUnavailableError
 
 from .meta_ads import enrich_meta_ads
 from .shopify_detect import enrich_shopify
@@ -50,6 +53,8 @@ def run_signal_enrichment(
     if "wikidata_socials" in run:
         try:
             results["wikidata_socials"] = enrich_wikidata_socials(db, limit=limit_per_step)
+        except LLMUnavailableError:
+            raise   # OpenAI unavailable — stop the whole run
         except Exception:
             logger.exception("wikidata_socials step failed")
             results["wikidata_socials"] = -1
@@ -57,6 +62,8 @@ def run_signal_enrichment(
     if "shopify" in run:
         try:
             results["shopify"] = enrich_shopify(db, limit=limit_per_step)
+        except LLMUnavailableError:
+            raise   # OpenAI unavailable — stop the whole run
         except Exception:
             logger.exception("shopify step failed")
             results["shopify"] = -1
@@ -64,6 +71,8 @@ def run_signal_enrichment(
     if "tranco" in run:
         try:
             results["tranco"] = enrich_tranco(db, limit=limit_per_step)
+        except LLMUnavailableError:
+            raise   # OpenAI unavailable — stop the whole run
         except Exception:
             logger.exception("tranco step failed")
             results["tranco"] = -1
@@ -71,6 +80,8 @@ def run_signal_enrichment(
     if "meta_ads" in run:
         try:
             results["meta_ads"] = enrich_meta_ads(db, limit=limit_per_step)
+        except LLMUnavailableError:
+            raise   # OpenAI unavailable — stop the whole run
         except Exception:
             logger.exception("meta_ads step failed")
             results["meta_ads"] = -1
@@ -78,6 +89,8 @@ def run_signal_enrichment(
     if "youtube" in run:
         try:
             results["youtube"] = enrich_youtube_sponsorships(db, limit=limit_per_step)
+        except LLMUnavailableError:
+            raise   # OpenAI unavailable — stop the whole run
         except Exception:
             logger.exception("youtube step failed")
             results["youtube"] = -1

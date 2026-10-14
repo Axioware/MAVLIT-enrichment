@@ -66,7 +66,7 @@ from sqlalchemy.orm import Session
 
 from config import OPENAI_KEY
 from pipeline.db import BrandNiche, BrandRaw, InstagramPost, Prompt, normalize_niche
-from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.helpers.gpt_llm import LLMUnavailableError, call_gpt_json, fill_template
 from pipeline.helpers.http import fetch_html_with_jina_fallback
 from pipeline.helpers.normalize import normalize
 from pipeline.helpers.prompts import (
@@ -533,7 +533,20 @@ def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None, bran
                 brand.description = about_text
                 about_count += 1
                 logger.debug("  %s.description set (%d chars)", brand.name, len(about_text))
-                _update_brand_niche_description_and_tags(db, brand, about_text)
+                try:
+                    _update_brand_niche_description_and_tags(db, brand, about_text)
+                except LLMUnavailableError:
+                    # OpenAI is out of credits / unavailable. shopify_checked,
+                    # is_shopify and the description are staged but not
+                    # committed — drop them so this brand is NOT marked as
+                    # checked and gets fully re-run once OpenAI is back.
+                    db.rollback()
+                    logger.error(
+                        "Shopify/socials check: OpenAI unavailable at brand_id=%s — stopping; "
+                        "this brand stays shopify_checked=False (%d brand(s) done this run)",
+                        brand.id, updated,
+                    )
+                    raise
 
         updated += 1
         db.commit()

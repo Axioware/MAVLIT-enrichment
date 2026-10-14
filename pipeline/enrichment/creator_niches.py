@@ -20,7 +20,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from pipeline.db import CreatorNiche, InstagramUser, Prompt, SessionLocal
-from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.helpers.gpt_llm import LLMUnavailableError, call_gpt_json, fill_template
 from pipeline.helpers.prompts import (
     CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT,
     CREATOR_NICHE_DESCRIPTION_PROMPT_NAME,
@@ -167,7 +167,16 @@ def run_creator_niches(
         batch = pending[batch_start : batch_start + batch_size]
         inserts = []
         for row in batch:
-            niche = _generate_niche(db, row.username, contexts[row.username], retries)
+            try:
+                niche = _generate_niche(db, row.username, contexts[row.username], retries)
+            except LLMUnavailableError:
+                # OpenAI unavailable — save the creators of this batch that
+                # are already done (their LLM calls were paid for), then stop.
+                if inserts:
+                    from sqlalchemy.dialects.postgresql import insert as _insert
+                    db.execute(_insert(CreatorNiche).values(inserts).on_conflict_do_nothing())
+                    db.commit()
+                raise
             if not niche:
                 continue
             inserts.append({

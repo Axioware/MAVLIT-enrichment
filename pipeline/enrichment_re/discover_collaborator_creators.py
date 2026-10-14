@@ -90,7 +90,7 @@ from pipeline.enrichment_re.facebook_branded_content_checker import (
     START_DATE,
     check_branded_content,
 )
-from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.helpers.gpt_llm import LLMUnavailableError, call_gpt_json, fill_template
 from pipeline.helpers.social import normalize_handle
 
 logger = logging.getLogger(__name__)
@@ -499,6 +499,17 @@ def run(
         tag = f"[{index}/{len(usernames)}] @{username}"
         try:
             ok = _process_username(db, username, summary, tag)
+        except LLMUnavailableError:
+            # OpenAI is out of credits / unavailable. Everything not finished
+            # (this username and the rest) counts as failed, so no row that
+            # still has work left is marked collaborators_checked — rows that
+            # were fully handled before this point still are.
+            failed.update(u.lower() for u in usernames[index - 1:])
+            _mark_rows_checked(db, [
+                row_id for row_id, row_usernames in rows.items()
+                if not any(u.lower() in failed for u in row_usernames)
+            ])
+            raise
         except Exception:
             logger.exception("%s: unexpected error — will retry next run", tag)
             db.rollback()
