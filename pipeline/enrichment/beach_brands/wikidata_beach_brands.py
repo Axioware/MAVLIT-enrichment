@@ -1,5 +1,5 @@
 """
-pipeline/enrichment/wikidata_beach_brands.py
+pipeline/enrichment/beach_brands/wikidata_beach_brands.py
 
 Discover brands with a genuine beach / water-sports / outdoor-athlete
 connection from Wikidata, and print them in the terminal. Discovery only —
@@ -13,11 +13,11 @@ beach_cooling, marine_safety, beach_camping, beach_fishing, beach_eyewear,
 beach_travel, marine_technology, ocean_conservation.
 
 Run from the project root:
-    python -m pipeline.enrichment.wikidata_beach_brands
-    python -m pipeline.enrichment.wikidata_beach_brands --limit 10
-    python -m pipeline.enrichment.wikidata_beach_brands --limit 10 --category surfing
-    python -m pipeline.enrichment.wikidata_beach_brands --limit 10 --category sun_protection
-    python -m pipeline.enrichment.wikidata_beach_brands --limit 20 --min-relevance HIGH --output beach_brands.json
+    python -m pipeline.enrichment.beach_brands.wikidata_beach_brands
+    python -m pipeline.enrichment.beach_brands.wikidata_beach_brands --limit 10
+    python -m pipeline.enrichment.beach_brands.wikidata_beach_brands --limit 10 --category surfing
+    python -m pipeline.enrichment.beach_brands.wikidata_beach_brands --limit 10 --category sun_protection
+    python -m pipeline.enrichment.beach_brands.wikidata_beach_brands --limit 20 --min-relevance HIGH --output beach_brands.json
 
 Discovery strategies (all live Wikidata queries, merged and deduplicated):
   A. Product relationships — beach product concepts (surfboard, wetsuit,

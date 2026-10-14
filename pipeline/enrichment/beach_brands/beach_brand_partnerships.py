@@ -1,5 +1,5 @@
 """
-pipeline/enrichment/beach_brand_partnerships.py
+pipeline/enrichment/beach_brands/beach_brand_partnerships.py
 
 Which beach-related US brands run creator partnerships?
 
@@ -32,10 +32,10 @@ stopped. --recheck ignores saved results. --no-db neither reads nor writes
 any table (no resume, nothing added to brands_raw).
 
 Run from the project root (FACEBOOK_PROXIES / SEARXNG_URL from .env):
-    python -m pipeline.enrichment.beach_brand_partnerships
-    python -m pipeline.enrichment.beach_brand_partnerships --output partnerships.json
-    python -m pipeline.enrichment.beach_brand_partnerships --category surfing --limit 5
-    python -m pipeline.enrichment.beach_brand_partnerships --input beach_brands.json
+    python -m pipeline.enrichment.beach_brands.beach_brand_partnerships
+    python -m pipeline.enrichment.beach_brands.beach_brand_partnerships --output partnerships.json
+    python -m pipeline.enrichment.beach_brands.beach_brand_partnerships --category surfing --limit 5
+    python -m pipeline.enrichment.beach_brands.beach_brand_partnerships --input beach_brands.json
 """
 
 import argparse
@@ -47,7 +47,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-from pipeline.enrichment import wikidata_beach_brands as wbb
+from pipeline.enrichment.beach_brands import wikidata_beach_brands as wbb
 from pipeline.enrichment_re.facebook_branded_content_checker import (
     END_DATE,
     START_DATE,
