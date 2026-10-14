@@ -373,6 +373,7 @@ def enrich_instagram_posts(
     brand_id: int | None = None,
     niche: str | None = None,
     workers: int = 1,
+    beach_brands_only: bool = False,
 ) -> int:
     """
     For each brand with instagram_handle set, instagram_checked=False,
@@ -402,6 +403,10 @@ def enrich_instagram_posts(
     (case-insensitive) — brands_raw.niche is stored verbatim as typed at
     seed time (see pipeline/seed.py), so this must match that same string.
     Ignored if brand_id is also given.
+
+    Pass beach_brands_only=True to process only brands with
+    brands_raw.beach_brands = true (those get the deeper 60-post scrape). The
+    run conditions above still apply to them.
 
     Pass workers > 1 to run that many Apify scrapes at the same time (the
     slow part). Only the Apify calls run in parallel threads; LLM filtering,
@@ -438,6 +443,8 @@ def enrich_instagram_posts(
         or_(has_confident_partnership, ~in_partnership_table),
         BrandRaw.brand_tier.in_(_ELIGIBLE_BRAND_TIERS),   # never empty / higher-range / extreme (brand_tier.py)
     )
+    if beach_brands_only:
+        query = query.filter(BrandRaw.beach_brands.is_(True))
     if brand_id is not None:
         query = query.filter(
             BrandRaw.id == brand_id,

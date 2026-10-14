@@ -48,6 +48,7 @@ from sqlalchemy.orm import Session
 from config import APIFY_TOKEN, OPENAI_KEY
 from pipeline.db import (
     BrandInstagramUser,
+    BrandRaw,
     InstagramCreatorCommenter,
     InstagramPost,
     InstagramUser,
@@ -537,6 +538,7 @@ def enrich_instagram_users(
     limit: int = 5,
     row_id: int | None = None,
     brand_raw_id: int | None = None,
+    beach_brands_only: bool = False,
 ) -> int:
     """
     Process up to `limit` instagram_posts with sponsorship_confidence >= 90
@@ -547,6 +549,10 @@ def enrich_instagram_users(
     key (instagram_posts.id) — bypasses the is_users_scraped filter (so you
     can re-run/test a post that was already processed). Not to be confused
     with instagram_posts.post_id, which is Instagram's own post ID string.
+
+    Pass beach_brands_only=True to scope the run to the instagram_posts rows
+    of brands with brands_raw.beach_brands = true (still filtered to
+    is_users_scraped=False and sponsorship_confidence >= 90).
 
     Pass brand_raw_id to scope the run to one brand's instagram_posts rows
     instead — still filtered to is_users_scraped=False, so repeated calls
@@ -572,6 +578,10 @@ def enrich_instagram_users(
         )
     else:
         query = query.filter(InstagramPost.is_users_scraped == False)
+    if beach_brands_only and row_id is None:
+        query = query.filter(InstagramPost.brand_raw_id.in_(
+            db.query(BrandRaw.id).filter(BrandRaw.beach_brands.is_(True))
+        ))
 
     posts: list[InstagramPost] = query.limit(limit).all()
 

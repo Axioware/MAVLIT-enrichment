@@ -72,6 +72,20 @@ enrich_instagram_posts(db, limit=100, niche='fashion', workers=4)
 db.close()
 "
 
+or (only brands with beach_brands = true — scraped for the last 60 posts instead of 40)
+
+python3 -c "
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.instagram_posts import enrich_instagram_posts
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+db = SessionLocal()
+enrich_instagram_posts(db, limit=100, beach_brands_only=True, workers=4)
+db.close()
+"
+# The usual run conditions still apply (tier lower/midlower/midhigher-range, refferls false,
+# geo_reach_score 0-40, not instagram_checked) — so run brand_tier.py and geo_reach.py first.
+
 ## to run youtube_sponsorship.py (daily limited run)
 python3 -c "
 from dotenv import load_dotenv; load_dotenv()
@@ -238,6 +252,21 @@ result = enrich_instagram_users(db, limit=5, brand_raw_id=5318)
 print('Posts processed:', result)
 db.close()
 "
+
+OR (only the instagram_posts rows of brands with beach_brands = true)
+
+python3 -c "
+import logging; logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.instagram_users import enrich_instagram_users
+db = SessionLocal()
+result = enrich_instagram_users(db, limit=50, beach_brands_only=True)
+print('Posts processed:', result)
+db.close()
+"
+# Needs the brand's posts scraped first (instagram_posts.py above) with
+# sponsorship_confidence >= 90.
 
 ## run brand_scoring.py
 python -c "
