@@ -17,8 +17,10 @@ higher-range = large, well-known companies that are hard but not impossible
 for an independent creator to reach.
 
 When a brand has no name or no description, the tier is guessed from its
-Instagram username (e.g. "shoptemu" -> Temu); the prompt's "unsure -> null"
-rule is relaxed for those rows.
+Instagram username (e.g. "shoptemu" -> Temu). A brand the LLM does not
+recognize at all is treated as small and gets lower-range — the prompt never
+asks for null; an empty tier only means the OpenAI call failed or returned
+nothing usable (retried on the next run).
 
 Safe to re-run — rows with brand_tier IS NULL are processed, and rows with an
 existing value are skipped. Brands with refferls = true are never processed. When the LLM gives no confirmed tier (unsure, or
@@ -92,9 +94,9 @@ Important rules:
 - Use extreme ONLY for Fortune 500 / household-name brands that mostly partner with celebrities and very large creators. Large but less famous companies, major subsidiaries, and well-known niche leaders are higher-range, not extreme.
 - Large parent companies, major subsidiaries, and major corporate brands should generally be higher-range (or extreme if they are Fortune 500 household names).
 - Government agencies, universities, major hospitals, museums, sports leagues, and major public institutions should generally be higher-range.
-- If information is limited, estimate based on brand name, website, description, and likely commercial scale.
-- If you are genuinely unsure, do not force a tier. Set "brand_tier" to null instead of guessing.
-- Only return a tier when the evidence is strong enough to support it.
+- If information is limited, estimate based on brand name, website, description, Instagram username, and likely commercial scale.
+- If you do not recognize the brand at all — you know nothing about it from its name, description, website or Instagram username — that is itself evidence that it is small. Household names and large companies are recognized by almost everyone, so a brand you have never heard of is very unlikely to be higher-range or extreme. Classify an unrecognized brand as lower-range (use midlower-range only if the description or website clearly shows an established regional or growing business).
+- Always return one of the five tiers. Do not return null.
 
 Brand name: {brand_name}
 Brand niche: {niche}
@@ -104,16 +106,16 @@ Instagram handle: {instagram_handle}
 Instagram username: {username}
 {identification_note}
 
-Respond with ONLY valid JSON:
+Respond with ONLY valid JSON, with exactly one of the five tier values:
 
-{"brand_tier":null}
+{"brand_tier":"<tier>"}
 """
 
 # Added to the prompt when the brand has no name or no description: the
 # Instagram username is then the main evidence, and the "unsure -> null" rule
 # is relaxed so a recognizable username still gets a tier.
 IDENTIFY_FROM_USERNAME_NOTE = """
-NOTE: this brand has no {missing}. Work out which brand or business the Instagram username "@{username}" belongs to (for example "shoptemu" is Temu, "espn" is ESPN, "homedepot" is The Home Depot) and classify THAT brand using the definitions above. Make your best-supported guess from the username; return null only when you cannot tell what business the username refers to.
+NOTE: this brand has no {missing}. Work out which brand or business the Instagram username "@{username}" belongs to (for example "shoptemu" is Temu, "espn" is ESPN, "homedepot" is The Home Depot) and classify THAT brand using the definitions above. If you cannot tell which business the username refers to, or you have never heard of it, it is almost certainly a small brand: classify it as lower-range.
 """
 
 _NORMALIZED_VALUES = {
