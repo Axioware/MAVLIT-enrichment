@@ -71,7 +71,7 @@ and returns the page HTML. Set JINA_API_KEY in .env for higher rate limits.
 
 RUN CONDITIONS — a brands_raw row is scored only when ALL hold:
   1. geo_reach_score is empty.
-  2. geo_reach_country_codes is empty / null / [].
+  2. geo_reach_country_codes is empty / null / [] / {}.
   3. website is set.
   4. refferls = false.
   5. brand_tier is lower-range, midlower-range or midhigher-range. NOT run
@@ -792,6 +792,9 @@ def enrich_geo_reach(
             # None) is not SQL NULL — treat it as "no result yet" too.
             | (func.jsonb_typeof(BrandRaw.geo_reach_country_codes) == "null")
             | (BrandRaw.geo_reach_country_codes == [])
+            # '{}' (empty JSON object) is what /admin writes into JSON columns
+            # when a brand row is edited and saved (e.g. ticking beach_brands).
+            | (BrandRaw.geo_reach_country_codes == {})
         ),
         BrandRaw.website.isnot(None),
         BrandRaw.website != "",
