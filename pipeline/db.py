@@ -59,6 +59,9 @@ class BrandRaw(Base):
     # True when content_creator_re's brand_check LLM sees this brand using
     # a creator discount/referral code in a confirmed partnership post.
     refferls          = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Beach / ocean related brand — set to true manually (e.g. in /admin);
+    # false for every brand by default.
+    beach_brands      = Column(Boolean, nullable=False, server_default="false", default=False)
     target_audience_gender = Column(Text)
     target_audience_gender_confidence = Column(Integer)
     target_audience_min_age = Column(Integer)

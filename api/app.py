@@ -214,6 +214,7 @@ def _run_migrations() -> None:
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS wikipedia_url TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS source_confidence INTEGER",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS refferls BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS beach_brands BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw DROP COLUMN IF EXISTS male_pct",
         "ALTER TABLE brands_raw DROP COLUMN IF EXISTS male_confidence",
         "ALTER TABLE brands_raw DROP COLUMN IF EXISTS female_pct",
