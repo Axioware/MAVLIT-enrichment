@@ -21,7 +21,7 @@ Instagram username (e.g. "shoptemu" -> Temu); the prompt's "unsure -> null"
 rule is relaxed for those rows.
 
 Safe to re-run — rows with brand_tier IS NULL are processed, and rows with an
-existing value are skipped. When the LLM gives no confirmed tier (unsure, or
+existing value are skipped. Brands with refferls = true are never processed. When the LLM gives no confirmed tier (unsure, or
 the OpenAI call failed) brand_tier is left NULL — never the text 'null' — so
 the row is retried on the next run.
 """
@@ -185,8 +185,12 @@ def _classify_brand_tier(db: Session, brand: BrandRaw) -> str | None:
 
 
 def score_brand_tier(db: Session, limit: int | None = None, brand_raw_id: int | None = None) -> int:
-    """Set brand_tier for pending brands in brands_raw."""
-    query = db.query(BrandRaw).filter(BrandRaw.brand_tier.is_(None))
+    """Set brand_tier for pending brands in brands_raw (brand_tier IS NULL, refferls not true)."""
+    # refferls=True brands are skipped; NULL / False are processed.
+    query = db.query(BrandRaw).filter(
+        BrandRaw.brand_tier.is_(None),
+        BrandRaw.refferls.isnot(True),
+    )
     if brand_raw_id is not None:
         query = query.filter(BrandRaw.id == brand_raw_id)
     if limit is not None:

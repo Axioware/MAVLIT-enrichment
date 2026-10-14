@@ -7,12 +7,14 @@ RUN CONDITIONS — a brands_raw row is processed (batch mode) only when ALL hold
      NOT run for: brand_tier NULL / empty (not classified yet — run
      pipeline/enrichment/brand_tier.py first), the text 'null', higher-range
      or extreme.
-  3. instagram_profile_checked = false (not processed before).
-  4. Partnership evidence is not weak: the brand has at least one
+  3. refferls is not true (refferls = true brands are never processed; NULL
+     and false are).
+  4. instagram_profile_checked = false (not processed before).
+  5. Partnership evidence is not weak: the brand has at least one
      test_creator_brand_partnership_posts row with sponsorship_confidence
      >= 90, or no row there at all. A brand with posts ONLY below 90 is skipped.
-Requires APIFY_TOKEN. Passing brand_id targets one brand and skips 3 and 4
-(1 and 2 still apply). Rows whose Apify scrape fails stay unchecked and are
+Requires APIFY_TOKEN. Passing brand_id targets one brand and skips 4 and 5
+(1, 2 and 3 still apply). Rows whose Apify scrape fails stay unchecked and are
 retried on the next run.
 
 Name/website resolution AND verification straight from a brand's own
@@ -714,8 +716,8 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
 
     Batch mode (no brand_id) processes every row with instagram_handle set,
     brand_tier in _ELIGIBLE_BRAND_TIERS (lower-range / midlower-range /
-    midhigher-range — never NULL, higher-range or extreme) and
-    instagram_profile_checked=False — named or bare, whether or not
+    midhigher-range — never NULL, higher-range or extreme), refferls not true
+    and instagram_profile_checked=False — named or bare, whether or not
     brand_wikidata_lookup.py has run on it yet — EXCEPT brands that are in
     test_creator_brand_partnership_posts only with sponsorship_confidence
     < _MIN_PARTNERSHIP_CONFIDENCE. A brand qualifies if it has at least one
@@ -736,6 +738,7 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
         # 'null' (not classified yet), higher-range and extreme (Fortune-500 /
         # household-name brands) — see brand_tier.py.
         BrandRaw.brand_tier.in_(_ELIGIBLE_BRAND_TIERS),
+        BrandRaw.refferls.isnot(True),   # never referral brands (NULL / False still run)
     )
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
