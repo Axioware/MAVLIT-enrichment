@@ -1,6 +1,22 @@
 """
 pipeline/enrichment/brand_tier.py
 
+RUN CONDITIONS — a brands_raw row is classified only when ALL hold:
+  1. brand_tier IS NULL (empty). Rows that already have a tier are skipped,
+     and so are rows holding the old text 'null' — reset those to NULL first
+     (UPDATE brands_raw SET brand_tier = NULL WHERE brand_tier = 'null').
+  2. refferls is not true (NULL and false run; refferls = true never does).
+  3. Partnership evidence is not weak — EITHER the brand has a
+     test_creator_brand_partnership_posts row with sponsorship_confidence
+     >= 90 (any post date), OR it has no row in that table at all. A brand
+     whose posts are ALL below 90 is skipped.
+Nothing else is required: no website, name, description, Instagram handle or
+geo score. A brand without a name or description is
+guessed from its Instagram username. Needs OPENAI_KEY (without it every
+brand is left empty). --brand-id and --limit only narrow the set; they do not
+bypass 1, 2 or 3. This is the first step of the tier-limited chain — geo_reach,
+instagram_posts and brand_instagram_profile skip a brand until it has a tier.
+
 Classify each brand in brands_raw into a market tier based on likely scale,
 brand power, and premium positioning.
 
@@ -19,13 +35,12 @@ for an independent creator to reach.
 When a brand has no name or no description, the tier is guessed from its
 Instagram username (e.g. "shoptemu" -> Temu). A brand the LLM does not
 recognize at all is treated as small and gets lower-range — the prompt never
-asks for null; an empty tier only means the OpenAI call failed or returned
-nothing usable (retried on the next run).
+asks for null. brand_tier stays NULL (never the text 'null') only when the
+OpenAI call failed or returned nothing usable, so the row is retried on the
+next run; if OpenAI is out of credits the run stops (LLMUnavailableError)
+without marking anything.
 
-Safe to re-run — rows with brand_tier IS NULL are processed, and rows with an
-existing value are skipped. Brands with refferls = true are never processed. When the LLM gives no confirmed tier (unsure, or
-the OpenAI call failed) brand_tier is left NULL — never the text 'null' — so
-the row is retried on the next run.
+Safe to re-run — rows with an existing tier are skipped.
 """
 
 import argparse
@@ -35,10 +50,14 @@ import re
 from sqlalchemy.orm import Session
 
 from config import OPENAI_KEY
-from pipeline.db import BrandRaw, SessionLocal
+from sqlalchemy import or_
+
+from pipeline.db import BrandRaw, SessionLocal, TestCreatorBrandPartnershipPost
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 
 logger = logging.getLogger(__name__)
+
+_MIN_PARTNERSHIP_CONFIDENCE = 90
 
 BRAND_TIER_PROMPT = """
 You are classifying a brand's sponsorship accessibility tier for influencer marketing.
@@ -187,11 +206,31 @@ def _classify_brand_tier(db: Session, brand: BrandRaw) -> str | None:
 
 
 def score_brand_tier(db: Session, limit: int | None = None, brand_raw_id: int | None = None) -> int:
-    """Set brand_tier for pending brands in brands_raw (brand_tier IS NULL, refferls not true)."""
+    """
+    Set brand_tier for pending brands in brands_raw: brand_tier IS NULL,
+    refferls not true, and either a partnership post with
+    sponsorship_confidence >= 90 or no partnership post row at all.
+    """
+    has_confident_partnership = (
+        db.query(TestCreatorBrandPartnershipPost.id)
+        .filter(
+            TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
+            TestCreatorBrandPartnershipPost.sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE,
+        )
+        .exists()
+    )
+    in_partnership_table = (
+        db.query(TestCreatorBrandPartnershipPost.id)
+        .filter(TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id)
+        .exists()
+    )
     # refferls=True brands are skipped; NULL / False are processed.
     query = db.query(BrandRaw).filter(
         BrandRaw.brand_tier.is_(None),
         BrandRaw.refferls.isnot(True),
+        # a confirmed (>= 90) partnership, or not in the partnership table at all;
+        # brands whose posts are only below 90 are skipped
+        or_(has_confident_partnership, ~in_partnership_table),
     )
     if brand_raw_id is not None:
         query = query.filter(BrandRaw.id == brand_raw_id)
