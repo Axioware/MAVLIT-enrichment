@@ -37,6 +37,13 @@ Fetches each brand's homepage to:
 
      Skipped entirely if OPENAI_KEY isn't set. brands_niches is upserted
      (not just updated) since a bare brand has no existing row there yet.
+  6. Beach relevance — with the same description and Instagram evidence, a
+     second LLM call (brand_beach_related prompt) decides whether the brand,
+     or any of its products, is beach / ocean related (surfing, swimwear,
+     diving, water sports, sun protection, action cameras, beach gear, ...)
+     whatever its primary niche. A confident "yes" sets brands_raw.
+     beach_brands = true. It is only ever switched ON here — a brand already
+     flagged (e.g. by hand) is never switched off, and a "no" changes nothing.
 
 Social fields are only written if the column is currently NULL, so they
 don't overwrite more-authoritative Wikidata data fetched earlier.
@@ -70,6 +77,8 @@ from pipeline.helpers.gpt_llm import LLMUnavailableError, call_gpt_json, fill_te
 from pipeline.helpers.http import fetch_html_with_jina_fallback
 from pipeline.helpers.normalize import normalize
 from pipeline.helpers.prompts import (
+    BRAND_BEACH_RELATED_DEFAULT_PROMPT,
+    BRAND_BEACH_RELATED_PROMPT_NAME,
     BRAND_NICHE_TAGS_DEFAULT_PROMPT,
     BRAND_NICHE_TAGS_PROMPT_NAME,
 )
@@ -321,6 +330,14 @@ def _get_brand_niche_tags_prompt(db: Session) -> str:
     return row.content if row else BRAND_NICHE_TAGS_DEFAULT_PROMPT
 
 
+_BEACH_MIN_CONFIDENCE = 70   # beach_brands is only switched on at or above this confidence
+
+
+def _get_brand_beach_prompt(db: Session) -> str:
+    row = db.query(Prompt).filter(Prompt.name == BRAND_BEACH_RELATED_PROMPT_NAME).first()
+    return row.content if row else BRAND_BEACH_RELATED_DEFAULT_PROMPT
+
+
 _INSTAGRAM_POSTS_FOR_NICHE = 5   # brand's own recent posts sent with the website description
 
 
@@ -390,6 +407,46 @@ def _extract_brand_niche_and_tags(
     tags = result.get("tags")
     tags = [t for t in tags if isinstance(t, str) and t.strip()] if isinstance(tags, list) else []
     return name, niche, tags
+
+
+def _detect_beach_brand(db: Session, brand: BrandRaw, description: str) -> bool:
+    """
+    Ask the LLM whether this brand, or any of its products, is beach / ocean
+    related; on a confident yes set brand.beach_brands = True. Returns True
+    when the flag was switched on by this call. Never switches it off, and
+    does nothing when it is already on. Raises LLMUnavailableError (via
+    call_gpt_json) when OpenAI is unavailable.
+    """
+    if not OPENAI_KEY or brand.beach_brands:
+        return False
+    prompt = fill_template(
+        _get_brand_beach_prompt(db),
+        brand_name=brand.name or "unknown",
+        niche=brand.niche or "unknown",
+        description=description,
+        instagram_posts=_instagram_evidence(db, brand.id),
+    )
+    result = call_gpt_json(prompt, context=f"beach related check for {brand.name or brand.id}")
+    if not isinstance(result, dict) or result.get("beach_related") is not True:
+        return False
+    try:
+        confidence = int(result.get("confidence"))
+    except (TypeError, ValueError):
+        confidence = 0
+    if confidence < _BEACH_MIN_CONFIDENCE:
+        logger.info(
+            "Shopify/socials check: %s looks beach related but confidence %d < %d — not flagged",
+            brand.name or f"brand_id={brand.id}", confidence, _BEACH_MIN_CONFIDENCE,
+        )
+        return False
+    brand.beach_brands = True
+    products = result.get("products")
+    logger.info(
+        "Shopify/socials check: %s flagged beach_brands=true (confidence %d) — %s%s",
+        brand.name or f"brand_id={brand.id}", confidence, str(result.get("reason") or "").strip()[:160],
+        f" | products: {', '.join(str(p) for p in products[:5])}" if isinstance(products, list) and products else "",
+    )
+    return True
 
 
 def _upsert_brand_niche(db: Session, brand_id: int, niche: str, description: str, tags: list[str] | None) -> None:
@@ -500,6 +557,7 @@ def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None, bran
     shopify_count = 0
     socials_count = 0
     about_count   = 0
+    beach_count   = 0
 
     for brand in brands:
         html = _fetch_page(brand.website)
@@ -535,6 +593,8 @@ def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None, bran
                 logger.debug("  %s.description set (%d chars)", brand.name, len(about_text))
                 try:
                     _update_brand_niche_description_and_tags(db, brand, about_text)
+                    if _detect_beach_brand(db, brand, about_text):
+                        beach_count += 1
                 except LLMUnavailableError:
                     # OpenAI is out of credits / unavailable. shopify_checked,
                     # is_shopify and the description are staged but not
@@ -554,7 +614,8 @@ def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None, bran
 
     woo_count = sum(1 for b in brands if b.is_woocommerce)
     logger.info(
-        "Shopify/socials check: %d done, %d Shopify, %d WooCommerce, %d social URLs filled, %d about descriptions set",
-        updated, shopify_count, woo_count, socials_count, about_count,
+        "Shopify/socials check: %d done, %d Shopify, %d WooCommerce, %d social URLs filled, "
+        "%d about descriptions set, %d flagged beach_brands",
+        updated, shopify_count, woo_count, socials_count, about_count, beach_count,
     )
     return updated

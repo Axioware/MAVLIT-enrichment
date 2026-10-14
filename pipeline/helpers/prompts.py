@@ -1146,6 +1146,37 @@ Reply ONLY with this JSON object, no extra text:
 Use an empty list for tags if the description and Instagram posts don't give enough information — do not invent tags not supported by the input. If you truly cannot determine a niche from the description or the Instagram posts, use "unknown" for niche. If you truly cannot determine a real brand name from the description or the Instagram bio/posts, use "unknown" for name.\
 """
 
+BRAND_BEACH_RELATED_PROMPT_NAME = "brand_beach_related"
+BRAND_BEACH_RELATED_DEFAULT_PROMPT = """\
+You decide whether a brand is BEACH / OCEAN RELATED for MAVLIT, an influencer-partnership platform.
+
+A brand is beach related when its business, or at least one of its products, is something people use at the beach, in or on the water, or to experience or film the ocean — from ANY primary niche. It does not have to describe itself as a beach brand.
+
+Beach / ocean related product areas:
+- Surfing, bodyboarding, skimboarding, windsurfing, kitesurfing, wakeboarding, water skiing, stand-up paddleboarding, kayaking, canoeing, sailing, boating, jet skis
+- Swimming, swimwear, boardshorts, wetsuits, rash guards, UV / sun-protective clothing, beach and water footwear (water shoes, flip-flops), beach hats
+- Freediving, spearfishing, scuba diving, snorkeling and dive equipment (masks, fins, regulators, dive computers)
+- Surf and saltwater fishing, boating and marine safety (life jackets, flotation, beacons)
+- Action cameras, underwater cameras and housings, waterproof camera gear, camera drones, waterproof headphones / speakers / wearables used for water sports or filming the ocean
+- Sunscreen, after-sun and reef-safe skincare, SPF lip balm, sun-protection eyewear
+- Beach gear: towels, umbrellas, shade tents, chairs, coolers, dry bags, waterproof phone cases, beach bags, camping gear for the coast
+- Hydration and electrolyte products aimed at outdoor / water-sports athletes
+- Ocean conservation and beach cleanup products
+
+NOT beach related on their own: a generic clothing, electronics, food, beverage, software or travel brand with no product aimed at the beach, water sports or the ocean; a brand that is only "outdoorsy" in a general sense; the mere mention of a beach in a name, location or photo.
+
+Decide from the brand name, niche, description and recent Instagram posts below. Say true only when the evidence clearly shows beach / ocean products or activity. When the evidence is thin or ambiguous, say false.
+
+Brand name: {brand_name}
+Brand niche: {niche}
+Brand description: {description}
+Recent Instagram posts: {instagram_posts}
+
+Respond with ONLY valid JSON:
+{"beach_related": true, "confidence": 0, "products": ["the beach / ocean products or activities that make it relevant"], "reason": "one short sentence"}
+Use "beach_related": false and an empty products list when it is not beach related. "confidence" is an integer 0-100 for how sure you are of that answer.
+"""
+
 
 #  content_creator_re.py
 
