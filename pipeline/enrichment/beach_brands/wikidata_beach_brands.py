@@ -63,6 +63,13 @@ from urllib.parse import urlparse
 
 import httpx
 
+from pipeline.enrichment.beach_brands.beach_categories import (
+    CATEGORY_SPECS,
+    EXPAND_TERMS,
+    PRIORITY_CATEGORIES,
+    normalize_term,
+    term_regex,
+)
 from pipeline.sources.wikidata import _extract_domain, _website_score
 
 logger = logging.getLogger(__name__)
@@ -81,6 +88,8 @@ BACKOFF_BASE = 2.0         # exponential backoff for transient errors: 2, 4, 8 s
 QUERY_PAUSE = 1.0          # politeness pause between Wikidata requests
 DETAIL_BATCH = 40          # entities per details query
 SUBCLASS_CAP = 150         # max product classes after subclass expansion
+LABEL_CHUNK = 120          # product labels resolved per SPARQL query
+PRODUCT_CHUNK = 100        # product classes per relationship query
 RESULT_CAP = 1500          # LIMIT on relationship queries (many product classes now)
 
 EXIT_OK = 0
@@ -175,10 +184,7 @@ PRODUCT_CONCEPTS: tuple[tuple[str, str, bool], ...] = (
     ("oral rehydration therapy", "hydration", False),
     ("hydration pack", "hydration", False),
     ("water bottle", "hydration", False),
-    ("protein bar", "sports_nutrition", False),
     ("energy gel", "sports_nutrition", False),
-    ("protein supplement", "sports_nutrition", False),
-    ("dietary supplement", "sports_nutrition", False),
     ("beach towel", "beach_accessories", False),
     ("beach umbrella", "beach_accessories", False),
     ("dry bag", "beach_accessories", False),
@@ -263,8 +269,6 @@ KEYWORD_TERMS: tuple[tuple[str, str], ...] = (
     ("sports drink", "hydration"),
     ("hydration pack", "hydration"),
     ("insulated water bottle", "hydration"),
-    ("protein powder", "sports_nutrition"),
-    ("protein bar", "sports_nutrition"),
     ("energy gel", "sports_nutrition"),
     ("sports nutrition", "sports_nutrition"),
     ("hair sun protection", "beach_haircare"),
@@ -373,7 +377,7 @@ RELEVANCE_TERMS: dict[str, tuple[str, ...]] = {
         r"sports?\s+drinks?", r"oral\s+rehydration", r"insulated\s+water\s+bottles?",
     ),
     "sports_nutrition": (
-        r"protein\s+(?:powders?|bars?|shakes?|supplements?)", r"energy\s+gels?", r"endurance\s+nutrition",
+        r"energy\s+gels?", r"endurance\s+nutrition",
         r"carbohydrate\s+drink\s+mix(?:es)?", r"sports?\s+(?:nutrition|supplements?)", r"hydration\s+supplements?",
     ),
     "beach_haircare": (
@@ -426,12 +430,40 @@ RELEVANCE_TERMS: dict[str, tuple[str, ...]] = {
 # Kept for the MEDIUM cap mechanism; empty now that diving/snorkeling is its
 # own requested category instead of "aquatic but not beach fitness".
 WEAK_TERMS: tuple[str, ...] = ()
+
+
+# ---------------------------------------------------------------------------
+# Beach / ocean categories (beach_categories.py): every term feeds Strategy A
+# (product class by exact label), Strategy C (keyword search) and the
+# relevance vocabulary. A category that already exists above (sun_protection,
+# beach_footwear, ...) is extended, not replaced.
+# ---------------------------------------------------------------------------
+def _merge_category_specs() -> None:
+    global CATEGORIES, PRODUCT_CONCEPTS, KEYWORD_TERMS
+    new_categories, concepts, keywords = [], [], []
+    for category, (label, terms) in CATEGORY_SPECS.items():
+        if category not in CATEGORY_LABELS:
+            CATEGORY_LABELS[category] = label
+            new_categories.append(category)
+        patterns = [term_regex(t) for t in terms]
+        RELEVANCE_TERMS[category] = tuple(dict.fromkeys(RELEVANCE_TERMS.get(category, ()) + tuple(patterns)))
+        for term in terms:
+            concepts.append((term, category, term in EXPAND_TERMS))
+            keywords.append((term, category))
+    CATEGORIES = CATEGORIES + tuple(new_categories)
+    PRODUCT_CONCEPTS = PRODUCT_CONCEPTS + tuple(concepts)
+    KEYWORD_TERMS = KEYWORD_TERMS + tuple(keywords)
+
+
+_merge_category_specs()
 NEGATIVE_CONTEXT = re.compile(
     r"\b(?:schools?|camps?|lessons?|rentals?|tour\s+operators?|governing\s+body|leagues?|federations?|"
     r"associations?|hotels?|resorts?|spas?|museums?|festivals?|films?|album|magazines?|television|restaurants?|"
     r"software|web\s+design|agency|detergent|dairy|chemical|paint|swimming\s+pool|pool\s+(?:supplies|"
     r"equipment|systems|products)|wikimedia|disambiguation|human|family\s+name|given\s+name|"
-    r"census|village|city|town|lake|beach\s+in|island|parish)\b",
+    r"census|village|city|town|lake|beach\s+in|island|parish|"
+    r"military|defen[cs]e|weapons?|missiles?|armaments?|"
+    r"metasearch|online\s+travel|travel\s+(?:agency|search|booking|fare)|flights?|airlines?)\b",
     re.I,
 )
 DEFUNCT = re.compile(r"\b(?:former|defunct|dissolved|bankrupt|closed\s+down)\b", re.I)
@@ -622,17 +654,19 @@ def _add(cands: dict[str, Candidate], qid: str | None, method: str,
 def resolve_concepts(client: WikidataClient, labels) -> dict[str, list[str]]:
     """Exact English label -> QIDs of items that are real classes (have P279)."""
     labels = list(dict.fromkeys(labels))
-    rows = client.sparql(f"""
+    out: dict[str, list[str]] = {}
+    for i in range(0, len(labels), LABEL_CHUNK):
+        chunk = labels[i:i + LABEL_CHUNK]
+        rows = client.sparql(f"""
 SELECT ?l ?item WHERE {{
-  VALUES ?l {{ {_literal_block(labels)} }}
+  VALUES ?l {{ {_literal_block(chunk)} }}
   ?item rdfs:label ?l .
   FILTER EXISTS {{ ?item wdt:P279 [] }}
 }}""")
-    out: dict[str, list[str]] = {}
-    for row in rows:
-        label, qid = _value(row, "l"), _qid(_value(row, "item"))
-        if label and qid:
-            out.setdefault(label, []).append(qid)
+        for row in rows:
+            label, qid = _value(row, "l"), _qid(_value(row, "item"))
+            if label and qid:
+                out.setdefault(label, []).append(qid)
     return out
 
 
@@ -657,15 +691,20 @@ SELECT DISTINCT ?p ?pl ?concept WHERE {{
 def discover_by_products(client: WikidataClient, cands: dict[str, Candidate],
                          categories: tuple[str, ...]) -> None:
     concepts = [c for c in PRODUCT_CONCEPTS if c[1] in categories]
-    resolved = resolve_concepts(client, [c[0] for c in concepts])
+    # Wikidata labels are case-sensitive and mostly lower-case ("surfboard")
+    # with some capitalised ("Surfwear", "Kiteboard") — ask for both forms.
+    wanted = list(dict.fromkeys(f for c in concepts for f in (c[0], c[0][:1].upper() + c[0][1:])))
+    resolved = resolve_concepts(client, wanted)
     product_label: dict[str, str] = {}
     product_category: dict[str, str] = {}
     to_expand: list[str] = []
     for label, category, expand in concepts:
-        for qid in resolved.get(label, []):
-            product_label[qid], product_category[qid] = label, category
-            if expand:
-                to_expand.append(qid)
+        for form in dict.fromkeys((label, label[:1].upper() + label[1:])):
+            for qid in resolved.get(form, []):
+                product_label.setdefault(qid, label)
+                product_category.setdefault(qid, category)
+                if expand and qid not in to_expand:
+                    to_expand.append(qid)
     for qid, (label, parent) in expand_subclasses(client, to_expand).items():
         if qid not in product_label:
             product_label[qid] = label
@@ -673,19 +712,21 @@ def discover_by_products(client: WikidataClient, cands: dict[str, Candidate],
     if not product_label:
         logger.warning("Strategy A: no product concepts resolved")
         return
-    block = _values_block(product_label)
     logger.info("Strategy A: %d product classes", len(product_label))
 
-    for row in client.sparql(f"""
+    qids = list(product_label)
+    for i in range(0, len(qids), PRODUCT_CHUNK):
+        block = _values_block(qids[i:i + PRODUCT_CHUNK])
+        for row in client.sparql(f"""
 SELECT DISTINCT ?c ?p WHERE {{ VALUES ?p {{ {block} }} ?c wdt:P1056 ?p . }} LIMIT {RESULT_CAP}"""):
-        p = _qid(_value(row, "p"))
-        _add(cands, _qid(_value(row, "c")), "Product relationship (company produces, P1056)",
-             product_label.get(p), product_category.get(p))
-    for row in client.sparql(f"""
+            p = _qid(_value(row, "p"))
+            _add(cands, _qid(_value(row, "c")), "Product relationship (company produces, P1056)",
+                 product_label.get(p), product_category.get(p))
+        for row in client.sparql(f"""
 SELECT DISTINCT ?c ?p WHERE {{ VALUES ?p {{ {block} }} ?x wdt:P31 ?p . ?x wdt:P176 ?c . }} LIMIT {RESULT_CAP}"""):
-        p = _qid(_value(row, "p"))
-        _add(cands, _qid(_value(row, "c")), "Product relationship (manufacturer of product, P176)",
-             product_label.get(p), product_category.get(p))
+            p = _qid(_value(row, "p"))
+            _add(cands, _qid(_value(row, "c")), "Product relationship (manufacturer of product, P176)",
+                 product_label.get(p), product_category.get(p))
 
 
 def discover_by_industry(client: WikidataClient, cands: dict[str, Candidate]) -> None:
@@ -705,11 +746,18 @@ SELECT DISTINCT ?c WHERE {{ VALUES ?t {{ {_values_block(classes)} }} ?c wdt:P31 
 
 def discover_by_keywords(client: WikidataClient, cands: dict[str, Candidate],
                          categories: tuple[str, ...]) -> None:
+    # One Wikidata search per distinct term (many categories share terms such
+    # as "snorkel" or "life jacket"); every selected category it belongs to is
+    # attached to what it finds.
+    by_term: dict[str, tuple[str, set[str]]] = {}
     for term, category in KEYWORD_TERMS:
-        if category not in categories:
-            continue
+        if category in categories:
+            by_term.setdefault(normalize_term(term), (term, set()))[1].add(category)
+    logger.info("Strategy C: %d keyword searches", len(by_term))
+    for term, cats in by_term.values():
         for qid in client.search(term):
-            _add(cands, qid, f"Keyword search ('{term}')", category=category)
+            _add(cands, qid, f"Keyword search ('{term}')")
+            cands[qid].discovery_categories.update(cats)
 
 
 # ---------------------------------------------------------------------------
@@ -976,6 +1024,23 @@ def _classify_evidence(cand: Candidate, desc: str) -> Relevance:
         return Relevance("MEDIUM", f"Broader business with a beach-related product line per Wikidata: {', '.join(evidence[:5])}.", categories)
     if desc_cats:
         return Relevance("MEDIUM", f"Description mentions beach products but does not describe the business clearly: \"{desc}\".", desc_cats)
+    # Found by a product search (keyword search restricted to companies /
+    # brands, or a product-class lookup) but Wikidata's own description and
+    # product list don't name the category — typical for big general
+    # companies (GoPro and DJI are just "technology company" there). Their
+    # products are what makes them relevant, so keep them at MEDIUM.
+    if cand.discovery_categories:
+        cats = [c for c in CATEGORIES if c in cand.discovery_categories]
+        searched = sorted(
+            m.split("('", 1)[1].rstrip("')") for m in cand.methods if m.startswith("Keyword search ('")
+        ) or sorted(cand.discovery_products)
+        return Relevance(
+            "MEDIUM",
+            "Found by a Wikidata search for beach/ocean product terms "
+            f"({', '.join(searched[:5])}); Wikidata's description does not name the product line, "
+            f"so check the company's own products. Description: \"{desc or 'none'}\".",
+            cats,
+        )
     return Relevance("LOW", "No beach or water-sports evidence in Wikidata.", [])
 
 
@@ -1128,7 +1193,7 @@ def build_results(cands: dict[str, Candidate], category: str = "all",
         rel = classify_relevance(cand)
         if rel.level not in allowed:
             continue
-        if category != "all" and category not in rel.categories:
+        if category != "all" and not set(selected_categories(category)) & set(rel.categories):
             continue
         coverage = classify_coverage(cand)
         if not all_coverage and coverage.level not in QUALIFYING_COVERAGE:
@@ -1188,10 +1253,19 @@ def dedupe_by_domain(results: list[BrandResult]) -> list[BrandResult]:
     return out
 
 
+def selected_categories(category: str) -> tuple[str, ...]:
+    """--category value -> the categories it covers: "all", "priority" (core ocean sports) or one."""
+    if category == "all":
+        return CATEGORIES
+    if category == "priority":
+        return PRIORITY_CATEGORIES
+    return (category,)
+
+
 def discover(client: WikidataClient, category: str = "all", min_relevance: str = "MEDIUM",
              all_coverage: bool = False) -> list[BrandResult]:
     """Run all strategies, fetch details, classify and dedupe. QID dedupe is built into _add()."""
-    categories = CATEGORIES if category == "all" else (category,)
+    categories = selected_categories(category)
     cands: dict[str, Candidate] = {}
     discover_by_products(client, cands, categories)
     discover_by_industry(client, cands)
@@ -1293,8 +1367,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Discover beach / water-sports fitness brands from Wikidata (prints to terminal; no database writes).")
     parser.add_argument("--limit", type=_limit_arg, default=None,
                         help="Max number of unique brands to display (default: all of them).")
-    parser.add_argument("--category", default="all", choices=("all",) + CATEGORIES,
-                        help="Restrict to one beach category (default all).")
+    parser.add_argument("--category", default="all", choices=("all", "priority") + CATEGORIES,
+                        help="Restrict to one category, or 'priority' (surfing, freediving, spearfishing, "
+                             "scuba diving, snorkeling, paddle sports). Default: all.")
     parser.add_argument("--min-relevance", type=_relevance_arg, default="MEDIUM",
                         help="Minimum relevance: HIGH or MEDIUM (default MEDIUM).")
     parser.add_argument("--timeout", type=_timeout_arg, default=DEFAULT_TIMEOUT,

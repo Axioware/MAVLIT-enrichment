@@ -300,7 +300,8 @@ def main(argv: list[str] | None = None) -> int:
     for noisy in ("httpx", "httpcore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--category", default="all", choices=("all",) + wbb.CATEGORIES)
+    parser.add_argument("--category", default="all", choices=("all", "priority") + wbb.CATEGORIES,
+                        help="One category, 'priority' (core ocean sports) or all.")
     parser.add_argument("--min-relevance", default="MEDIUM", choices=("HIGH", "MEDIUM"))
     parser.add_argument("--all-coverage", action="store_true",
                         help="Also include brands without evidence of operating in the US.")
