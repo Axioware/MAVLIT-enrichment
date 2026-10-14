@@ -758,6 +758,7 @@ def enrich_geo_reach(
     brand_id: int | None = None,
     niche: str | None = None,
     creator_niche: str | None = None,
+    beach_brands_only: bool = False,
 ) -> int:
     """
     Score geographic reach for pending brands_raw rows that have a website,
@@ -767,6 +768,9 @@ def enrich_geo_reach(
     Only brands with brand_tier lower-range / midlower-range / midhigher-range
     run — an empty tier, higher-range and extreme are skipped. See "RUN
     CONDITIONS" in the module docstring.
+
+    beach_brands_only=True limits the run to brands with
+    brands_raw.beach_brands = true (the run conditions above still apply).
 
     niche filters on the brand's OWN brands_raw.niche. creator_niche instead
     filters on the niche of the content_creator_re row(s) that discovered
@@ -812,6 +816,8 @@ def enrich_geo_reach(
         query = query.filter(BrandRaw.id == brand_id)
     if niche is not None:
         query = query.filter(BrandRaw.niche == niche)
+    if beach_brands_only:
+        query = query.filter(BrandRaw.beach_brands.is_(True))
     if creator_niche is not None:
         creator_brand_ids = (
             db.query(TestCreatorBrandPartnershipPost.brand_raw_id)
@@ -850,12 +856,17 @@ def main() -> None:
         "--creator-niche", type=str, default=None, dest="creator_niche",
         help="Limit to brands discovered via a content_creator_re row with this niche.",
     )
+    parser.add_argument(
+        "--beach-brands-only", action="store_true", dest="beach_brands_only",
+        help="Only brands with brands_raw.beach_brands = true.",
+    )
     args = parser.parse_args()
 
     db = SessionLocal()
     try:
         updated = enrich_geo_reach(
             db, limit=args.limit, brand_id=args.brand_id, niche=args.niche, creator_niche=args.creator_niche,
+            beach_brands_only=args.beach_brands_only,
         )
         print(f"geo_reach: updated={updated}")
     finally:

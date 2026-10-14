@@ -523,6 +523,11 @@ python3 -m pipeline.enrichment.geo_reach.geo_reach --limit 1
 python3 -m pipeline.enrichment.geo_reach.geo_reach --brand-id 5318
 python3 -m pipeline.enrichment.geo_reach.geo_reach --limit 1 --creator-niche Fitness
 
+or (only brands with beach_brands = true — the usual geo_reach run conditions still apply:
+tier lower/midlower/midhigher-range, refferls false, website set, no geo score yet)
+
+python3 -m pipeline.enrichment.geo_reach.geo_reach --beach-brands-only
+
 
 ## TASKS
 ### after all have to run LLM(one time) for niche of creators for specific selected niche
