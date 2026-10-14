@@ -69,6 +69,20 @@ Pages are fetched with a direct GET; if a site blocks or errors on that
 Reader (r.jina.ai), which renders it in a headless browser on Jina's side
 and returns the page HTML. Set JINA_API_KEY in .env for higher rate limits.
 
+RUN CONDITIONS — a brands_raw row is scored only when ALL hold:
+  1. geo_reach_score is empty.
+  2. geo_reach_country_codes is empty / null / [].
+  3. website is set.
+  4. refferls = false.
+  5. brand_tier is lower-range, midlower-range or midhigher-range. NOT run
+     for an empty tier (NULL / the text 'null' — run
+     pipeline/enrichment/brand_tier.py first), higher-range or extreme.
+  6. Partnership evidence is not weak — EITHER the brand has a
+     test_creator_brand_partnership_posts row with sponsorship_confidence
+     >= 90 (any post date), OR it has no row in that table at all. A brand
+     whose posts are all below 90 is skipped.
+Needs OPENAI_KEY. --brand-id does not bypass any of these.
+
 Safe to re-run — rows with a non-null geo_reach_score are skipped. Only
 brands with a website are eligible. If pages were read but no reach evidence
 was found, an online/digital brand is treated as worldwide (score 0,
@@ -113,10 +127,12 @@ _PAGE_TEXT_LIMIT = 6000   # chars of cleaned page text sent to the LLM per page
 _MIN_TEXT_LEN = 40        # pages shorter than this are treated as "no useful info"
 _FINAL_EXCERPT_CHARS = 1500   # per read page, passed to the final decision call
 
-# Only brands with a confirmed (>= 90) creator partnership post from 2026.
+# Brands with a confirmed (>= 90) creator partnership post (any date), or
+# with no partnership post row at all.
 _MIN_PARTNERSHIP_CONFIDENCE = 90
-_PARTNERSHIP_POST_FROM = "2026-01-01"
-_PARTNERSHIP_POST_TO   = "2027-01-01"
+# Only tiers a creator can realistically reach (brand_tier.py). Excludes an
+# empty tier (not classified yet), higher-range and extreme.
+_ELIGIBLE_BRAND_TIERS = ("lower-range", "midlower-range", "midhigher-range")
 
 # Tags that never carry useful body copy
 _NOISE_TAGS = ["script", "style", "nav", "header", "footer", "noscript", "iframe", "form", "aside", "svg", "template"]
@@ -746,7 +762,11 @@ def enrich_geo_reach(
     """
     Score geographic reach for pending brands_raw rows that have a website,
     refferls=False, and at least one test_creator_brand_partnership_posts
-    row (any creator) with sponsorship_confidence >= 90 posted in 2026.
+    row (any creator, any post date) with sponsorship_confidence >= 90, or
+    no test_creator_brand_partnership_posts row at all.
+    Only brands with brand_tier lower-range / midlower-range / midhigher-range
+    run — an empty tier, higher-range and extreme are skipped. See "RUN
+    CONDITIONS" in the module docstring.
 
     niche filters on the brand's OWN brands_raw.niche. creator_niche instead
     filters on the niche of the content_creator_re row(s) that discovered
@@ -772,16 +792,21 @@ def enrich_geo_reach(
         BrandRaw.website.isnot(None),
         BrandRaw.website != "",
         BrandRaw.refferls.is_(False),
-        or_(BrandRaw.brand_tier.is_(None), BrandRaw.brand_tier != "extreme"),  # never Fortune-500 / household-name brands (brand_tier.py 'extreme')
-        db.query(TestCreatorBrandPartnershipPost.id)
-        .filter(
-            TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
-            TestCreatorBrandPartnershipPost.sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE,
-            # post_timestamp is ISO-8601 text, so string comparison orders by date.
-            TestCreatorBrandPartnershipPost.post_timestamp >= _PARTNERSHIP_POST_FROM,
-            TestCreatorBrandPartnershipPost.post_timestamp < _PARTNERSHIP_POST_TO,
-        )
-        .exists(),
+        # Classified and reachable only: never an empty tier, higher-range or extreme (brand_tier.py).
+        BrandRaw.brand_tier.in_(_ELIGIBLE_BRAND_TIERS),
+        or_(
+            # a confirmed partnership post (confidence >= 90, any date) ...
+            db.query(TestCreatorBrandPartnershipPost.id)
+            .filter(
+                TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
+                TestCreatorBrandPartnershipPost.sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE,
+            )
+            .exists(),
+            # ... or no partnership post row at all
+            ~db.query(TestCreatorBrandPartnershipPost.id)
+            .filter(TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id)
+            .exists(),
+        ),
     )
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
