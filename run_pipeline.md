@@ -267,6 +267,8 @@ db.close()
 "
 # Needs the brand's posts scraped first (instagram_posts.py above) with
 # sponsorship_confidence >= 90.
+# Commenters are NOT scraped by default (SCRAPE_COMMENTERS = False in instagram_users.py).
+# To scrape them for one run: enrich_instagram_users(db, limit=50, beach_brands_only=True, scrape_commenters=True)
 
 ## run brand_scoring.py
 python -c "

@@ -21,6 +21,8 @@ For each instagram_post where is_users_scraped=False:
         the appropriate user_type — not nested into a single top_posts JSONB snapshot
         (that field is legacy-only now, still present on old rows, no longer written).
         Upserted on post_id, since one username can now own multiple rows.
+     (Steps e-g only run when SCRAPE_COMMENTERS / scrape_commenters=True — OFF by
+      default, so by default only the creators themselves are scraped.)
      e. Collect up to 5 commenters per post from latestComments → up to 25 unique usernames.
      f. For each commenter NOT already in instagram_users:
         - Scrape 1 post via Apify (addParentData=True) to get their profile data.
@@ -72,6 +74,13 @@ logger = logging.getLogger(__name__)
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"
 # Only instagram_posts rows with a partnership (sponsorship) confidence at or above this are processed.
 _MIN_SPONSORSHIP_CONFIDENCE = 90
+
+# Commenters (steps e-g in the module docstring) on/off. False = never collect,
+# scrape, store or link commenters — no extra Apify scrapes / LLM calls for
+# them; only the partner creators themselves are scraped. True = collect up
+# to 5 commenters per post and scrape them, exactly as before.
+# Override per call with enrich_instagram_users(..., scrape_commenters=True).
+SCRAPE_COMMENTERS = False
 
 #  Prompt helpers
 
@@ -539,6 +548,7 @@ def enrich_instagram_users(
     row_id: int | None = None,
     brand_raw_id: int | None = None,
     beach_brands_only: bool = False,
+    scrape_commenters: bool | None = None,
 ) -> int:
     """
     Process up to `limit` instagram_posts with sponsorship_confidence >= 90
@@ -549,6 +559,11 @@ def enrich_instagram_users(
     key (instagram_posts.id) — bypasses the is_users_scraped filter (so you
     can re-run/test a post that was already processed). Not to be confused
     with instagram_posts.post_id, which is Instagram's own post ID string.
+
+    scrape_commenters controls steps e-g (collect + scrape + store + link
+    commenters). None (default) uses the module-level SCRAPE_COMMENTERS
+    (False); True/False overrides it for this call. When off, commenters are
+    skipped entirely — nothing is scraped, classified, stored or linked.
 
     Pass beach_brands_only=True to scope the run to the instagram_posts rows
     of brands with brands_raw.beach_brands = true (still filtered to
@@ -582,6 +597,9 @@ def enrich_instagram_users(
         query = query.filter(InstagramPost.brand_raw_id.in_(
             db.query(BrandRaw.id).filter(BrandRaw.beach_brands.is_(True))
         ))
+
+    if scrape_commenters is None:
+        scrape_commenters = SCRAPE_COMMENTERS
 
     posts: list[InstagramPost] = query.limit(limit).all()
 
@@ -618,7 +636,8 @@ def enrich_instagram_users(
             new_creators = {u: t for u, t in creators.items() if u not in existing}
             for username in existing:
                 _link_to_brand(db, post.brand_raw_id, username)
-                _link_existing_commenters_from_creator_snapshot(db, post.brand_raw_id, username)
+                if scrape_commenters:
+                    _link_existing_commenters_from_creator_snapshot(db, post.brand_raw_id, username)
 
             logger.info(
                 "Instagram users: post %s → %d creator(s) (%d new, %d already in DB)",
@@ -666,7 +685,11 @@ def enrich_instagram_users(
                     profile.get("followersCount"),
                 )
 
-                #  e. Collect unique commenters from the 5 posts (up to 5/post)
+                #  e. Collect unique commenters from the 5 posts (up to 5/post).
+                #  Skipped entirely when scrape_commenters is off (steps e-g).
+                if not scrape_commenters:
+                    time.sleep(1.0)
+                    continue
                 commenter_records = _collect_commenter_records(raw_posts, n_per_post=5)
                 commenter_usernames = sorted({record["username"] for record in commenter_records})
                 if not commenter_usernames:
