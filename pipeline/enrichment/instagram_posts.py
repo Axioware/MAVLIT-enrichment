@@ -5,6 +5,26 @@ Scrapes recent Instagram posts for each brand. Every fetched post with a post
 ID is saved with its Apify creator-reference fields. When the full LLM filter
 confirms a partnership, those fields are narrowed to the confirmed creators.
 Prompts are editable via /admin > Prompts.
+
+RUN CONDITIONS — enrich_instagram_posts() processes a brands_raw row only
+when ALL hold:
+  1. instagram_handle is set.
+  2. refferls = false.
+  3. geo_reach_score is between 0 and 40. NULL (not geo-scored yet) is
+     skipped, so geo_reach.py must have run on the brand first.
+  4. brand_tier is lower-range, midlower-range or midhigher-range. NOT run
+     for an empty tier (NULL / the text 'null' — run
+     pipeline/enrichment/brand_tier.py first), higher-range or extreme.
+  5. Partnership evidence is not weak — EITHER the brand has a
+     test_creator_brand_partnership_posts row with sponsorship_confidence
+     >= 90, OR it has no row in that table at all (e.g. brands found through
+     Facebook Branded Content). A brand with posts ONLY below 90 is skipped.
+  6. instagram_checked = false (not scraped before). Set to true after a
+     successful scrape; a failed Apify run leaves it false so the brand is
+     retried on the next run.
+An official website is NOT required. Requires APIFY_TOKEN. --brand-id and
+--niche only narrow the set; they do not bypass conditions 1-6. At most
+`limit` brands (default 50) are processed per call.
 """
 
 import json
@@ -34,6 +54,8 @@ _ACTOR_ID     = "shu8hvrXbJbY3Eb9W"
 _POSTS_LIMIT  = 40   # last N posts, regardless of how far back that goes
 _RESULTS_TYPE = "posts"
 _MIN_PARTNERSHIP_CONFIDENCE = 90   # brands in test_creator_brand_partnership_posts only below this are skipped
+# Only tiers a creator can realistically reach (brand_tier.py): never an empty tier, higher-range or extreme.
+_ELIGIBLE_BRAND_TIERS = ("lower-range", "midlower-range", "midhigher-range")
 
 #  Prompt helpers
 
@@ -351,8 +373,9 @@ def enrich_instagram_posts(
 ) -> int:
     """
     For each brand with instagram_handle set, instagram_checked=False,
-    refferls=False, geo_reach_score 0-40 (NULL = not geo-scored yet is
-    skipped), and either at least one test_creator_brand_partnership_posts
+    refferls=False, brand_tier lower-range / midlower-range / midhigher-range
+    (an empty tier, higher-range and extreme are skipped), geo_reach_score
+    0-40 (NULL = not geo-scored yet is skipped), and either at least one test_creator_brand_partnership_posts
     row with sponsorship_confidence >= 90 or no row there at all (brands that
     are only there below 90 are skipped; an official website is not
     required):
@@ -408,7 +431,7 @@ def enrich_instagram_posts(
         BrandRaw.refferls.is_(False),
         BrandRaw.geo_reach_score.between(0, 40),   # NULL (not geo-scored yet) is skipped
         or_(has_confident_partnership, ~in_partnership_table),
-        or_(BrandRaw.brand_tier.is_(None), BrandRaw.brand_tier != "extreme"),  # never Fortune-500 / household-name brands (brand_tier.py 'extreme')
+        BrandRaw.brand_tier.in_(_ELIGIBLE_BRAND_TIERS),   # never empty / higher-range / extreme (brand_tier.py)
     )
     if brand_id is not None:
         query = query.filter(
