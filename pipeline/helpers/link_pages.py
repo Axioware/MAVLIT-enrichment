@@ -207,26 +207,116 @@ def pick_brand_link(links: list[str], names: list[str]) -> str | None:
     return None
 
 
-def search_brand_site(names: list[str]) -> str | None:
-    """SearXNG "<name> official website": first result whose domain carries the brand name."""
-    name = next((n for n in names if n and n.strip()), "")
-    if not name or not SEARXNG_URL:
-        return None
+def _searxng_results(query: str) -> list[dict]:
+    if not SEARXNG_URL:
+        return []
     try:
         resp = httpx.get(
             f"{SEARXNG_URL.rstrip('/')}/search",
-            params={"q": f"{name} official website", "format": "json"},
+            params={"q": query, "format": "json"},
             timeout=15,
         )
         resp.raise_for_status()
-        results = resp.json().get("results") or []
+        return resp.json().get("results") or []
     except Exception as exc:
-        logger.warning("link_pages: SearXNG search failed for %r: %s", name, exc)
+        logger.warning("link_pages: SearXNG search failed for %r: %s", query, exc)
+        return []
+
+
+def search_brand_site(names: list[str]) -> str | None:
+    """SearXNG "<name> official website": first result whose domain carries the brand name."""
+    name = next((n for n in names if n and n.strip()), "")
+    if not name:
         return None
-    for r in results[:20]:
+    for r in _searxng_results(f"{name} official website")[:20]:
         url = (r.get("url") or "").strip()
         if url.startswith("http") and _is_candidate(url) and _name_matches_domain(names, url):
             return url
+    return None
+
+
+# Instagram path segments that are never an account.
+_IG_RESERVED = frozenset([
+    "p", "reel", "reels", "explore", "stories", "tv", "accounts", "direct", "about",
+    "web", "legal", "developer", "directory", "challenge", "locations", "tags", "share",
+])
+_IG_TITLE_HANDLE = re.compile(r"\(@([A-Za-z0-9._]{1,30})\)")
+_CORPORATE_SUFFIXES = re.compile(
+    r"\b(?:inc|llc|ltd|limited|corp|corporation|company|co|gmbh|plc|sa|ag|international|"
+    r"holdings?|group|usa|us|brands?|official)\b\.?", re.I,
+)
+
+
+def _instagram_handle_from_result(result: dict) -> str | None:
+    """Account handle of a SearXNG result: URL first path segment, or the "(@handle)" in the title."""
+    url = (result.get("url") or "").strip()
+    p = urlparse(url)
+    if _domain(url) in ("instagram.com", "m.instagram.com"):
+        seg = p.path.strip("/").split("/", 1)[0].lower()
+        if seg and seg not in _IG_RESERVED and re.fullmatch(r"[a-z0-9._]{1,30}", seg):
+            return seg
+        m = _IG_TITLE_HANDLE.search(result.get("title") or "")
+        if m:
+            return m.group(1).lower()
+    return None
+
+
+def _name_variants(names: list[str]) -> list[str]:
+    out: list[str] = []
+    for n in names:
+        for v in (n, _CORPORATE_SUFFIXES.sub(" ", n or "")):
+            c = _compact(v)
+            if len(c) >= 3 and c not in out:
+                out.append(c)
+    return out
+
+
+def search_brand_instagram(names: list[str]) -> str | None:
+    """
+    Instagram handle of the brand's official account via SearXNG. A result
+    only counts when it carries the brand name, so a fan page or an unrelated
+    account that merely ranks first is never returned. In order of strength:
+      0. the handle equals the brand name           (billabong)
+      1. the profile's display name equals the name  ("Ron Jon Surf Shop" ->
+         @ronjonofficial; "O'Neill" -> @oneillusa)
+      2. the handle contains / is contained in the name   (kelty_)
+    then SearXNG rank. Queries: the name without corporate suffixes
+    ("O'Neill, Inc." -> "O'Neill"), then its compact form ("oneill").
+    """
+    base = next((n for n in names if n and n.strip()), "")
+    variants = _name_variants(names)
+    if not base or not variants:
+        return None
+    stripped = re.sub(r"\s+", " ", _CORPORATE_SUFFIXES.sub(" ", base)).strip(" ,.-")
+    queries = list(dict.fromkeys(q for q in (f"{stripped or base} instagram", f"{variants[-1]} instagram") if q))
+
+    for query in queries:
+        best: tuple[int, int, str] | None = None   # (kind, rank, handle)
+        for rank, r in enumerate(_searxng_results(query)[:25]):
+            handle = _instagram_handle_from_result(r)
+            if not handle:
+                continue
+            h = _compact(handle)
+            if len(h) < 3:
+                continue
+            display = _compact((r.get("title") or "").split("(@")[0])
+            kind = None
+            for v in variants:
+                if h == v:
+                    kind = 0
+                    break
+                if display and display == v:
+                    kind = 1
+                elif kind is None and (v in h or h in v) and min(len(v), len(h)) >= 4 \
+                        and min(len(v), len(h)) >= 0.6 * max(len(v), len(h)):
+                    kind = 2
+            if kind is None:
+                continue
+            cand = (kind, rank, handle)
+            if best is None or cand < best:
+                best = cand
+        if best:
+            return best[2]
     return None
 
 

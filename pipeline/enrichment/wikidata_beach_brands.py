@@ -1,13 +1,22 @@
 """
 pipeline/enrichment/wikidata_beach_brands.py
 
-Discover FITNESS brands with a genuine beach / water-sports connection
-(surfing, swimming, water sports, beach sports) from Wikidata, and print them
-in the terminal. Discovery only — nothing is written to the database.
+Discover brands with a genuine beach / water-sports / outdoor-athlete
+connection from Wikidata, and print them in the terminal. Discovery only —
+nothing is written to the database.
+
+Categories (--category, default all; see CATEGORY_LABELS): surfing, swimming,
+water_sports, beach_sports, sun_protection, beach_activewear, beach_footwear,
+diving_snorkeling, paddle_sports, beach_fitness, beach_recovery, hydration,
+sports_nutrition, beach_haircare, beach_skincare, beach_accessories,
+beach_cooling, marine_safety, beach_camping, beach_fishing, beach_eyewear,
+beach_travel, marine_technology, ocean_conservation.
 
 Run from the project root:
+    python -m pipeline.enrichment.wikidata_beach_brands
     python -m pipeline.enrichment.wikidata_beach_brands --limit 10
     python -m pipeline.enrichment.wikidata_beach_brands --limit 10 --category surfing
+    python -m pipeline.enrichment.wikidata_beach_brands --limit 10 --category sun_protection
     python -m pipeline.enrichment.wikidata_beach_brands --limit 20 --min-relevance HIGH --output beach_brands.json
 
 Discovery strategies (all live Wikidata queries, merged and deduplicated):
@@ -34,9 +43,10 @@ supplies, software, hotels, ...) disqualify a candidate.
 Website comes from Wikidata P856 and Instagram from Wikidata P2003 — both are
 reported as "from Wikidata, not independently verified".
 
-Market coverage (see classify_coverage()): by default only brands with
-Wikidata evidence of operating WORLDWIDE, across the UNITED STATES, or in
-MULTIPLE COUNTRIES INCLUDING THE US are shown. Pass --all-coverage to also
+Market coverage (see classify_coverage()): by default only brands that
+operate in the US are shown — Wikidata evidence of operating WORLDWIDE, in
+the UNITED STATES (incl. any US-based brand), or in MULTIPLE COUNTRIES
+INCLUDING THE US. Pass --all-coverage to also
 show brands whose coverage is unknown or limited to non-US countries.
 """
 
@@ -71,32 +81,65 @@ BACKOFF_BASE = 2.0         # exponential backoff for transient errors: 2, 4, 8 s
 QUERY_PAUSE = 1.0          # politeness pause between Wikidata requests
 DETAIL_BATCH = 40          # entities per details query
 SUBCLASS_CAP = 150         # max product classes after subclass expansion
-RESULT_CAP = 400           # LIMIT on relationship queries
+RESULT_CAP = 1500          # LIMIT on relationship queries (many product classes now)
 
 EXIT_OK = 0
 EXIT_WIKIDATA_UNAVAILABLE = 3
 
-CATEGORIES = ("surfing", "swimming", "water_sports", "beach_sports")
+CATEGORIES = (
+    "surfing", "swimming", "water_sports", "beach_sports", "sun_protection", "beach_activewear",
+    "beach_footwear", "diving_snorkeling", "paddle_sports", "beach_fitness", "beach_recovery",
+    "hydration", "sports_nutrition", "beach_haircare", "beach_skincare", "beach_accessories",
+    "beach_cooling", "marine_safety", "beach_camping", "beach_fishing", "beach_eyewear",
+    "beach_travel", "marine_technology", "ocean_conservation",
+)
 CATEGORY_LABELS = {
     "surfing": "Surfing and surf apparel",
     "swimming": "Swimming and swimwear",
     "water_sports": "Water sports equipment",
     "beach_sports": "Beach sports",
+    "sun_protection": "Sun protection and outdoor skincare",
+    "beach_activewear": "Beach and water-sports apparel",
+    "beach_footwear": "Beach and water-sports footwear",
+    "diving_snorkeling": "Diving and snorkeling equipment",
+    "paddle_sports": "Paddleboarding and paddling equipment",
+    "beach_fitness": "Beach workout and outdoor fitness equipment",
+    "beach_recovery": "Sports recovery for outdoor athletes",
+    "hydration": "Hydration and sports nutrition",
+    "sports_nutrition": "Sports nutrition for outdoor athletes",
+    "beach_haircare": "Haircare for sun and saltwater exposure",
+    "beach_skincare": "Skincare for beach environments",
+    "beach_accessories": "Beach and outdoor accessories",
+    "beach_cooling": "Cooling and heat-management products",
+    "marine_safety": "Water-sports and ocean safety",
+    "beach_camping": "Beach camping and outdoor recreation",
+    "beach_fishing": "Fishing and coastal recreation",
+    "beach_eyewear": "Sunglasses and eye protection",
+    "beach_travel": "Beach travel equipment",
+    "marine_technology": "Water-sports technology",
+    "ocean_conservation": "Ocean-conscious consumer products",
 }
 
 # Strategy A: product concepts, resolved by exact English label at run time.
-# (label, category, expand_to_subclasses)
+# (label, category, expand_to_subclasses). A label with no matching Wikidata
+# class is simply skipped — keyword search (Strategy C) still covers it.
 PRODUCT_CONCEPTS: tuple[tuple[str, str, bool], ...] = (
     ("surfboard", "surfing", True),
     ("bodyboard", "surfing", False),
     ("boardshorts", "surfing", False),
     ("Surfwear", "surfing", False),
+    ("skimboard", "surfing", False),
+    ("surf wax", "surfing", False),
+    ("leash", "surfing", False),
     ("swimsuit", "swimming", True),
     ("competitive swimwear", "swimming", False),
     ("bikini", "swimming", False),
     ("swim goggles", "swimming", False),
     ("swim cap", "swimming", False),
     ("swimfins", "swimming", False),
+    ("kickboard", "swimming", False),
+    ("pull buoy", "swimming", False),
+    ("swim briefs", "swimming", False),
     ("wetsuit", "water_sports", True),
     ("rash guard", "water_sports", False),
     ("windsurfing board", "water_sports", False),
@@ -105,7 +148,55 @@ PRODUCT_CONCEPTS: tuple[tuple[str, str, bool], ...] = (
     ("stand-up paddleboard", "water_sports", False),
     ("paddleboard", "water_sports", False),
     ("snorkel", "water_sports", False),
+    ("dry suit", "water_sports", False),
+    ("water ski", "water_sports", False),
     ("beach volleyball", "beach_sports", False),
+    ("volleyball", "beach_sports", False),
+    ("flying disc", "beach_sports", False),
+    ("sunscreen", "sun_protection", True),
+    ("sun protective clothing", "sun_protection", False),
+    ("flip-flops", "beach_footwear", False),
+    ("sandal", "beach_footwear", False),
+    ("water shoe", "beach_footwear", False),
+    ("diving mask", "diving_snorkeling", False),
+    ("diving regulator", "diving_snorkeling", False),
+    ("buoyancy compensator", "diving_snorkeling", False),
+    ("dive computer", "diving_snorkeling", False),
+    ("diving equipment", "diving_snorkeling", True),
+    ("kayak", "paddle_sports", True),
+    ("canoe", "paddle_sports", False),
+    ("paddle", "paddle_sports", False),
+    ("resistance band", "beach_fitness", False),
+    ("pull-up bar", "beach_fitness", False),
+    ("skipping rope", "beach_fitness", False),
+    ("foam roller", "beach_recovery", False),
+    ("massage gun", "beach_recovery", False),
+    ("sports drink", "hydration", True),
+    ("oral rehydration therapy", "hydration", False),
+    ("hydration pack", "hydration", False),
+    ("water bottle", "hydration", False),
+    ("protein bar", "sports_nutrition", False),
+    ("energy gel", "sports_nutrition", False),
+    ("protein supplement", "sports_nutrition", False),
+    ("dietary supplement", "sports_nutrition", False),
+    ("beach towel", "beach_accessories", False),
+    ("beach umbrella", "beach_accessories", False),
+    ("dry bag", "beach_accessories", False),
+    ("ice pack", "beach_cooling", False),
+    ("personal flotation device", "marine_safety", True),
+    ("lifebuoy", "marine_safety", False),
+    ("emergency position-indicating radiobeacon", "marine_safety", False),
+    ("hammock", "beach_camping", False),
+    ("tent", "beach_camping", False),
+    ("sleeping bag", "beach_camping", False),
+    ("fishing rod", "beach_fishing", False),
+    ("fishing reel", "beach_fishing", False),
+    ("fishing tackle", "beach_fishing", False),
+    ("fishing lure", "beach_fishing", False),
+    ("sunglasses", "beach_eyewear", True),
+    ("action camera", "marine_technology", False),
+    ("underwater camera", "marine_technology", False),
+    ("smartwatch", "marine_technology", False),
 )
 
 # Strategy B: industries (P452 values) and company classes (P31 values).
@@ -118,17 +209,97 @@ KEYWORD_TERMS: tuple[tuple[str, str], ...] = (
     ("surfboard", "surfing"),
     ("surfing apparel", "surfing"),
     ("bodyboard", "surfing"),
+    ("skimboard", "surfing"),
+    ("surf wax", "surfing"),
+    ("surf fins", "surfing"),
+    ("surf poncho", "surfing"),
     ("swimwear", "swimming"),
     ("swimsuit", "swimming"),
     ("competitive swimwear", "swimming"),
     ("swimming equipment", "swimming"),
+    ("swim goggles", "swimming"),
+    ("swim parka", "swimming"),
     ("wetsuit", "water_sports"),
     ("water sports equipment", "water_sports"),
     ("paddleboard", "water_sports"),
     ("windsurfing", "water_sports"),
     ("kitesurfing", "water_sports"),
     ("wakeboard", "water_sports"),
+    ("drysuit", "water_sports"),
+    ("water ski", "water_sports"),
     ("beach volleyball", "beach_sports"),
+    ("beach tennis", "beach_sports"),
+    ("beach soccer", "beach_sports"),
+    ("spikeball", "beach_sports"),
+    ("paddleball", "beach_sports"),
+    ("sunscreen", "sun_protection"),
+    ("mineral sunscreen", "sun_protection"),
+    ("sun care", "sun_protection"),
+    ("after-sun", "sun_protection"),
+    ("UV protection clothing", "sun_protection"),
+    ("swim leggings", "beach_activewear"),
+    ("rash vest", "beach_activewear"),
+    ("UV swimwear", "beach_activewear"),
+    ("swim trunks", "beach_activewear"),
+    ("water shoes", "beach_footwear"),
+    ("flip-flops", "beach_footwear"),
+    ("beach sandals", "beach_footwear"),
+    ("surf booties", "beach_footwear"),
+    ("scuba diving equipment", "diving_snorkeling"),
+    ("snorkel", "diving_snorkeling"),
+    ("dive computer", "diving_snorkeling"),
+    ("spearfishing", "diving_snorkeling"),
+    ("stand-up paddleboard", "paddle_sports"),
+    ("kayak", "paddle_sports"),
+    ("canoe paddle", "paddle_sports"),
+    ("resistance bands", "beach_fitness"),
+    ("suspension trainer", "beach_fitness"),
+    ("outdoor fitness equipment", "beach_fitness"),
+    ("massage gun", "beach_recovery"),
+    ("foam roller", "beach_recovery"),
+    ("compression boots", "beach_recovery"),
+    ("sports recovery", "beach_recovery"),
+    ("electrolyte drink", "hydration"),
+    ("sports drink", "hydration"),
+    ("hydration pack", "hydration"),
+    ("insulated water bottle", "hydration"),
+    ("protein powder", "sports_nutrition"),
+    ("protein bar", "sports_nutrition"),
+    ("energy gel", "sports_nutrition"),
+    ("sports nutrition", "sports_nutrition"),
+    ("hair sun protection", "beach_haircare"),
+    ("swimmer shampoo", "beach_haircare"),
+    ("aloe vera gel", "beach_skincare"),
+    ("after sun lotion", "beach_skincare"),
+    ("beach towel", "beach_accessories"),
+    ("beach umbrella", "beach_accessories"),
+    ("beach chair", "beach_accessories"),
+    ("dry bag", "beach_accessories"),
+    ("cooling towel", "beach_cooling"),
+    ("portable cooler", "beach_cooling"),
+    ("portable fan", "beach_cooling"),
+    ("life jacket", "marine_safety"),
+    ("personal flotation device", "marine_safety"),
+    ("rescue buoy", "marine_safety"),
+    ("camping hammock", "beach_camping"),
+    ("tent", "beach_camping"),
+    ("camping equipment", "beach_camping"),
+    ("fishing tackle", "beach_fishing"),
+    ("fishing rod", "beach_fishing"),
+    ("fishing reel", "beach_fishing"),
+    ("sunglasses", "beach_eyewear"),
+    ("polarized sunglasses", "beach_eyewear"),
+    ("sports eyewear", "beach_eyewear"),
+    ("waterproof backpack", "beach_travel"),
+    ("travel towel", "beach_travel"),
+    ("action camera", "marine_technology"),
+    ("underwater camera", "marine_technology"),
+    ("GPS sports watch", "marine_technology"),
+    ("waterproof headphones", "marine_technology"),
+    ("ocean plastic", "ocean_conservation"),
+    ("reef-safe", "ocean_conservation"),
+    ("sustainable swimwear", "ocean_conservation"),
+    ("reusable water bottle", "ocean_conservation"),
 )
 
 # Entities must be (subclasses of) business, brand or trademark.
@@ -139,26 +310,122 @@ KEYWORD_P31_FILTER = "haswbstatement:" + "|".join(
                          "Q783794", "Q24928712", "Q658255", "Q167270")
 )
 
-# Relevance vocabulary — word-boundary regexes per category.
+# Relevance vocabulary — word-boundary regexes per category. Generic words
+# are only matched in a beach/sport phrase ("electrolyte powder", not
+# "electrolyte" — battery makers; "beach slides", not "slides"; "fishing
+# tackle", not "tackle"; "beach towel", not "towel").
 RELEVANCE_TERMS: dict[str, tuple[str, ...]] = {
     "surfing": (
         r"surf(?:ing|wear|board|boards|er|ers|\s+apparel|\s+brand|\s+clothing|\s+equipment|\s+company)?",
         r"board\s?shorts?", r"body\s?boards?|bodyboarding",
+        r"skim\s?boards?|skimboarding", r"(?:longboard|shortboard)\s+surfboards?",
+        r"surf\s+(?:wax|leash\w*|fins?|traction(?:\s+pads?)?|ponchos?)", r"traction\s+pads?",
     ),
     "swimming": (
-        r"swim(?:wear|suits?|ming|\s+wear|\s+goggles|\s+caps?|\s+fins|fins|\s+trunks|\s+briefs)?",
+        r"swim(?:wear|suits?|ming|\s+wear|\s+goggles|\s+caps?|\s+fins|fins|\s+trunks|\s+briefs|\s+paddles|\s+parkas?)?",
         r"bikinis?", r"tankinis?", r"bathing\s+suits?",
+        r"kick\s?boards?", r"pull\s+buoys?", r"open[- ]water\s+(?:swimming\s+)?buoys?",
     ),
     "water_sports": (
         r"wetsuits?|wet\s+suits?", r"water\s?sports?", r"aquatic\s+sports?",
         r"paddle\s?boards?|paddleboarding|stand[- ]up\s+paddle\w*",
         r"windsurf\w*", r"kite\s?surf\w*|kite\s?boards?|kiteboarding", r"wake\s?boards?\w*",
-        r"rash\s?guards?", r"snorkel\w*", r"scuba|recreational\s+diving|dive\s+gear|diving\s+equipment",
+        r"rash\s?guards?", r"snorkel\w*", r"dry\s?suits?", r"water[- ]?ski\w*", r"towables?|towable\s+tubes?",
     ),
-    "beach_sports": (r"beach\s+volleyball", r"beach\s+tennis", r"beach\s+sports?"),
+    "beach_sports": (
+        r"beach\s+(?:volleyball|tennis|soccer|football|badminton|handball|paddleball|cricket|frisbee|sports?)",
+        r"spikeball|roundnet", r"paddleball", r"flying\s+discs?|frisbees?",
+    ),
+    "sun_protection": (
+        r"sunscreens?|sun\s?screens?|sun\s?blocks?|sun\s?care|sun\s+protection|spf|after[- ]sun",
+        r"sunburn\w*|uv[- ]protect\w*|upf\s?\d*|zinc\s+oxide|reef[- ](?:safe|friendly|conscious)\s+sunscreens?",
+    ),
+    "beach_activewear": (
+        r"swim\s+(?:leggings|shirts?|trunks)|swim\s?trunks", r"rash\s+vests?", r"surf\s+leggings",
+        r"uv\s+swimwear", r"water[- ]?sports?\s+(?:clothing|apparel)", r"quick[- ]dry\s+(?:shorts|clothing|apparel)",
+        r"beach\s+activewear",
+    ),
+    "beach_footwear": (
+        r"water\s+shoes|aqua\s+shoes|reef\s+shoes", r"surf\s+boot(?:ie)?s|neoprene\s+boots|div(?:e|ing)\s+boots",
+        r"sandals?|flip[- ]?flops?|thongs\s+\(footwear\)", r"beach\s+slides|pool\s+slides",
+    ),
+    "diving_snorkeling": (
+        r"scuba|recreational\s+diving|dive\s+gear|diving\s+(?:equipment|gear|masks?|fins|regulators?|computers?)",
+        r"dive\s+(?:computers?|masks?|equipment)", r"snorkel\w*", r"buoyancy\s+compensators?",
+        r"spearfishing", r"underwater\s+(?:camera\s+)?housings?",
+    ),
+    "paddle_sports": (
+        r"sup\s+boards?|stand[- ]up\s+paddle\w*|paddle\s?boards?|paddleboarding|inflatable\s+paddleboards?",
+        r"kayaks?|kayaking|canoes?|canoeing", r"(?:kayak|canoe)\s+paddles?", r"paddleboard\s+(?:pumps?|leash\w*|accessories)",
+    ),
+    "beach_fitness": (
+        r"resistance\s+bands?", r"(?:portable\s+)?pull[- ]up\s+bars?", r"suspension\s+train\w*",
+        r"agility\s+ladders?", r"speed\s+ropes?|jump\s+ropes?|skipping\s+ropes?", r"sandbag\s+training|training\s+sandbags?",
+        r"(?:portable|outdoor|beach)\s+(?:workout|fitness)\s+equipment|outdoor\s+fitness|beach\s+workouts?",
+    ),
+    "beach_recovery": (
+        r"massage\s+guns?|percussion\s+massag\w*", r"foam\s+rollers?", r"compression\s+boots",
+        r"(?:muscle|sports?)\s+recovery|recovery\s+(?:balms?|drinks?|products|tools?|boots)", r"cooling\s+towels?",
+    ),
+    "hydration": (
+        r"electrolyte\s+(?:powders?|tablets?|drinks?|drink\s+mix(?:es)?|supplements?|replacement)",
+        r"hydration\s+(?:drinks?|packs?|vests?|multipliers?|powders?|supplements?|products|bladders?)",
+        r"sports?\s+drinks?", r"oral\s+rehydration", r"insulated\s+water\s+bottles?",
+    ),
+    "sports_nutrition": (
+        r"protein\s+(?:powders?|bars?|shakes?|supplements?)", r"energy\s+gels?", r"endurance\s+nutrition",
+        r"carbohydrate\s+drink\s+mix(?:es)?", r"sports?\s+(?:nutrition|supplements?)", r"hydration\s+supplements?",
+    ),
+    "beach_haircare": (
+        r"saltwater\s+hair\w*", r"uv\s+hair\s+protection|hair\s+(?:sun\s?protection|sunscreen)",
+        r"after[- ]swim\s+(?:shampoo|hair\s?care)|swimmers?'?\s+shampoo|chlorine\s+remov\w*\s+shampoo",
+        r"ocean\s+hair\s?care", r"leave[- ]in\s+conditioners?", r"sun\s+protection\s+hair\s+sprays?",
+    ),
+    "beach_skincare": (
+        r"after[- ]sun|aloe\s+vera(?:\s+gel)?", r"sunburn\s+(?:care|relief)", r"saltwater\s+skin\s?care",
+        r"outdoor\s+skin\s?care", r"water[- ]resistant\s+skin\s?care", r"moisturi[sz]ing\s+lotions?",
+    ),
+    "beach_accessories": (
+        r"beach\s+(?:towels?|umbrellas?|tents?|canop(?:y|ies)|chairs?|blankets?|bags?|gear|accessories|carts?|wagons?)",
+        r"quick[- ]dry\s+towels?", r"dry\s+bags?", r"waterproof\s+(?:bags?|phone\s+(?:pouch(?:es)?|cases?))",
+    ),
+    "beach_cooling": (
+        r"cooling\s+(?:towels?|vests?)", r"portable\s+fans?", r"(?:insulated|soft|hard|portable|camping)\s+coolers?",
+        r"ice\s+(?:packs?|chests?)", r"insulated\s+(?:beach\s+)?bags?", r"(?:portable\s+)?shade\s+canop(?:y|ies)",
+    ),
+    "marine_safety": (
+        r"life\s+(?:jackets?|vests?)|lifejackets?|personal\s+flotation\s+devices?",
+        r"(?:swim|rescue)\s+buoys?|lifebuoys?", r"marine\s+safety|water[- ]safety\s+equipment",
+        r"waterproof\s+first\s+aid", r"emergency\s+(?:position[- ]indicating\s+)?(?:marine\s+)?(?:radio\s?)?beacons?",
+    ),
+    "beach_camping": (
+        r"camping\s+(?:hammocks?|coolers?|gear|equipment|tents?)|hammocks?", r"tents?", r"sleeping\s+bags?",
+        r"portable\s+(?:showers?|shelters?)", r"outdoor\s+mats?", r"outdoor\s+recreation\s+(?:equipment|gear|products)",
+    ),
+    "beach_fishing": (
+        r"fishing\s+(?:rods?|reels?|tackle|gear|equipment|waders|lures?|lines?|sunglasses|tackle\s+bags?)",
+        r"surf\s+fishing|saltwater\s+fishing|sport\s?fishing|angling", r"spinning\s+reels?", r"tackle\s+(?:bags?|boxes?)",
+    ),
+    "beach_eyewear": (
+        r"sunglasses|polari[sz]ed\s+(?:lenses|eyewear)", r"sports?\s+eyewear|water[- ]?sports?\s+eyewear",
+        r"swim(?:ming)?\s+goggles", r"uv\s+protection\s+(?:sunglasses|eyewear)",
+    ),
+    "beach_travel": (
+        r"beach\s+travel\s+bags?", r"waterproof\s+(?:luggage|backpacks?)", r"travel\s+towels?",
+        r"water[- ]resistant\s+(?:backpacks?|bags?|luggage)", r"snorkel(?:ing)?\s+travel\s+gear",
+    ),
+    "marine_technology": (
+        r"action\s+cameras?|underwater\s+cameras?", r"waterproof\s+(?:cameras?|smartwatch\w*|watches|headphones|earbuds|speakers?)",
+        r"swim(?:ming)?\s+(?:tracking|headphones|watch\w*)", r"gps\s+(?:sports?\s+)?watch\w*", r"dive\s+computers?",
+    ),
+    "ocean_conservation": (
+        r"ocean[- ](?:friendly|conscious|plastic|cleanup|clean-up)", r"plastic[- ]free", r"reusable\s+(?:water\s+)?bottles?",
+        r"sustainable\s+swimwear", r"recycled\s+(?:ocean\s+)?plastics?", r"reef[- ](?:safe|friendly|conscious)",
+    ),
 }
-# Diving gear is aquatic but not beach fitness on its own — capped at MEDIUM.
-WEAK_TERMS = (r"scuba|recreational\s+diving|dive\s+gear|diving\s+equipment", r"snorkel\w*")
+# Kept for the MEDIUM cap mechanism; empty now that diving/snorkeling is its
+# own requested category instead of "aquatic but not beach fitness".
+WEAK_TERMS: tuple[str, ...] = ()
 NEGATIVE_CONTEXT = re.compile(
     r"\b(?:schools?|camps?|lessons?|rentals?|tour\s+operators?|governing\s+body|leagues?|federations?|"
     r"associations?|hotels?|resorts?|spas?|museums?|festivals?|films?|album|magazines?|television|restaurants?|"
@@ -719,7 +986,7 @@ COVERAGE_UNKNOWN = "UNKNOWN"
 QUALIFYING_COVERAGE = (COVERAGE_WORLDWIDE, COVERAGE_US, COVERAGE_MULTI_US)
 COVERAGE_LABELS = {
     COVERAGE_WORLDWIDE: "Worldwide",
-    COVERAGE_US: "United States (nationwide)",
+    COVERAGE_US: "United States",
     COVERAGE_MULTI_US: "Multiple countries including the US",
     COVERAGE_UNKNOWN: "Unknown",
 }
@@ -730,7 +997,6 @@ _US = re.compile(r"\b(?:united\s+states(?:\s+of\s+america)?|usa|u\.s\.a?\.?)\b",
 _DESC_WORLD = re.compile(
     r"\b(?:multinational|global|globally|worldwide|international|internationally|"
     r"in\s+(?:over|more\s+than)\s+\d+\s+countries|sold\s+in\s+\d+\s+countries)\b")
-SITELINKS_INTERNATIONAL = 10   # Wikipedia articles in >= this many languages -> internationally known
 
 
 @dataclass
@@ -769,13 +1035,14 @@ def classify_coverage(cand: Candidate) -> Coverage:
          international / sold in N countries -> WORLDWIDE.
       3. Countries (P17) or headquarters countries (P159 -> P17) include the
          US and at least one other country -> MULTI_COUNTRY_WITH_US.
-      4. Official websites (P856) cover several countries (country domains
-         or country paths) -> WORLDWIDE (multiple country sites).
-      5. Proxy: the brand has Wikipedia articles in >= SITELINKS_INTERNATIONAL
-         languages -> WORLDWIDE (internationally known). This is recognition,
-         not proof of distribution, and is labelled as such.
-    A US headquarters or a single US country on its own is NOT treated as
-    nationwide coverage — that is reported as Unknown.
+      4. An official US website (P856: .us domain or /us path) -> US.
+      5. Country (P17) or headquarters country is the US -> US (US-based
+         brand, so it operates in the US).
+    Only US evidence qualifies: operating in the US, headquartered in the
+    US, or an explicit worldwide / multinational statement. Wikipedia
+    language count and non-US country sites are NOT evidence. Brands with
+    only non-US countries on record, or no location data, are Unknown and
+    filtered out by default.
     """
     areas = cand.operating_areas
     if areas:
@@ -795,18 +1062,23 @@ def classify_coverage(cand: Candidate) -> Coverage:
     if len(countries) >= 2 and any(_US.search(c) for c in countries):
         return Coverage(COVERAGE_MULTI_US, f"countries / headquarters in: {', '.join(countries)}")
 
+    # An official US website (a .us domain or a /us path) is direct evidence
+    # of US operation. Country sites for OTHER countries are not.
     site_countries = _website_countries(cand.websites)
-    if len(site_countries) >= 3 or (len(site_countries) >= 2 and "global" not in site_countries):
-        return Coverage(COVERAGE_WORLDWIDE, f"official websites for several countries ({', '.join(sorted(site_countries))})")
+    if "us" in site_countries:
+        return Coverage(COVERAGE_US, f"official US website ({', '.join(sorted(site_countries))})")
 
-    if cand.sitelinks >= SITELINKS_INTERNATIONAL:
-        return Coverage(COVERAGE_WORLDWIDE, f"internationally known — Wikipedia articles in {cand.sitelinks} "
-                                            f"languages (recognition proxy, not proof of distribution)")
+    # Deliberately NO "Wikipedia articles in N languages" or "websites for
+    # several countries" fallback: being well known abroad (Arena, Rip Curl,
+    # Ray-Ban...) says nothing about operating in or being headquartered in
+    # the US, so such brands are Unknown and filtered out.
 
     if countries and not any(_US.search(c) for c in countries):
         return Coverage(COVERAGE_UNKNOWN, f"only non-US country on record: {', '.join(countries)}")
     if countries:
-        return Coverage(COVERAGE_UNKNOWN, "US-based, but no evidence of nationwide or international operation")
+        # A US-based brand operates in the US — that is all this discovery
+        # needs (beach-related brands in any niche that operate in the US).
+        return Coverage(COVERAGE_US, f"US-based — country / headquarters: {', '.join(countries)}")
     return Coverage(COVERAGE_UNKNOWN, "no location data on Wikidata")
 
 
@@ -837,6 +1109,8 @@ class BrandResult:
     coverage_level: str
     discovery_methods: list[str]
     also_wikidata_ids: list[str]
+    entity_type: str | None = None        # label of the first P31 (instance-of) value
+    operating_area: list[str] = field(default_factory=list)   # P2541
     _evidence: int = 0
 
     def to_json(self) -> dict:
@@ -888,6 +1162,8 @@ def build_results(cands: dict[str, Candidate], category: str = "all",
             coverage_level=coverage.level,
             discovery_methods=sorted(cand.methods),
             also_wikidata_ids=list(cand.also_qids),
+            entity_type=(cand.types[0] if cand.types else None),
+            operating_area=list(cand.operating_areas),
             _evidence=len(cand.methods) + len(cand.discovery_products) + bool(website) + bool(instagram),
         ))
     results = dedupe_by_domain(results)
@@ -935,11 +1211,11 @@ def _or_unavailable(values, what: str = "Not available") -> str:
     return values or what
 
 
-def render(results: list[BrandResult], limit: int, category: str, min_relevance: str,
+def render(results: list[BrandResult], limit: int | None, category: str, min_relevance: str,
            all_coverage: bool = False) -> str:
     line, thin = "=" * 60, "-" * 60
     out = [line, "WIKIDATA BEACH-RELATED FITNESS BRAND DISCOVERY", line, "",
-           f"Requested limit: {limit}", "Discovery source: Wikidata", "Niche: Fitness",
+           f"Requested limit: {limit if limit is not None else 'none (all brands)'}", "Discovery source: Wikidata", "Niche: Fitness",
            "Focus: Beach and water-sports-related brands",
            f"Category filter: {category}", f"Minimum relevance: {min_relevance}",
            "Market coverage filter: " + ("none (--all-coverage)" if all_coverage else
@@ -968,7 +1244,7 @@ def render(results: list[BrandResult], limit: int, category: str, min_relevance:
             out.append(f"Also on Wikidata as: {', '.join(r.also_wikidata_ids)} (same website)")
         out.append("")
     out += [line, "SUMMARY", line, ""]
-    if len(results) < limit:
+    if limit is not None and len(results) < limit:
         out.append(f"Only {len(results)} brand(s) met the criteria (requested {limit}).")
     out += [f"Brands discovered: {len(results)}",
             f"Brands with websites: {sum(1 for r in results if r.website)}",
@@ -990,8 +1266,8 @@ def _limit_arg(value: str) -> int:
         n = int(value)
     except ValueError:
         raise argparse.ArgumentTypeError(f"--limit must be a whole number, got {value!r}")
-    if not 1 <= n <= 200:
-        raise argparse.ArgumentTypeError("--limit must be between 1 and 200")
+    if n < 1:
+        raise argparse.ArgumentTypeError("--limit must be 1 or more")
     return n
 
 
@@ -1015,7 +1291,8 @@ def _relevance_arg(value: str) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Discover beach / water-sports fitness brands from Wikidata (prints to terminal; no database writes).")
-    parser.add_argument("--limit", type=_limit_arg, default=10, help="Number of unique brands to display (default 10).")
+    parser.add_argument("--limit", type=_limit_arg, default=None,
+                        help="Max number of unique brands to display (default: all of them).")
     parser.add_argument("--category", default="all", choices=("all",) + CATEGORIES,
                         help="Restrict to one beach category (default all).")
     parser.add_argument("--min-relevance", type=_relevance_arg, default="MEDIUM",
@@ -1052,7 +1329,7 @@ def main(argv: list[str] | None = None, client: WikidataClient | None = None) ->
         if own_client:
             client.close()
 
-    shown = results[:args.limit]
+    shown = results if args.limit is None else results[:args.limit]
     print(render(shown, args.limit, args.category, args.min_relevance, args.all_coverage))
     logger.info("%d qualifying brand(s) in total, %d shown; %d Wikidata request(s)",
                 len(results), len(shown), client.requests_made)
