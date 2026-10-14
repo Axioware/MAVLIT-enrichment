@@ -22,7 +22,9 @@ when ALL hold:
   6. instagram_checked = false (not scraped before). Set to true after a
      successful scrape; a failed Apify run leaves it false so the brand is
      retried on the next run.
-An official website is NOT required. Requires APIFY_TOKEN. --brand-id and
+An official website is NOT required. Requires APIFY_TOKEN.
+POSTS SCRAPED per brand: the last 40 posts (posts_limit); 60 for brands with
+beach_brands = true (never fewer than posts_limit). --brand-id and
 --niche only narrow the set; they do not bypass conditions 1-6. At most
 `limit` brands (default 50) are processed per call.
 """
@@ -52,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 _ACTOR_ID     = "shu8hvrXbJbY3Eb9W"
 _POSTS_LIMIT  = 40   # last N posts, regardless of how far back that goes
+_BEACH_BRAND_POSTS_LIMIT = 60   # brands with beach_brands = true get a deeper scrape
 _RESULTS_TYPE = "posts"
 _MIN_PARTNERSHIP_CONFIDENCE = 90   # brands in test_creator_brand_partnership_posts only below this are skipped
 # Only tiers a creator can realistically reach (brand_tier.py): never an empty tier, higher-range or extreme.
@@ -387,6 +390,8 @@ def enrich_instagram_posts(
 
     posts_limit caps the scrape at the brand's last N posts (resultsLimit),
     regardless of how far back that goes — no time-window filter is applied.
+    Brands with beach_brands = true are scraped for the last 60 posts instead
+    (_BEACH_BRAND_POSTS_LIMIT; never fewer than posts_limit).
     All posts_limit posts are always fetched from Apify in one call (no
     change to scrape cost).
 
@@ -456,10 +461,18 @@ def enrich_instagram_posts(
 
     # Handles are read here, in this thread — worker threads never touch ORM objects.
     handles = {brand.id: normalize_handle(brand.instagram_handle) for brand in brands}
+    # Beach brands (brands_raw.beach_brands) are scraped deeper: 60 posts.
+    brand_posts_limit = {
+        brand.id: max(posts_limit, _BEACH_BRAND_POSTS_LIMIT) if brand.beach_brands else posts_limit
+        for brand in brands
+    }
     db.commit()  # don't hold the brand-query transaction open during long Apify runs
 
     pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="ig-apify")
-    futures = {pool.submit(_scrape_handle, handles[brand.id], posts_limit): brand for brand in brands}
+    futures = {
+        pool.submit(_scrape_handle, handles[brand.id], brand_posts_limit[brand.id]): brand
+        for brand in brands
+    }
     try:
         for future in as_completed(futures):
             brand  = futures[future]
