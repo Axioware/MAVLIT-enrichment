@@ -62,6 +62,29 @@ logger = logging.getLogger(__name__)
 _RESUMABLE_STATUSES = ("found", "not_found", "not_in_dropdown")   # not "error"
 
 
+def _category_text(b: dict) -> str:
+    """Readable beach categories of a brand: "Surfing equipment [surfing_equipment], ..."."""
+    return ", ".join(f"{wbb.CATEGORY_LABELS.get(c, c)} [{c}]" for c in (b.get("categories") or [])) or "none"
+
+
+def _found_via(b: dict) -> str:
+    """How Wikidata surfaced the brand: product class (P1056 / P176), industry, or a keyword search."""
+    methods = b.get("discovery_methods") or []
+    short = []
+    for m in methods:
+        if m.startswith("Keyword search"):
+            short.append(m.replace("Keyword search ", "keyword search ").replace("('", "").replace("')", ""))
+        elif "P1056" in m:
+            short.append("makes a product (P1056)")
+        elif "P176" in m:
+            short.append("manufacturer of a product (P176)")
+        elif m.startswith("Industry"):
+            short.append("industry (P452 / sporting goods manufacturer)")
+        else:
+            short.append(m)
+    return "; ".join(dict.fromkeys(short)) or "n/a"
+
+
 def _handle_from_url(url: str | None) -> str | None:
     """Instagram URL (Wikidata P2003 value) -> lower-case handle."""
     if not url:
@@ -92,6 +115,8 @@ def _load_brands(args) -> list[dict]:
         "wikidata_instagram": r.get("instagram"), "wikidata_website": r.get("website"),
         "categories": r.get("beach_categories") or [], "coverage": r.get("coverage_level"),
         "description": r.get("description"), "entity_type": r.get("entity_type"),
+        "relevance": r.get("beach_relevance"), "relevance_reason": r.get("relevance_reason"),
+        "discovery_methods": r.get("discovery_methods") or [],
         "country": r.get("country") or [], "headquarters": r.get("headquarters") or [],
         "operating_area": r.get("operating_area") or [],
     } for r in rows if r.get("brand")]
@@ -171,7 +196,8 @@ def _check_accounts(brands: list[dict], db, recheck: bool, headed: bool) -> None
             continue
         saved = None if recheck else _saved_check(db, username)
         if saved:
-            logger.info("%s: already checked (%s, %d result(s)) — reusing", tag, saved["status"], saved["result_count"])
+            logger.info("%s: already checked (%s, %d result(s)) — reusing | entity type: %s | categories: %s",
+                        tag, saved["status"], saved["result_count"], b.get("entity_type") or "n/a", _category_text(b))
             b.update(saved)
             done[username] = saved
             continue
@@ -189,7 +215,9 @@ def _check_accounts(brands: list[dict], db, recheck: bool, headed: bool) -> None
         res = {"status": status, "instagram_id": r.instagram_id, "result_count": r.result_count}
         b.update(res)
         done[username] = res
-        logger.info("%s: %s — %d branded-content result(s)", tag, status, r.result_count)
+        logger.info("%s: %s — %d branded-content result(s) | entity type: %s | categories: %s | relevance: %s",
+                    tag, status, r.result_count, b.get("entity_type") or "n/a", _category_text(b),
+                    b.get("relevance") or "n/a")
 
 
 def _add_new_brands_to_brands_raw(brands: list[dict], db) -> None:
@@ -261,6 +289,10 @@ def _report(brands: list[dict]) -> list[dict]:
         note = f"   [{b['add_note']}]" if b.get("add_note") else ""
         print(f"{b['name']}\n    https://www.instagram.com/{b['handle']}/   "
               f"({b['result_count']} result(s))   {b.get('website') or ''}{note}")
+        print(f"    entity type: {b.get('entity_type') or 'n/a'} | relevance: {b.get('relevance') or 'n/a'}"
+              f" | wikidata: {b.get('wikidata_id') or 'n/a'}")
+        print(f"    category:    {_category_text(b)}")
+        print(f"    found via:   {_found_via(b)}")
     print("\n" + "-" * 70)
     print(f"Brands discovered:               {n}")
     print(f"With an Instagram account:       {with_ig}  "
@@ -276,16 +308,19 @@ def _report(brands: list[dict]) -> list[dict]:
 
 
 def _write_output(path: Path, brands: list[dict], partners: list[dict]) -> None:
-    rows = [{**b, "instagram_url": f"https://www.instagram.com/{b['handle']}/" if b.get("handle") else None}
+    rows = [{**b, "instagram_url": f"https://www.instagram.com/{b['handle']}/" if b.get("handle") else None,
+             "category_labels": _category_text(b), "found_via": _found_via(b)}
             for b in brands]
     if path.suffix.lower() == ".csv":
-        cols = ["name", "instagram_url", "result_count", "status", "website", "instagram_source",
-                "website_source", "wikidata_id", "categories", "coverage"]
+        cols = ["name", "instagram_url", "result_count", "status", "entity_type", "categories",
+                "category_labels", "relevance", "found_via", "relevance_reason", "website",
+                "instagram_source", "website_source", "wikidata_id", "coverage"]
         with path.open("w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
             w.writeheader()
             for r in rows:
-                w.writerow({**r, "categories": ", ".join(r.get("categories") or [])})
+                w.writerow({**r, "categories": ", ".join(r.get("categories") or []),
+                            "category_labels": _category_text(r), "found_via": _found_via(r)})
     else:
         path.write_text(json.dumps({
             "window": {"start": START_DATE, "end": END_DATE},
