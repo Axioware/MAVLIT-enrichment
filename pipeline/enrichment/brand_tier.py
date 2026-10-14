@@ -16,12 +16,19 @@ Coca-Cola, ...) that mostly partner with celebrities and very large creators.
 higher-range = large, well-known companies that are hard but not impossible
 for an independent creator to reach.
 
+When a brand has no name or no description, the tier is guessed from its
+Instagram username (e.g. "shoptemu" -> Temu); the prompt's "unsure -> null"
+rule is relaxed for those rows.
+
 Safe to re-run — rows with brand_tier IS NULL are processed, and rows with an
-existing value are skipped.
+existing value are skipped. When the LLM gives no confirmed tier (unsure, or
+the OpenAI call failed) brand_tier is left NULL — never the text 'null' — so
+the row is retried on the next run.
 """
 
 import argparse
 import logging
+import re
 
 from sqlalchemy.orm import Session
 
@@ -94,10 +101,19 @@ Brand niche: {niche}
 Brand description: {description}
 Website/domain: {website}
 Instagram handle: {instagram_handle}
+Instagram username: {username}
+{identification_note}
 
 Respond with ONLY valid JSON:
 
 {"brand_tier":null}
+"""
+
+# Added to the prompt when the brand has no name or no description: the
+# Instagram username is then the main evidence, and the "unsure -> null" rule
+# is relaxed so a recognizable username still gets a tier.
+IDENTIFY_FROM_USERNAME_NOTE = """
+NOTE: this brand has no {missing}. Work out which brand or business the Instagram username "@{username}" belongs to (for example "shoptemu" is Temu, "espn" is ESPN, "homedepot" is The Home Depot) and classify THAT brand using the definitions above. Make your best-supported guess from the username; return null only when you cannot tell what business the username refers to.
 """
 
 _NORMALIZED_VALUES = {
@@ -113,36 +129,52 @@ _NORMALIZED_VALUES = {
     "extreme": "extreme",
     "extreme-range": "extreme",
 }
-NO_TIER_SENTINEL = "null"
 
 
-def _normalize_brand_tier(value: object) -> str:
-    if value is None:
-        return NO_TIER_SENTINEL
+def _normalize_brand_tier(value: object) -> str | None:
+    """A valid tier, or None when there is no confirmed tier (stored as NULL)."""
     if not isinstance(value, str):
-        return NO_TIER_SENTINEL
+        return None
     cleaned = value.strip().lower().replace("_", "-")
     if cleaned in {"", "null", "none", "n/a", "na", "unknown", "unsure"}:
-        return NO_TIER_SENTINEL
-    return _NORMALIZED_VALUES.get(cleaned) or NO_TIER_SENTINEL
+        return None
+    return _NORMALIZED_VALUES.get(cleaned)
 
 
-def _classify_brand_tier(db: Session, brand: BrandRaw) -> str:
+def _username(handle: str | None) -> str:
+    """Instagram username from a stored handle / profile URL ("https://www.instagram.com/espn/" -> "espn")."""
+    value = (handle or "").strip()
+    value = re.sub(r"^(?:https?://)?(?:www\.)?instagram\.com/", "", value, flags=re.I)
+    return re.split(r"[/?#]", value, maxsplit=1)[0].lstrip("@").strip()
+
+
+def _classify_brand_tier(db: Session, brand: BrandRaw) -> str | None:
     if not OPENAI_KEY:
         logger.warning("OPENAI_KEY not set — skipping brand tier classification for brand_id=%s", brand.id)
-        return NO_TIER_SENTINEL
+        return None
+
+    username = _username(brand.instagram_handle)
+    name = (brand.name or "").strip()
+    description = (brand.description or "").strip()
+    missing = " or ".join(label for label, value in (("name", name), ("description", description)) if not value)
+    note = ""
+    if missing and username:
+        note = IDENTIFY_FROM_USERNAME_NOTE.replace("{missing}", missing).replace("{username}", username)
+        logger.info("Brand tier scoring: id=%s has no %s — guessing from @%s", brand.id, missing, username)
 
     prompt = fill_template(
         BRAND_TIER_PROMPT,
-        brand_name=brand.name or "unknown",
+        brand_name=name or "none provided",
         niche=brand.niche or "unknown",
-        description=(brand.description or "")[:800] or "none provided",
+        description=description[:800] or "none provided",
         website=brand.website or brand.domain or "none provided",
         instagram_handle=brand.instagram_handle or "none provided",
+        username=username or "none provided",
+        identification_note=note,
     )
     result = call_gpt_json(prompt, context=f"brand tier for brand_id={brand.id}")
     if not isinstance(result, dict):
-        return NO_TIER_SENTINEL
+        return None
 
     inferred = result.get("brand_tier")
     if inferred is None:
@@ -170,16 +202,12 @@ def score_brand_tier(db: Session, limit: int | None = None, brand_raw_id: int | 
 
     for row in rows:
         tier = _classify_brand_tier(db, row)
-        if tier == NO_TIER_SENTINEL:
+        if tier is None:
             logger.info(
-                "Brand tier scoring: id=%s name=%s — LLM returned no confirmed tier; storing '%s' to prevent retry",
+                "Brand tier scoring: id=%s name=%s — no confirmed tier; leaving brand_tier empty (retried next run)",
                 row.id,
                 row.name,
-                NO_TIER_SENTINEL,
             )
-            row.brand_tier = tier
-            db.commit()
-            updated += 1
             continue
 
         row.brand_tier = tier
