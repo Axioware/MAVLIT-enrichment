@@ -202,6 +202,17 @@ db = SessionLocal()
 enrich_shopify(db, limit=1, niche='fashion')
 db.close()
 "
+OR
+
+python3 -c "
+from dotenv import load_dotenv; load_dotenv()
+from pipeline.db import SessionLocal
+from pipeline.enrichment.shopify_detect import enrich_shopify
+import logging; logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+db = SessionLocal()
+enrich_shopify(db, limit=1000, beach_brands_only=True)
+db.close()
+"
 
 
 ## Tranco (checks if brand domain is in top 1M website rankings)

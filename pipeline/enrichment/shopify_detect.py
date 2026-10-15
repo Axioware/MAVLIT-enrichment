@@ -518,7 +518,10 @@ def _update_brand_niche_description_and_tags(db: Session, brand: BrandRaw, descr
         _upsert_brand_niche(db, brand.id, effective_niche, description, tags or None)
 
 
-def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None, brand_id: int | None = None) -> int:
+def enrich_shopify(
+    db: Session, limit: int = 300, niche: str | None = None, brand_id: int | None = None,
+    beach_brands_only: bool = False,
+) -> int:
     """
     Fetch homepage for each brand with has_official_website=True and
     shopify_checked=False. Sets is_shopify / is_woocommerce and fills any
@@ -530,6 +533,9 @@ def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None, bran
     seed time (see pipeline/seed.py), so this must match that same string.
     Ignored if brand_id is also given.
 
+    Pass beach_brands_only=True to process only brands with
+    brands_raw.beach_brands = true (the other filters above still apply).
+
     Pass brand_id to target one specific brand directly — this bypasses the
     has_official_website/shopify_checked filters (so you can re-run/test a
     brand that was already processed), but website must still be set.
@@ -539,6 +545,8 @@ def enrich_shopify(db: Session, limit: int = 300, niche: str | None = None, bran
         BrandRaw.has_official_website.is_(True),
         or_(BrandRaw.brand_tier.is_(None), BrandRaw.brand_tier != "extreme"),  # never Fortune-500 / household-name brands (brand_tier.py 'extreme')
     )
+    if beach_brands_only:
+        query = query.filter(BrandRaw.beach_brands.is_(True))
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
     else:
