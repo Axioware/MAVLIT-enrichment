@@ -52,6 +52,24 @@ Runs on every page load; designed to be cheap:
            fuzzy niche_match scoring dimension in Step C, which still runs
            on whatever niche overlap exists for ranking.
 
+           EXEMPTION — brands outside the four core niches. The niche check
+           above only protects the four niches MAVLIT is built around
+           (beauty, music, fitness, health). A brand is EXEMPT from it (shown
+           to creators of any niche) when:
+             - at least one creator on a sponsorship_confidence >= 90 post
+               has a niche — Instagram creators in instagram_users (tagged /
+               mentioned / co-authored / sponsor on the brand's >= 90
+               instagram_posts, never commenters, never the brand's own
+               account) and content_creator_re creators on >= 90
+               test_creator_brand_partnership_posts rows — AND
+             - NONE of the niches of the brand itself (brands_raw.niche) or
+               of those creators is beauty, music, fitness or health (exact
+               case-insensitive match; spelling variants such as
+               "health & wellness" do NOT count as health).
+           A brand with no creator at >= 90 is not exempt and goes through
+           the normal check above. Every other hard filter (geo, gender,
+           follower range, avoided categories, ...) still applies.
+
            Gender filter, gated on the creator's gender being male or
            female (skipped otherwise). The brand must pass ANY of:
              - brands_raw.target_audience_gender is the creator's gender
@@ -120,6 +138,73 @@ _FOLLOWER_TOLERANCE = 2   # +/-200% buffer beyond the brand's confirmed collabor
 # Brand categories always avoided, for every creator — brands_raw.niche values
 # (compared case-insensitively). Brands with no niche are kept.
 _EXCLUDED_BRAND_NICHES = ("band",)
+
+# The four niches the creator-niche hard filter protects. Brands whose niche
+# and whose >= 90-confidence creators' niches are all OUTSIDE these four are
+# exempt from the niche hard filter (see _niche_exempt_brand_ids).
+_CORE_NICHES = ("beauty", "music", "fitness", "health")
+_EXEMPT_MIN_CONFIDENCE = 90
+
+# Brands outside the four core niches, with at least one >= 90 creator that
+# has a niche. Creator niches come from (a) instagram_users matched by the
+# usernames on the brand's >= 90 instagram_posts (tagged / mentions /
+# co-authors / sponsors; commenters and the brand's own account excluded)
+# and (b) content_creator_re via >= 90 test_creator_brand_partnership_posts.
+_NICHE_EXEMPT_SQL = """
+WITH hi AS (
+  SELECT p.brand_raw_id, p.tagged_users, p.mentions, p.coauthor_producers, p.sponsors
+  FROM instagram_posts p
+  WHERE p.post_id IS NOT NULL AND p.sponsorship_confidence >= :min_conf
+),
+names AS (
+  SELECT hi.brand_raw_id,
+         lower(CASE WHEN jsonb_typeof(e) = 'string' THEN e #>> '{}' ELSE e ->> 'username' END) AS username
+  FROM hi
+  CROSS JOIN LATERAL (
+    SELECT jsonb_array_elements(CASE WHEN jsonb_typeof(col) = 'array' THEN col ELSE '[]'::jsonb END) AS e
+    FROM (VALUES (hi.tagged_users), (hi.mentions), (hi.coauthor_producers), (hi.sponsors)) AS t(col)
+  ) x
+),
+ig_creator AS (
+  SELECT n.brand_raw_id, lower(btrim(u.niche)) AS niche
+  FROM names n
+  JOIN brands_raw b ON b.id = n.brand_raw_id
+  JOIN instagram_users u ON lower(u.username) = n.username
+  WHERE u.user_type <> 'commenter'
+    AND u.niche IS NOT NULL AND btrim(u.niche) <> ''
+    AND n.username <> lower(regexp_replace(
+          regexp_replace(btrim(coalesce(b.instagram_handle, '')),
+                         '^(https?://)?(www\.)?instagram\.com/', '', 'i'),
+          '[/?#].*$|^@', '', 'g'))
+),
+re_creator AS (
+  SELECT t.brand_raw_id, lower(btrim(c.niche)) AS niche
+  FROM test_creator_brand_partnership_posts t
+  JOIN content_creator_re c ON c.id = t.content_creator_re_id
+  WHERE t.sponsorship_confidence >= :min_conf
+    AND c.niche IS NOT NULL AND btrim(c.niche) <> ''
+),
+creator_niches AS (
+  SELECT brand_raw_id, niche FROM ig_creator
+  UNION ALL
+  SELECT brand_raw_id, niche FROM re_creator
+)
+SELECT cn.brand_raw_id
+FROM creator_niches cn
+JOIN brands_raw b ON b.id = cn.brand_raw_id
+GROUP BY cn.brand_raw_id, b.niche
+HAVING NOT bool_or(cn.niche = ANY(:core))
+   AND coalesce(lower(btrim(b.niche)), '') <> ALL(:core)
+"""
+
+
+def _niche_exempt_brand_ids(db: Session) -> set[int]:
+    """Ids of brands exempt from the creator-niche hard filter (see module docstring)."""
+    rows = db.execute(
+        text(_NICHE_EXEMPT_SQL),
+        {"min_conf": _EXEMPT_MIN_CONFIDENCE, "core": list(_CORE_NICHES)},
+    ).all()
+    return {r[0] for r in rows}
 
 
 
@@ -241,6 +326,11 @@ def _hard_filtered_query(db: Session, creator: CreatorProfile, apply_gender_filt
             )
         )
         match_clauses = [brand_niche_match, collaborator_niche_match, re_creator_niche_match]
+        # Brands outside the four core niches (and with a >= 90 creator) are
+        # shown to every creator — the niche check does not apply to them.
+        exempt_ids = _niche_exempt_brand_ids(db)
+        if exempt_ids:
+            match_clauses.append(BrandRaw.id.in_(exempt_ids))
 
         query = query.filter(or_(*match_clauses))
 
