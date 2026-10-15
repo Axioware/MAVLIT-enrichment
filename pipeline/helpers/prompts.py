@@ -460,11 +460,22 @@ Bio: {bio}
 Recent post captions: {captions}
 Recent post hashtags: {hashtags}
 
-Based on the bio, captions, and hashtags, identify the single most likely content niche/category this creator posts about (e.g. "fashion", "gaming", "fitness", "food_cooking", "beauty", "travel", "tech", "music", "parenting", "finance"). If there isn't enough information to tell, answer "unknown".
+PRIMARY NICHES — classify into one of these four whenever the creator's content reasonably fits:
+* Music — musicians, singers, songwriters, producers, DJs, bands, instrument players, music teachers, and creators whose main content is music (covers, releases, studio, gigs, music commentary).
+* Fitness — workouts, gym and strength training, bodybuilding, running, cycling, swimming, yoga, pilates, sports training, athletic performance, personal trainers.
+* Health — nutrition and dietitians, healthy eating, wellness, mental health, sleep, weight management, medical and doctor content, chronic conditions, supplements and general health advice.
+* Beauty — makeup, skincare, hair, nails, cosmetics, beauty reviews and tutorials, grooming.
+
+HOW TO CHOOSE
+1. Decide first whether the creator fits Music, Fitness, Health or Beauty. A creator who mixes a primary niche with other topics (for example a lifestyle creator who mostly shares workouts) takes the primary niche.
+2. If more than one primary niche fits, pick the one the bio, captions and hashtags show most strongly. Music beats the others only when music is clearly the creator's main identity (a musician or music creator), not when music is just background in videos.
+3. Only when NONE of the four fits, use the single best other niche (e.g. "fashion", "gaming", "food_cooking", "travel", "tech", "parenting", "finance", "comedy", "sports").
+4. If there isn't enough information to tell, answer "unknown".
+
 Formatting requirement:
 * The first letter of the niche must always be uppercase.
 * Preserve the rest of the niche exactly as written.
-* Examples: "fashion" → "Fashion", "gaming" → "Gaming", "food_cooking" → "Food_cooking", "beauty" → "Beauty".
+* Examples: "music" → "Music", "fitness" → "Fitness", "health" → "Health", "beauty" → "Beauty", "food_cooking" → "Food_cooking", "gaming" → "Gaming".
 * If there isn't enough information to determine the niche, return "Unknown".
 
 Reply ONLY with this JSON object, no extra text:
