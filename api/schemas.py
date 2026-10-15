@@ -18,6 +18,7 @@ class CreatorProfileResponse(BaseModel):
 
     content_niche:       str | None = None
     excluded_categories:  list[str] | None = None
+    brand_preferences:    str | None = None
 
     instagram_handle: str | None = None
     instagram_followers: int | None = None
@@ -82,6 +83,7 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         gender=row.gender,
         content_niche=row.content_niche,
         excluded_categories=_as_list(row.excluded_categories),
+        brand_preferences=row.brand_preferences,
         instagram_handle=row.instagram_handle,
         instagram_followers=row.instagram_followers,
         primary_platform=row.primary_platform,

@@ -8,7 +8,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Req
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
 from sqlalchemy import String, cast, or_, text
@@ -425,6 +425,7 @@ def _run_migrations() -> None:
         # content_description replaced by instagram_description / youtube_description
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS content_description",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS excluded_categories JSONB",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS brand_preferences TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS follower_count INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS age INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS gender TEXT",
@@ -1547,6 +1548,9 @@ class CreatorProfileRequest(BaseModel):
 
     content_niche:       str | None = None
     excluded_categories:  list[str] | None = None
+    # Free-text brand preferences (wanted / unwanted brand types) for the
+    # Matches v3 LLM ranking. Stored trimmed; empty becomes NULL.
+    brand_preferences:    str | None = Field(default=None, max_length=1000)
 
     instagram_handle: str | None = None
     instagram_followers: int | None = None
@@ -1910,6 +1914,7 @@ def upsert_my_creator_profile(
     db = SessionLocal()
     try:
         payload = body.model_dump()
+        payload["brand_preferences"] = (payload.get("brand_preferences") or "").strip() or None
         if not is_profile_complete(payload):
             raise HTTPException(
                 status_code=422,

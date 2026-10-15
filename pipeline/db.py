@@ -593,6 +593,11 @@ class CreatorProfile(Base):
     #  Matching projections populated from the selected primary platform
     content_niche = Column(Text)
     excluded_categories   = Column(JSONB)   # brand niches/categories this creator refuses to work with — Stage 3 hard filter
+    # Free text from the creator: the kinds of brands they want to see more of
+    # or never want to see ("more guitar brands", "sunscreen brands", "no
+    # lipstick brands"). Not a hard filter — passed to the Matches v3 LLM
+    # ranking, which ranks wanted brands higher and unwanted ones last.
+    brand_preferences     = Column(Text)
 
     #  Platform profile fields used by creator-profile.html
     instagram_handle = Column(Text)

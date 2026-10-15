@@ -9,7 +9,10 @@ prompt has the LLM score content fit and that match evidence separately and
 return confidence = 0.65 x content fit + 0.35 x match evidence.
 
   creator — niche(s), sub-niche tags, content_tags, description(s),
-            embedding_text (same as v2), gender
+            embedding_text (same as v2), gender, and the creator's own
+            free-text brand preferences (creator_profiles.brand_preferences:
+            brand types they want to see more of / do not want) — wanted
+            brands are ranked higher, unwanted ones last
   brand   — name, niche, description, brands_niches tags, why_it_matches,
             target_audience_gender, product_audience_gender
 
@@ -111,7 +114,13 @@ def rank_brands_with_llm_v3(db: Session, creator_id: int) -> int:
     for payload in payloads:
         payload["why_it_matches"] = taglines[payload["id"]]
         payload["target_audience_gender"], payload["product_audience_gender"] = audience[payload["id"]]
-    creator_fields = {**_creator_fields(creator), "creator_gender": _creator_gender_label(creator.gender)}
+    creator_fields = {
+        **_creator_fields(creator),
+        "creator_gender": _creator_gender_label(creator.gender),
+        # What the creator typed in the profile's "Brand preferences" box:
+        # brand types to rank higher / never show (prompt: CREATOR PREFERENCE RULES).
+        "creator_preferences": (creator.brand_preferences or "").strip() or "none",
+    }
     template = _get_prompt(db)
     db.commit()  # release read locks before the slow LLM calls
 
