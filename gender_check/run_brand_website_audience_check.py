@@ -6,6 +6,7 @@ Run from the project root:
     python -m gender_check.run_brand_website_audience_check --brand-id 2151 --force
 
 Use --dry-run to list qualifying brands without scraping or calling the LLM.
+Use --beach-brands to process only brands with beach_brands = true.
 Use --force (only with --brand-id) to re-analyse brands that already have
 audience results; their existing values are overwritten.
 """
@@ -67,63 +68,59 @@ _UNANALYSED_FILTER = """
         AND br.product_audience_age_confidence IS NULL
         AND br.audience_analysis_explanation IS NULL"""
 
+# Candidate brands: refferls = false, geo_reach_score 0-40, at least 5
+# instagram_posts rows, and partnership evidence from EITHER source:
+#   - a test_creator_brand_partnership_posts row with sponsorship_confidence >= 90
+#   - an instagram_posts row with sponsorship_confidence >= 90
+# This script handles brands WITH a usable website (official website, URL and
+# description); run_brand_gender_check.py handles the rest.
 _BRAND_QUERY_SQL = """
-    WITH best_per_brand AS (
-      SELECT DISTINCT ON (tcbp.brand_raw_id)
-        ccr.username AS creator_username,
-        ccr.niche,
-        tcbp.brand_raw_id,
-        tcbp.brand_name,
-        tcbp.post_url,
-        tcbp.post_timestamp,
-        tcbp.sponsorship_confidence,
-        br.has_official_website,
-        br.website,
-        br.description
-      FROM content_creator_re ccr
-      JOIN test_creator_brand_partnership_posts tcbp
-        ON tcbp.content_creator_re_id = ccr.id
-      JOIN brands_raw br
-        ON br.id = tcbp.brand_raw_id
-      WHERE ccr.niche IN ('Beauty', 'Music', 'Fitness', 'Health')
-        AND tcbp.sponsorship_confidence >= 90
-        AND br.refferls = false{unanalysed_filter}
-        AND (
-          br.geo_reach_score BETWEEN 0 AND 40
-          OR br.geo_reach_score IS NULL
-        )
-        AND tcbp.post_timestamp >= '2026-01-01'
-        AND tcbp.post_timestamp < '2027-01-01'
-        AND (
-          SELECT COUNT(*)
-          FROM instagram_posts ip
-          WHERE ip.brand_raw_id = br.id
-        ) >= 5
-      ORDER BY
-        tcbp.brand_raw_id,
-        tcbp.sponsorship_confidence DESC NULLS LAST,
-        tcbp.post_timestamp DESC NULLS LAST
-    )
     SELECT
-      brand_raw_id,
-      brand_name,
-      creator_username,
-      post_url,
-      post_timestamp,
-      sponsorship_confidence,
-      website,
-      description
-    FROM best_per_brand
-    WHERE has_official_website = true
-      AND website IS NOT NULL
-      AND description IS NOT NULL
+      br.id AS brand_raw_id,
+      COALESCE(br.name, (
+        SELECT tcbp.brand_name
+        FROM test_creator_brand_partnership_posts tcbp
+        WHERE tcbp.brand_raw_id = br.id AND tcbp.brand_name IS NOT NULL
+        LIMIT 1
+      )) AS brand_name,
+      br.website,
+      br.description
+    FROM brands_raw br
+    WHERE br.refferls = false{unanalysed_filter}
+      AND br.geo_reach_score BETWEEN 0 AND 40
+      AND (
+        EXISTS (
+          SELECT 1 FROM test_creator_brand_partnership_posts tcbp
+          WHERE tcbp.brand_raw_id = br.id AND tcbp.sponsorship_confidence >= 90
+        )
+        OR EXISTS (
+          SELECT 1 FROM instagram_posts ip
+          WHERE ip.brand_raw_id = br.id AND ip.sponsorship_confidence >= 90
+        )
+      )
+      AND (
+        SELECT COUNT(*)
+        FROM instagram_posts ip
+        WHERE ip.brand_raw_id = br.id
+      ) >= 5
+      AND br.has_official_website = true
+      AND br.website IS NOT NULL
+      AND br.description IS NOT NULL{beach_filter}
     ORDER BY brand_name
 """
 
-# Default: only brands with no audience results yet. --force drops that
-# condition so already-analysed brands can be re-run.
-BRAND_QUERY = text(_BRAND_QUERY_SQL.replace("{unanalysed_filter}", _UNANALYSED_FILTER))
-FORCE_BRAND_QUERY = text(_BRAND_QUERY_SQL.replace("{unanalysed_filter}", ""))
+
+def _brand_query(force: bool, beach_only: bool):
+    """
+    Default: only brands with no audience results yet. force drops that
+    condition so already-analysed brands can be re-run. beach_only narrows
+    the set to brands_raw.beach_brands = true.
+    """
+    return text(
+        _BRAND_QUERY_SQL
+        .replace("{unanalysed_filter}", "" if force else _UNANALYSED_FILTER)
+        .replace("{beach_filter}", "\n      AND br.beach_brands = true" if beach_only else "")
+    )
 
 AUDIENCE_PROMPT = """
 You are analyzing a brand to determine its audience demographics.
@@ -586,6 +583,7 @@ def main() -> int:
         action="store_true",
         help="With --brand-id: re-analyse the brand even if it already has audience results (overwrites them).",
     )
+    parser.add_argument("--beach-brands", action="store_true", help="Only process brands with beach_brands = true.")
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be at least 1")
@@ -595,7 +593,7 @@ def main() -> int:
     db = SessionLocal()
     try:
         _ensure_latest_product_columns(db)
-        brands = db.execute(FORCE_BRAND_QUERY if args.force else BRAND_QUERY).mappings().all()
+        brands = db.execute(_brand_query(args.force, args.beach_brands)).mappings().all()
         if args.brand_ids:
             requested_ids = set(args.brand_ids)
             brands = [brand for brand in brands if brand["brand_raw_id"] in requested_ids]

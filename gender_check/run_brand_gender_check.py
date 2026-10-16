@@ -1,7 +1,8 @@
 # Run from the project root in PowerShell (module mode keeps the project root on sys.path):
 #   .\venv\Scripts\python.exe -m gender_check.run_brand_gender_check
 # Optional: add --dry-run to list qualifying brands without calling the LLM,
-# or --limit 10 to process at most 10 brands.
+# --limit 10 to process at most 10 brands, or --beach-brands to process only
+# brands with beach_brands = true.
 # Classification results are saved to brands_raw and printed as JSON lines.
 # python -m gender_check.run_brand_gender_check --brand-id 2151
 
@@ -29,67 +30,62 @@ from pipeline.helpers.prompts import (
 MIN_INSTAGRAM_POSTS = 10
 LLM_MODEL = "gpt-5"
 
-BRAND_QUERY = text("""
-    WITH best_per_brand AS (
-      SELECT DISTINCT ON (tcbp.brand_raw_id)
-        ccr.username AS creator_username,
-        ccr.niche,
-        tcbp.brand_raw_id,
-        tcbp.brand_name,
-        tcbp.post_url,
-        tcbp.post_timestamp,
-        tcbp.sponsorship_confidence,
-        br.has_official_website,
-        br.description
-      FROM content_creator_re ccr
-      JOIN test_creator_brand_partnership_posts tcbp
-        ON tcbp.content_creator_re_id = ccr.id
-      JOIN brands_raw br
-        ON br.id = tcbp.brand_raw_id
-      WHERE ccr.niche IN ('Beauty', 'Music', 'Fitness', 'Health')
-        AND tcbp.sponsorship_confidence >= 90
-        AND br.refferls = false
-        AND br.target_audience_gender IS NULL
-        AND br.target_audience_gender_confidence IS NULL
-        AND br.target_audience_min_age IS NULL
-        AND br.target_audience_max_age IS NULL
-        AND br.target_audience_age_confidence IS NULL
-        AND br.product_audience_gender IS NULL
-        AND br.product_audience_gender_confidence IS NULL
-        AND br.product_audience_min_age IS NULL
-        AND br.product_audience_max_age IS NULL
-        AND br.product_audience_age_confidence IS NULL
-        AND br.audience_analysis_explanation IS NULL
-        AND (
-          br.geo_reach_score BETWEEN 0 AND 40
-          OR br.geo_reach_score IS NULL
-        )
-        AND tcbp.post_timestamp >= '2026-01-01'
-        AND tcbp.post_timestamp < '2027-01-01'
-      ORDER BY
-        tcbp.brand_raw_id,
-        tcbp.sponsorship_confidence DESC NULLS LAST,
-        tcbp.post_timestamp DESC NULLS LAST
-    )
+# Candidate brands: refferls = false, geo_reach_score 0-40, no audience
+# results yet, and partnership evidence from EITHER source:
+#   - a test_creator_brand_partnership_posts row with sponsorship_confidence >= 90
+#   - an instagram_posts row with sponsorship_confidence >= 90
+# This script handles the brands WITHOUT a usable website (no website, or a
+# website with no description); run_brand_website_audience_check.py handles
+# the rest. --beach-brands narrows the set to brands_raw.beach_brands = true.
+_BRAND_QUERY_SQL = """
     SELECT
-      brand_raw_id,
-      brand_name,
-      creator_username,
-      post_url,
-      post_timestamp,
-      sponsorship_confidence,
-      has_official_website,
-      description,
+      br.id AS brand_raw_id,
+      COALESCE(br.name, (
+        SELECT tcbp.brand_name
+        FROM test_creator_brand_partnership_posts tcbp
+        WHERE tcbp.brand_raw_id = br.id AND tcbp.brand_name IS NOT NULL
+        LIMIT 1
+      )) AS brand_name,
+      br.has_official_website,
+      br.description,
       CASE
-        WHEN has_official_website = false THEN 'no_website'
-        WHEN has_official_website = true AND description IS NULL
+        WHEN br.has_official_website = false THEN 'no_website'
+        WHEN br.has_official_website = true AND br.description IS NULL
           THEN 'website_but_description_null'
       END AS reason
-    FROM best_per_brand
-    WHERE has_official_website = false
-       OR (has_official_website = true AND description IS NULL)
+    FROM brands_raw br
+    WHERE br.refferls = false
+      AND br.geo_reach_score BETWEEN 0 AND 40
+      AND (
+        EXISTS (
+          SELECT 1 FROM test_creator_brand_partnership_posts tcbp
+          WHERE tcbp.brand_raw_id = br.id AND tcbp.sponsorship_confidence >= 90
+        )
+        OR EXISTS (
+          SELECT 1 FROM instagram_posts ip
+          WHERE ip.brand_raw_id = br.id AND ip.sponsorship_confidence >= 90
+        )
+      )
+      AND br.target_audience_gender IS NULL
+      AND br.target_audience_gender_confidence IS NULL
+      AND br.target_audience_min_age IS NULL
+      AND br.target_audience_max_age IS NULL
+      AND br.target_audience_age_confidence IS NULL
+      AND br.product_audience_gender IS NULL
+      AND br.product_audience_gender_confidence IS NULL
+      AND br.product_audience_min_age IS NULL
+      AND br.product_audience_max_age IS NULL
+      AND br.product_audience_age_confidence IS NULL
+      AND br.audience_analysis_explanation IS NULL
+      AND (
+        br.has_official_website = false
+        OR (br.has_official_website = true AND br.description IS NULL)
+      ){beach_filter}
     ORDER BY reason, brand_name
-""")
+"""
+
+BRAND_QUERY = text(_BRAND_QUERY_SQL.replace("{beach_filter}", ""))
+BEACH_BRAND_QUERY = text(_BRAND_QUERY_SQL.replace("{beach_filter}", "\n      AND br.beach_brands = true"))
 
 
 logging.basicConfig(
@@ -273,6 +269,11 @@ def main() -> int:
         dest="brand_ids",
         help="Process one brand_raw ID. Repeat this option to process multiple IDs.",
     )
+    parser.add_argument(
+        "--beach-brands",
+        action="store_true",
+        help="Only process brands with beach_brands = true.",
+    )
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be at least 1")
@@ -281,7 +282,7 @@ def main() -> int:
     try:
         _ensure_gender_columns(db)
         prompt_template = _get_brand_audience_prompt(db)
-        brands = db.execute(BRAND_QUERY).mappings().all()
+        brands = db.execute(BEACH_BRAND_QUERY if args.beach_brands else BRAND_QUERY).mappings().all()
         if args.brand_ids:
             requested_ids = set(args.brand_ids)
             brands = [brand for brand in brands if brand["brand_raw_id"] in requested_ids]
