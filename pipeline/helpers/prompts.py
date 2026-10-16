@@ -1162,10 +1162,11 @@ Use an empty list for tags if the description and Instagram posts don't give eno
 # of what they sell. Inserted before the "Reply ONLY with this JSON object" line,
 # so it also works with an edited copy of the prompt in the database.
 BRAND_BEACH_TAGS_NOTE = """\
-BEACH BRAND - this brand is flagged as a beach / ocean related brand: what it sells or does is used at the beach, in or on the water, or to experience or film the ocean. Apply this to the sub-niche "tags":
-- Make the tags describe that beach / ocean / water angle concretely, using the specific products or services the brand offers - for example "surf apparel", "reef-safe sunscreen", "freediving gear", "action cameras for water sports", "swimwear", "beach towels", "snorkeling gear", "wetsuits", "coastal travel".
-- List the beach / ocean / water related tags first. When the description or Instagram posts support it, make at least half of the tags beach related (maximum 10 tags in total).
-- Stay honest: every tag must still be supported by the description or Instagram posts. Do not invent products, and do not tag something the brand does not make or sell just to add a beach tag.
+BEACH BRAND - MAVLIT has verified that this brand is a beach / ocean related brand: the products or services it offers are related to the beach, swimming, water sports or the ocean (for example swimwear and beachwear, surf, diving and snorkeling gear, sun care, waterproof cameras, beach gear, hydration for water athletes, coastal travel). This is a given fact - it holds even when the website description and the Instagram posts never mention the beach. Apply it to the sub-niche "tags":
+- ALWAYS include 2 to 4 beach / ocean / water tags, even when nothing in the description or posts hints at the beach. Build them from what the brand actually makes or sells, connecting it to the beach, swimming, water sports or the ocean - for example "beach apparel", "swimwear", "swim goggles", "surf gear", "water sports gear", "snorkeling gear", "reef-safe sunscreen", "sun protection", "waterproof action cameras", "waterproof gear", "beach accessories", "hydration for water sports", "coastal travel".
+- Choose beach tags that fit the brand's real product type: a sportswear brand -> "swim and beach activewear" or "water sports apparel"; a camera or drone brand -> "waterproof cameras for ocean filming"; an eyewear brand -> "sun protection eyewear"; a hydration or nutrition brand -> "hydration for water sports". If you cannot tell which beach product fits, use a general tag such as "beach lifestyle" or "water sports".
+- List the beach / ocean / water tags first, followed by the brand's other tags (maximum 10 tags in total).
+- Do not name a specific product the brand does not make (no "surfboards" for a running-shoe brand). Beach tags may describe the beach use or category of what it does sell; they may not invent new products.
 - This changes only the tags. The niche rules above are unchanged (repeat a known niche as it is; the core-niche rules still decide a new one).
 """
 
