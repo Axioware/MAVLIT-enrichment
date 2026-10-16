@@ -351,6 +351,45 @@ def _hard_filtered_query(db: Session, creator: CreatorProfile, apply_gender_filt
     return query, distance_expr
 
 
+# Brands with a creator of a given gender referenced on one of their
+# sponsorship_confidence >= 90 instagram_posts (tagged / mentions / co-authors /
+# sponsors), matched to instagram_users BY USERNAME. A creator's instagram_users
+# rows are their own latest posts, not the brand's post, so joining on
+# post_id (as before) only found co-authored collab posts and missed most
+# partners — which hid almost every brand with no target_audience_gender from
+# the gender filter. Commenters and the brand's own account are excluded.
+_GENDER_CREATOR_BRANDS_SQL = r"""
+WITH hi AS (
+  SELECT p.brand_raw_id, p.tagged_users, p.mentions, p.coauthor_producers, p.sponsors
+  FROM instagram_posts p
+  WHERE p.post_id IS NOT NULL AND p.sponsorship_confidence >= 90
+),
+names AS (
+  SELECT hi.brand_raw_id,
+         lower(CASE WHEN jsonb_typeof(e) = 'string' THEN e #>> '{}' ELSE e ->> 'username' END) AS username
+  FROM hi
+  CROSS JOIN LATERAL (
+    SELECT jsonb_array_elements(CASE WHEN jsonb_typeof(col) = 'array' THEN col ELSE '[]'::jsonb END) AS e
+    FROM (VALUES (hi.tagged_users), (hi.mentions), (hi.coauthor_producers), (hi.sponsors)) AS t(col)
+  ) x
+)
+SELECT DISTINCT n.brand_raw_id
+FROM names n
+JOIN brands_raw b ON b.id = n.brand_raw_id
+JOIN instagram_users u ON lower(u.username) = n.username
+WHERE u.user_type <> 'commenter'
+  AND lower(btrim(u.gender)) = :gender
+  AND n.username <> lower(regexp_replace(
+        regexp_replace(btrim(coalesce(b.instagram_handle, '')),
+                       '^(https?://)?(www\.)?instagram\.com/', '', 'i'),
+        '[/?#].*$|^@', '', 'g'))
+"""
+
+
+def _brand_ids_with_referenced_creator_gender(db: Session, gender: str) -> set[int]:
+    return {r[0] for r in db.execute(text(_GENDER_CREATOR_BRANDS_SQL), {"gender": gender}).all()}
+
+
 def _creator_gender_evidence(db: Session, gender: str):
     """
     (collaborator_match, re_creator_match) filter clauses: the brand has at
@@ -360,16 +399,20 @@ def _creator_gender_evidence(db: Session, gender: str):
         "contentcreatorRE") on a test partnership post
     Shared by the v1/v2 gender hard filter and v3's NULL-audience rule.
     """
-    collaborator_match = BrandRaw.id.in_(
-        db.query(BrandInstagramUser.brand_raw_id)
-        .join(InstagramUser, InstagramUser.id == BrandInstagramUser.instagram_user_id)
-        .join(InstagramPost, InstagramPost.post_id == InstagramUser.post_id)
-        .filter(
-            InstagramUser.user_type != "commenter",
-            func.lower(func.trim(InstagramUser.gender)) == gender,
-            InstagramPost.brand_raw_id == BrandInstagramUser.brand_raw_id,
-            InstagramPost.sponsorship_confidence >= 90,
-        )
+    collaborator_match = or_(
+        BrandRaw.id.in_(
+            db.query(BrandInstagramUser.brand_raw_id)
+            .join(InstagramUser, InstagramUser.id == BrandInstagramUser.instagram_user_id)
+            .join(InstagramPost, InstagramPost.post_id == InstagramUser.post_id)
+            .filter(
+                InstagramUser.user_type != "commenter",
+                func.lower(func.trim(InstagramUser.gender)) == gender,
+                InstagramPost.brand_raw_id == BrandInstagramUser.brand_raw_id,
+                InstagramPost.sponsorship_confidence >= 90,
+            )
+        ),
+        # creators referenced on the brand's 90+ posts, matched by username
+        BrandRaw.id.in_(_brand_ids_with_referenced_creator_gender(db, gender)),
     )
     re_creator_match = BrandRaw.id.in_(
         db.query(TestCreatorBrandPartnershipPost.brand_raw_id)
