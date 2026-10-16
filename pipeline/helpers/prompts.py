@@ -1157,6 +1157,18 @@ Reply ONLY with this JSON object, no extra text:
 Use an empty list for tags if the description and Instagram posts don't give enough information — do not invent tags not supported by the input. If you truly cannot determine a niche from the description or the Instagram posts, use "unknown" for niche. If you truly cannot determine a real brand name from the description or the Instagram bio/posts, use "unknown" for name.\
 """
 
+# Added to the brand_niche_tags prompt (shopify_detect.py) only for brands with
+# brands_raw.beach_brands = true: their tags should reflect the beach/ocean side
+# of what they sell. Inserted before the "Reply ONLY with this JSON object" line,
+# so it also works with an edited copy of the prompt in the database.
+BRAND_BEACH_TAGS_NOTE = """\
+BEACH BRAND - this brand is flagged as a beach / ocean related brand: what it sells or does is used at the beach, in or on the water, or to experience or film the ocean. Apply this to the sub-niche "tags":
+- Make the tags describe that beach / ocean / water angle concretely, using the specific products or services the brand offers - for example "surf apparel", "reef-safe sunscreen", "freediving gear", "action cameras for water sports", "swimwear", "beach towels", "snorkeling gear", "wetsuits", "coastal travel".
+- List the beach / ocean / water related tags first. When the description or Instagram posts support it, make at least half of the tags beach related (maximum 10 tags in total).
+- Stay honest: every tag must still be supported by the description or Instagram posts. Do not invent products, and do not tag something the brand does not make or sell just to add a beach tag.
+- This changes only the tags. The niche rules above are unchanged (repeat a known niche as it is; the core-niche rules still decide a new one).
+"""
+
 BRAND_BEACH_RELATED_PROMPT_NAME = "brand_beach_related"
 BRAND_BEACH_RELATED_DEFAULT_PROMPT = """\
 You decide whether a brand is BEACH / OCEAN RELATED for MAVLIT, an influencer-partnership platform.

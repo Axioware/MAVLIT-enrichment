@@ -35,6 +35,10 @@ Fetches each brand's homepage to:
      name_normalized values before being assigned, and silently skipped
      (logged, not raised) on a collision with an existing brand.
 
+     For brands with beach_brands = true, the prompt gets an extra
+     BRAND_BEACH_TAGS_NOTE so the tags describe the brand's beach / ocean /
+     water products and services (beach-related tags first).
+
      Skipped entirely if OPENAI_KEY isn't set. brands_niches is upserted
      (not just updated) since a bare brand has no existing row there yet.
   6. Beach relevance — with the same description and Instagram evidence, a
@@ -79,6 +83,7 @@ from pipeline.helpers.normalize import normalize
 from pipeline.helpers.prompts import (
     BRAND_BEACH_RELATED_DEFAULT_PROMPT,
     BRAND_BEACH_RELATED_PROMPT_NAME,
+    BRAND_BEACH_TAGS_NOTE,
     BRAND_NICHE_TAGS_DEFAULT_PROMPT,
     BRAND_NICHE_TAGS_PROMPT_NAME,
 )
@@ -379,8 +384,17 @@ def _extract_brand_niche_and_tags(
     """
     if not OPENAI_KEY:
         return None, None, []
+    template = _get_brand_niche_tags_prompt(db)
+    if brand.beach_brands:
+        # Beach brand: steer the tags toward its beach / ocean side. Inserted
+        # before the JSON-format line (appended if an edited prompt lacks it).
+        marker = "Reply ONLY with this JSON object"
+        template = (
+            template.replace(marker, BRAND_BEACH_TAGS_NOTE + "\n" + marker, 1)
+            if marker in template else template + "\n\n" + BRAND_BEACH_TAGS_NOTE
+        )
     prompt = fill_template(
-        _get_brand_niche_tags_prompt(db),
+        template,
         brand_name=brand.name or "unknown",
         niche=brand.niche or "unknown",
         description=description,
