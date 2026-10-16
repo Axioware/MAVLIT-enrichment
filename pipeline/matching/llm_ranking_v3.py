@@ -21,11 +21,7 @@ every target audience gender (male / female / both) are sent, and the
 prompt has the LLM weigh gender fit itself as a soft signal (a
 female-targeted brand whose products or partnerships also suit men is not
 excluded for a male creator). Brands with NO target_audience_gender
-(NULL / unknown) are excluded from v3 UNLESS they have sponsored a creator
-of this creator's gender (Instagram collaborator or RE creator, confidence
->= 90) — e.g. a NULL-audience brand that backed male creators is shown to
-a male creator. For creators without a male/female gender, NULL-audience
-brands are always excluded.
+(NULL) are sent too, as "unknown", which the prompt treats as neutral.
 
 Beach brands: every brand carries "beach_brand" (brands_raw.beach_brands),
 and the prompt gets a BEACH BRANDS section (LLM_BRAND_RANKING_V3_BEACH_NOTE)
@@ -59,10 +55,7 @@ from pipeline.matching.llm_ranking_v2 import (
     _rank_batch,
 )
 from pipeline.matching.match_text import generate_match_reasons
-from pipeline.matching.matcher import (
-    brand_ids_with_creator_gender,
-    hard_filtered_brands,
-)
+from pipeline.matching.matcher import hard_filtered_brands
 
 logger = logging.getLogger(__name__)
 
@@ -114,18 +107,9 @@ def rank_brands_with_llm_v3(db: Session, creator_id: int) -> int:
         return 0
 
     # Every hard filter except the creator-vs-brand gender match — the LLM
-    # judges gender fit softly. Brands with NO target_audience_gender
-    # (NULL / unknown) are kept only when they have sponsored a creator of
-    # this creator's gender (confidence >= 90, same evidence as the v1/v2
-    # gender filter); otherwise they are left out of v3.
-    all_candidates = hard_filtered_brands(db, creator, limit=_MAX_BRANDS, apply_gender_filter=False)
-    unknown_ids = [b.id for b, _p, _d in all_candidates if _gender_label(b.target_audience_gender) == "unknown"]
-    unknown_with_gender_creator = brand_ids_with_creator_gender(db, unknown_ids, creator.gender)
-    candidates = [
-        candidate for candidate in all_candidates
-        if _gender_label(candidate[0].target_audience_gender) != "unknown"
-        or candidate[0].id in unknown_with_gender_creator
-    ]
+    # judges gender fit softly, including brands with NO
+    # target_audience_gender (sent as "unknown").
+    candidates = hard_filtered_brands(db, creator, limit=_MAX_BRANDS, apply_gender_filter=False)
     audience = {
         brand.id: (_gender_label(brand.target_audience_gender), _gender_label(brand.product_audience_gender))
         for brand, _profile, _distance in candidates
