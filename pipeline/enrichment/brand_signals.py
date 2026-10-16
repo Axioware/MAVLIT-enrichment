@@ -83,11 +83,41 @@ def _upsert_brand_profile(db: Session, brand_raw_id: int, values: dict) -> None:
     db.commit()
 
 
+def _referenced_creator_usernames(db: Session, brand_raw_id: int) -> set[str]:
+    """
+    Lower-cased usernames referenced (tagged_users / mentions / coauthor_producers
+    / sponsors) on this brand's sponsorship_confidence >= 90 instagram_posts —
+    the creators the brand actually partnered with — minus the brand's own
+    account. List entries are plain usernames, or {"username": ...} on older rows.
+    """
+    own = (normalize_handle(
+        db.query(BrandRaw.instagram_handle).filter(BrandRaw.id == brand_raw_id).scalar() or ""
+    ) or "").lower()
+    names: set[str] = set()
+    rows = db.query(
+        InstagramPost.tagged_users, InstagramPost.mentions,
+        InstagramPost.coauthor_producers, InstagramPost.sponsors,
+    ).filter(
+        InstagramPost.brand_raw_id == brand_raw_id,
+        InstagramPost.post_id.isnot(None),
+        InstagramPost.sponsorship_confidence >= 90,
+    ).all()
+    for row in rows:
+        for field in row:
+            for entry in field if isinstance(field, list) else []:
+                value = entry.get("username") if isinstance(entry, dict) else entry
+                if isinstance(value, str) and value.strip():
+                    names.add(value.strip().lstrip("@").lower())
+    names.discard(own)
+    return names
+
+
 def compute_creator_tier_profile(db: Session, brand_raw_id: int) -> dict | None:
     """
     Average the follower/subscriber size of creators this brand has actually
-    worked with (YouTube sponsorships + high-confidence direct and
-    reverse-engineering Instagram creators), bucketed into nano/micro/macro/mega. Also
+    worked with (YouTube sponsorships + the Instagram creators referenced on
+    the brand's >= 90 posts, matched by username + reverse-engineering
+    creators), bucketed into nano/micro/macro/mega. Also
     records the highest and lowest follower/subscriber count seen on each
     platform. Writes to brand_match_profile. Returns None if there's no
     creator data at all for this brand.
@@ -116,6 +146,24 @@ def compute_creator_tier_profile(db: Session, brand_raw_id: int) -> dict | None:
         InstagramPost.brand_raw_id == brand_raw_id,
         InstagramPost.sponsorship_confidence >= 90,
     ).all()
+
+    # Creators referenced on the brand's own >= 90 posts, matched by USERNAME.
+    # The join above only finds a creator whose stored row IS the brand's post
+    # (co-authored collab posts); a tagged/mentioned creator's rows are their
+    # OWN latest posts, so on its own it missed most partners and left
+    # insta_lowest/insta_highest empty — which the Instagram follower-range
+    # hard filter then drops.
+    referenced = _referenced_creator_usernames(db, brand_raw_id)
+    referenced_users = (
+        db.query(InstagramUser.username, InstagramUser.followers_count)
+        .filter(
+            InstagramUser.user_type != "commenter",
+            InstagramUser.followers_count.isnot(None),
+            func.lower(InstagramUser.username).in_(referenced),
+        )
+        .all()
+        if referenced else []
+    )
 
     reverse_usernames = {
         username.strip().casefold()
@@ -149,6 +197,9 @@ def compute_creator_tier_profile(db: Session, brand_raw_id: int) -> dict | None:
     )
     follower_by_creator: dict[str, int] = {}
     for username, followers_count in direct_users:
+        key = username.casefold()
+        follower_by_creator[key] = max(follower_by_creator.get(key, 0), followers_count)
+    for username, followers_count in referenced_users:
         key = username.casefold()
         follower_by_creator[key] = max(follower_by_creator.get(key, 0), followers_count)
     for username, followers_count in reverse_users:
