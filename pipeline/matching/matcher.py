@@ -150,7 +150,7 @@ _EXEMPT_MIN_CONFIDENCE = 90
 # usernames on the brand's >= 90 instagram_posts (tagged / mentions /
 # co-authors / sponsors; commenters and the brand's own account excluded)
 # and (b) content_creator_re via >= 90 test_creator_brand_partnership_posts.
-_NICHE_EXEMPT_SQL = """
+_NICHE_EXEMPT_SQL = r"""
 WITH hi AS (
   SELECT p.brand_raw_id, p.tagged_users, p.mentions, p.coauthor_producers, p.sponsors
   FROM instagram_posts p
