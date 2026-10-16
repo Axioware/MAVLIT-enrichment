@@ -166,3 +166,6 @@ SELECT
     COUNT(*) FILTER (WHERE NOT instagram_checked) AS instagram_not_checked,
     COUNT(*) FILTER (WHERE initial_brand_scored) AS already_scored
 FROM brands_raw;
+
+SELECT DISTINCT niche
+FROM instagram_users;
