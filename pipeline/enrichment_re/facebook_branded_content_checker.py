@@ -39,15 +39,18 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
-from config import FACEBOOK_PROXIES
 from playwright.async_api import (
     Browser,
     BrowserContext,
     Locator,
     Page,
-    TimeoutError as PlaywrightTimeoutError,
     async_playwright,
 )
+from playwright.async_api import (
+    TimeoutError as PlaywrightTimeoutError,
+)
+
+from config import FACEBOOK_PROXIES
 
 logger = logging.getLogger(__name__)
 

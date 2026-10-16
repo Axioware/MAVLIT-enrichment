@@ -59,7 +59,10 @@ from pipeline.matching.llm_ranking_v2 import (
     _rank_batch,
 )
 from pipeline.matching.match_text import generate_match_reasons
-from pipeline.matching.matcher import brand_ids_with_creator_gender, hard_filtered_brands
+from pipeline.matching.matcher import (
+    brand_ids_with_creator_gender,
+    hard_filtered_brands,
+)
 
 logger = logging.getLogger(__name__)
 

@@ -1835,9 +1835,12 @@ def generate_my_creator_description(
 # AI ranking versions: v2 (profile fit) and v3 (profile fit + taglines).
 # Each has its own ranking function, results table and status columns
 # (<prefix>_ranking_status / <prefix>_ranking_error / <prefix>_ranked_at).
+# "paused": True skips the ranking run (no LLM calls) — profile saves and
+# /refresh leave the status idle and GET keeps serving the last stored results.
 _AI_RANKINGS = {
-    "v2": {"rank": lambda db, cid: rank_brands_with_llm(db, cid),    "model": CreatorBrandLlmRanking,   "prefix": "llm"},
-    "v3": {"rank": lambda db, cid: rank_brands_with_llm_v3(db, cid), "model": CreatorBrandLlmV3Ranking, "prefix": "llm_v3"},
+    # v2 temporarily paused to save LLM credits — set paused to False to resume.
+    "v2": {"rank": lambda db, cid: rank_brands_with_llm(db, cid),    "model": CreatorBrandLlmRanking,   "prefix": "llm",    "paused": True},
+    "v3": {"rank": lambda db, cid: rank_brands_with_llm_v3(db, cid), "model": CreatorBrandLlmV3Ranking, "prefix": "llm_v3", "paused": False},
 }
 
 
@@ -1851,6 +1854,11 @@ def _run_ai_ranking_job(creator_id: int, version: str) -> None:
     try:
         row = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
         if not row:
+            return
+        if config["paused"]:
+            logger.info("AI ranking %s is paused — skipping creator_id=%d", version, creator_id)
+            setattr(row, status_field, "idle")
+            db.commit()
             return
         setattr(row, status_field, "running")
         setattr(row, error_field, None)
@@ -1924,8 +1932,9 @@ def upsert_my_creator_profile(
         for field, value in payload.items():
             setattr(row, field, value)
         row.creator_tier = bucket_creator_tier(row.follower_count)
-        row.llm_ranking_status = "queued"     # signals job runs the v2 LLM ranking next,
-        row.llm_ranking_error = None
+        if not _AI_RANKINGS["v2"]["paused"]:
+            row.llm_ranking_status = "queued"     # signals job runs the v2 LLM ranking next,
+            row.llm_ranking_error = None
         row.llm_v3_ranking_status = "queued"  # then v3
         row.llm_v3_ranking_error = None
 
@@ -2073,6 +2082,8 @@ def _refresh_ai_matches(background_tasks: BackgroundTasks, user_id: int, version
     db = SessionLocal()
     try:
         row = db.query(CreatorProfile).filter(CreatorProfile.id == user_id).first()
+        if _AI_RANKINGS[version]["paused"]:
+            return _ai_matches_response(db, user_id, version)
         if getattr(row, f"{prefix}_ranking_status") not in ("queued", "running"):
             setattr(row, f"{prefix}_ranking_status", "queued")
             setattr(row, f"{prefix}_ranking_error", None)
