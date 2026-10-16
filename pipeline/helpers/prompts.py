@@ -1781,6 +1781,20 @@ Include every brand id from the input list exactly once.
 
 LLM_BRAND_RANKING_V3_PROMPT_NAME = "creator_brand_llm_ranking_v3"
 
+# Beach-brand guidance for the v3 ranking. llm_ranking_v3.py inserts it before
+# the final "Reply ONLY with this JSON object" line of whatever prompt is in use
+# (the default below or an edited copy in the database), unless that prompt
+# already contains "BEACH BRANDS" — so no database edit is needed.
+LLM_BRAND_RANKING_V3_BEACH_NOTE = """\
+BEACH BRANDS (apply with the content fit scoring; does not change the other rules):
+Each brand has "beach_brand": true or false. true means MAVLIT verified that the brand's products or services are related to the beach, swimming, water sports or the ocean - for example swimwear, surf, diving and snorkeling gear, wetsuits, sun care and sunscreen, beach gear, waterproof action cameras, paddle sports, coastal travel or boating. false (or missing) means no such flag; never treat a brand as a beach brand just because the word "beach" or "ocean" appears in a name or tag.
+A creator is BEACH-RELATED when their niche, sub-niches, tags, description, profile summary or brand preferences show beach, ocean, swimming, surfing, diving, water sports, sun and skin protection for outdoors, boating, fishing or coastal lifestyle or travel content. Decide this only from the creator information given; do not assume it.
+- Beach-related creator + a beach_brand: true brand whose products fit what the creator does: treat it as a strong content fit. Use a content fit of at least 80 when the brand matches the creator's own activity (a surfer and a surf brand, a swimmer and swim gear, a beach/travel creator and swimwear or sun care) and at least 70 when it is a broad beach product the creator could naturally promote. These brands should rank above comparable brands without the flag.
+- A SPECIALIZED beach brand (for example spearfishing or scuba) still needs the creator to show that activity; for a beach-related creator who does not, treat it as a partial fit, not a strong one.
+- Creator who is NOT beach-related: the beach flag gives no boost and no penalty - score the brand normally on its products. Broad products (sunscreen, sunglasses, swimwear for a fitness or beauty creator) can still fit; specialized beach gear for an unrelated creator follows the SPECIALIZED MISMATCH RULE.
+- The flag only adds evidence about what the brand sells. It never overrides the PREFERENCE, SPECIALIZED MISMATCH or OPPOSITE GENDER rules.
+"""
+
 LLM_BRAND_RANKING_V3_DEFAULT_PROMPT = """\
 You are ranking brands for a content creator on a creator-brand sponsorship matching platform.
 
@@ -1793,7 +1807,7 @@ Profile summary: {embedding_text}
 Gender: {creator_gender}
 Brand preferences written by the creator (what they want to see more of, and what they do not want): {creator_preferences}
 
-BRANDS (JSON list - each has id, name, niche, description, tags, why_it_matches, target_audience_gender, product_audience_gender):
+BRANDS (JSON list - each has id, name, niche, description, tags, why_it_matches, target_audience_gender, product_audience_gender, beach_brand):
 {brands_json}
 
 "why_it_matches" lists the platform's verified match signals between that brand and this creator. They are written to the creator, so "you" / "yours" means THIS creator. Examples: recent paid partnerships, partnerships with creators whose content is similar to this creator's, follower-size fit, a verified partnerships contact, same niche, the brand sponsoring creators in this creator's niche, audience fit.

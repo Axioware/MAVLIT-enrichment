@@ -27,6 +27,11 @@ of this creator's gender (Instagram collaborator or RE creator, confidence
 a male creator. For creators without a male/female gender, NULL-audience
 brands are always excluded.
 
+Beach brands: every brand carries "beach_brand" (brands_raw.beach_brands),
+and the prompt gets a BEACH BRANDS section (LLM_BRAND_RANKING_V3_BEACH_NOTE)
+telling the model such brands sell beach / swimming / water-sport / ocean
+products, so it ranks them higher for beach-related creators.
+
 Batching, model (gpt-5), parsing and the fully-replaced results table
 mirror v2; results go to creator_brand_llm_v3_rankings with the taglines
 stored alongside. Runs in the background after every creator-profile save
@@ -41,6 +46,7 @@ from sqlalchemy.orm import Session
 
 from pipeline.db import CreatorBrandLlmV3Ranking, CreatorProfile, Prompt
 from pipeline.helpers.prompts import (
+    LLM_BRAND_RANKING_V3_BEACH_NOTE,
     LLM_BRAND_RANKING_V3_DEFAULT_PROMPT,
     LLM_BRAND_RANKING_V3_PROMPT_NAME,
 )
@@ -74,7 +80,22 @@ def _creator_gender_label(value: str | None) -> str:
 
 def _get_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == LLM_BRAND_RANKING_V3_PROMPT_NAME).first()
-    return row.content if row else LLM_BRAND_RANKING_V3_DEFAULT_PROMPT
+    return _with_beach_note(row.content if row else LLM_BRAND_RANKING_V3_DEFAULT_PROMPT)
+
+
+def _with_beach_note(template: str) -> str:
+    """
+    Add the BEACH BRANDS guidance to the prompt (default or database copy)
+    before its final JSON-format instruction — unless the prompt already has
+    a BEACH BRANDS section (e.g. it was pasted into /admin). The flag itself
+    reaches the model as "beach_brand" on every brand in the list.
+    """
+    if "BEACH BRANDS" in template:
+        return template
+    marker = "Reply ONLY with this JSON object"
+    if marker in template:
+        return template.replace(marker, LLM_BRAND_RANKING_V3_BEACH_NOTE + "\n" + marker, 1)
+    return template + "\n\n" + LLM_BRAND_RANKING_V3_BEACH_NOTE
 
 
 def rank_brands_with_llm_v3(db: Session, creator_id: int) -> int:
@@ -111,9 +132,11 @@ def rank_brands_with_llm_v3(db: Session, creator_id: int) -> int:
         for brand, profile, _distance in candidates
     }
     payloads = _brand_payloads(db, [brand for brand, _profile, _distance in candidates])
+    beach_flag = {brand.id: bool(brand.beach_brands) for brand, _profile, _distance in candidates}
     for payload in payloads:
         payload["why_it_matches"] = taglines[payload["id"]]
         payload["target_audience_gender"], payload["product_audience_gender"] = audience[payload["id"]]
+        payload["beach_brand"] = beach_flag[payload["id"]]
     creator_fields = {
         **_creator_fields(creator),
         "creator_gender": _creator_gender_label(creator.gender),
