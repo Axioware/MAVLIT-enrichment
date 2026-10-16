@@ -28,7 +28,7 @@ and the prompt gets a BEACH BRANDS section (LLM_BRAND_RANKING_V3_BEACH_NOTE)
 telling the model such brands sell beach / swimming / water-sport / ocean
 products, so it ranks them higher for beach-related creators.
 
-Batching, model (gpt-5), parsing and the fully-replaced results table
+Batching, parsing and the fully-replaced results table
 mirror v2; results go to creator_brand_llm_v3_rankings with the taglines
 stored alongside. Runs in the background after every creator-profile save
 (after v2) and on POST /matches/me/v3/refresh. Prompt:
@@ -59,7 +59,7 @@ from pipeline.matching.matcher import hard_filtered_brands
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gpt-5"
+_MODEL = "gpt-5-mini"
 
 
 def _gender_label(value: str | None) -> str:
