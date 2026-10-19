@@ -10,6 +10,10 @@ Fetches each brand's homepage to:
      real about / our-story / company links found on the homepage (up to 3
      pages, each page's own links queued next, like geo_reach's crawler),
      else the homepage's own text. No about-page URLs are guessed.
+     The LLM always gets the Instagram bio + latest 10 posts (instagram_posts)
+     next to the website description. If the site gives no description at all,
+     it gets the Instagram bio + posts alone; with no stored posts either, the
+     niche stays NULL.
   5. Send that description to the LLM (brand_niche_tags) to extract
      sub-niche/category tags, stored in brands_niches.tags — and, for any of
      brands_raw.name / .niche that's currently unset (bare brands created by
@@ -343,7 +347,7 @@ def _get_brand_beach_prompt(db: Session) -> str:
     return row.content if row else BRAND_BEACH_RELATED_DEFAULT_PROMPT
 
 
-_INSTAGRAM_POSTS_FOR_NICHE = 5   # brand's own recent posts sent with the website description
+_INSTAGRAM_POSTS_FOR_NICHE = 10   # brand's own recent posts sent with the website description
 
 
 def _instagram_evidence(db: Session, brand_id: int) -> str:
@@ -367,6 +371,14 @@ def _instagram_evidence(db: Session, brand_id: int) -> str:
         for r in rows if r.caption or r.hashtags
     ]
     return json.dumps({"bio": (bio or "")[:600], "recent_posts": posts}, ensure_ascii=False)
+
+
+# Sent as the description when the website gave none and the brand's Instagram
+# bio + posts are all there is to go on (see _niche_from_instagram_only).
+_NO_DESCRIPTION_NOTE = (
+    "none - the website gave no description; work out the niche and tags from the "
+    "Instagram bio and recent posts below"
+)
 
 
 def _extract_brand_niche_and_tags(
@@ -397,7 +409,7 @@ def _extract_brand_niche_and_tags(
         template,
         brand_name=brand.name or "unknown",
         niche=brand.niche or "unknown",
-        description=description,
+        description=description or _NO_DESCRIPTION_NOTE,
         instagram_posts=_instagram_evidence(db, brand.id),
     )
     result = call_gpt_json(prompt, context=f"brand niche tags for {brand.name}")
@@ -529,7 +541,20 @@ def _update_brand_niche_description_and_tags(db: Session, brand: BrandRaw, descr
 
     effective_niche = brand.niche
     if effective_niche:
-        _upsert_brand_niche(db, brand.id, effective_niche, description, tags or None)
+        _upsert_brand_niche(db, brand.id, effective_niche, description or None, tags or None)
+
+
+def _niche_from_instagram_only(db: Session, brand: BrandRaw) -> bool:
+    """
+    The website gave nothing to read: run the niche/tags step on the brand's Instagram
+    bio + latest posts in instagram_posts ALONE (up to _INSTAGRAM_POSTS_FOR_NICHE;
+    no stored description is passed). With no stored posts nothing is done and the
+    niche stays NULL. Returns True when the LLM step ran.
+    """
+    if _instagram_evidence(db, brand.id) == "none":
+        return False
+    _update_brand_niche_description_and_tags(db, brand, "")
+    return True
 
 
 def enrich_shopify(
@@ -609,6 +634,19 @@ def enrich_shopify(
             # 2nd: about-style pages linked from the homepage, else the homepage's own text
             if not about_text:
                 about_text = _fetch_about_text(brand.website, homepage_html=html)
+            if not about_text:
+                try:
+                    if _niche_from_instagram_only(db, brand):
+                        logger.info("Shopify/socials check: %s - no website description, niche read from Instagram posts",
+                                    brand.name or f"brand_id={brand.id}")
+                except LLMUnavailableError:
+                    db.rollback()
+                    logger.error(
+                        "Shopify/socials check: OpenAI unavailable at brand_id=%s — stopping; "
+                        "this brand stays shopify_checked=False (%d brand(s) done this run)",
+                        brand.id, updated,
+                    )
+                    raise
             if about_text:
                 brand.description = about_text
                 about_count += 1

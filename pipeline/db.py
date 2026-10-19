@@ -987,10 +987,14 @@ def get_db():
 
 
 def normalize_niche(niche: str | None) -> str | None:
+    """Capitalise the first letter, write "_" as a space ("food_beverage" -> "Food beverage"),
+    and fold "Health & Wellness" / "health_wellness" into "Health"."""
     if not niche:
         return niche
 
-    niche = niche.strip()
+    niche = " ".join(niche.replace("_", " ").split())
+    if niche.lower() in ("health & wellness", "health wellness"):
+        return "Health"
     return niche[0].upper() + niche[1:] if niche else niche
 
 
