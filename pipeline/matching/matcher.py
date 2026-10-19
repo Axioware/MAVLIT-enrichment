@@ -84,7 +84,13 @@ Runs on every page load; designed to be cheap:
            that brand has sponsored at least one male creator.
 
            Geo-reach filter: brands_raw.geo_reach_score must be 0-40
-           (local/small-reach) or NULL (not geo-scored yet).
+           (local/small-reach); NULL (not geo-scored yet) is blocked.
+
+           Referral filter: brands with refferls = true are never shown.
+
+           Partnership filter: the brand needs a post with
+           sponsorship_confidence >= 90 in test_creator_brand_partnership_posts
+           or instagram_posts.
 
            Avoided brand niches: brands whose brands_raw.niche is in
            _EXCLUDED_BRAND_NICHES (e.g. "Band") are dropped for every
@@ -114,7 +120,7 @@ cheap enough for a real-time page load regardless.
 
 import logging
 
-from sqlalchemy import func, or_, text
+from sqlalchemy import exists, func, or_, text
 from sqlalchemy.orm import Session
 
 from pipeline.db import (
@@ -135,6 +141,7 @@ from pipeline.matching.scoring import score_match
 logger = logging.getLogger(__name__)
 
 _ACTIVITY_FLOOR = 0   # brands with a CONFIRMED score at or below this are dropped; unscored (NULL) brands are kept
+_MIN_PARTNERSHIP_CONFIDENCE = 90   # a shown brand needs a post at/above this in test_creator_brand_partnership_posts or instagram_posts
 _FOLLOWER_TOLERANCE = 2   # +/-200% buffer beyond the brand's confirmed collaborator follower range
 # Brand categories always avoided, for every creator — brands_raw.niche values
 # (compared case-insensitively). Brands with no niche are kept.
@@ -209,6 +216,37 @@ def _niche_exempt_brand_ids(db: Session) -> set[int]:
 
 
 
+def apply_brand_hard_filters(query):
+    """
+    The hard filters that depend on the brand only (not on the creator), applied to
+    any query that selects from BrandRaw:
+      - geo_reach_score between 0 and 40 (NULL = not geo-scored yet is blocked)
+      - refferls = true is blocked
+      - a post with sponsorship_confidence >= 90 in test_creator_brand_partnership_posts
+        OR instagram_posts
+      - brands_raw.niche not in _EXCLUDED_BRAND_NICHES (brands with no niche pass)
+    Used by _hard_filtered_query (v1 / v2 / v3 ranking runs) and by the API when it
+    serves stored v2 / v3 rankings, so a brand blocked here disappears from them
+    immediately instead of at the creator's next re-rank.
+    """
+    query = query.filter(BrandRaw.geo_reach_score.between(0, 40))
+    query = query.filter(BrandRaw.refferls.isnot(True))
+    query = query.filter(or_(
+        exists().where(
+            TestCreatorBrandPartnershipPost.brand_raw_id == BrandRaw.id,
+            TestCreatorBrandPartnershipPost.sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE,
+        ),
+        exists().where(
+            InstagramPost.brand_raw_id == BrandRaw.id,
+            InstagramPost.sponsorship_confidence >= _MIN_PARTNERSHIP_CONFIDENCE,
+        ),
+    ))
+    return query.filter(or_(
+        BrandRaw.niche.is_(None),
+        ~func.lower(func.trim(BrandRaw.niche)).in_(_EXCLUDED_BRAND_NICHES),
+    ))
+
+
 def _hard_filtered_query(db: Session, creator: CreatorProfile, apply_gender_filter: bool = True):
     """
     Step A — the hard-filtered (BrandRaw, BrandProfile, distance) query for
@@ -229,14 +267,9 @@ def _hard_filtered_query(db: Session, creator: CreatorProfile, apply_gender_filt
     query = query.filter(
         or_(BrandProfile.sponsorship_activity_score.is_(None), BrandProfile.sponsorship_activity_score > _ACTIVITY_FLOOR)
     )
-    # Local/small-reach brands only (geo_reach_score 0-40); NULL = not
-    # geo-scored yet, kept.
-    query = query.filter(or_(BrandRaw.geo_reach_score.is_(None), BrandRaw.geo_reach_score.between(0, 40)))
-    # Hard-coded brand categories to avoid (brands_raw.niche), for everyone.
-    query = query.filter(or_(
-        BrandRaw.niche.is_(None),
-        ~func.lower(func.trim(BrandRaw.niche)).in_(_EXCLUDED_BRAND_NICHES),
-    ))
+    # Brand-only rules (geo, referral, partnership, avoided niches), shared with
+    # the stored v2/v3 rankings (apply_brand_hard_filters).
+    query = apply_brand_hard_filters(query)
     # "Brand categories to avoid" are brands_niches.tags (picked on the
     # creator-profile page from the tags of their primary niche) — drop any
     # brand carrying one of them (exact tag, case-insensitive).

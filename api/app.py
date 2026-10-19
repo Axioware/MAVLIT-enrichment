@@ -130,7 +130,7 @@ from pipeline.helpers.prompts import (
 from pipeline.matching.llm_ranking_v2 import rank_brands_with_llm
 from pipeline.matching.llm_ranking_v3 import rank_brands_with_llm_v3
 from pipeline.matching.match_text import generate_match_reasons
-from pipeline.matching.matcher import get_matches
+from pipeline.matching.matcher import apply_brand_hard_filters, get_matches
 from pipeline.seed import run_seed
 
 logger = logging.getLogger(__name__)
@@ -2183,10 +2183,15 @@ def _ai_matches_response(db, user_id: int, version: str) -> LlmMatchesResponse:
     config = _AI_RANKINGS[version]
     ranking_model = config["model"]
     row = db.query(CreatorProfile).filter(CreatorProfile.id == user_id).first()
+    # Stored rankings are re-checked against the brand-only hard filters (geo,
+    # referral, partnership, avoided niches) so a newly blocked brand disappears
+    # at once, without waiting for the creator's next re-rank.
     rows = (
-        db.query(ranking_model, BrandRaw)
-        .join(BrandRaw, BrandRaw.id == ranking_model.brand_raw_id)
-        .filter(ranking_model.creator_profile_id == user_id)
+        apply_brand_hard_filters(
+            db.query(ranking_model, BrandRaw)
+            .join(BrandRaw, BrandRaw.id == ranking_model.brand_raw_id)
+            .filter(ranking_model.creator_profile_id == user_id)
+        )
         .order_by(ranking_model.rank)
         .all()
     )
