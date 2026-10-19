@@ -1064,6 +1064,20 @@ Use empty lists if there isn't enough information to extract either one — do n
 #  creator_niches.py
 
 CREATOR_NICHE_DESCRIPTION_PROMPT_NAME = "creator_niche_description"
+# Added to the end of the creator_niche_description prompt by the description
+# generators when the copy stored in the prompts table (which overrides the code
+# default) has no audience fields yet - so one LLM call still returns the audience
+# gender and age range, whatever the stored copy says. Keep the wording in step with
+# CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT.
+CREATOR_AUDIENCE_NOTE = """\
+
+ADDITIONAL REQUIRED OUTPUT - AUDIENCE ESTIMATE
+Besides the description and tags, estimate who this creator's AUDIENCE is, as a best estimate from the bio and content (no analytics are available), and add these three keys to the same JSON object:
+- "audience_gender": the gender most of the audience is - exactly "male", "female" or "both". Base it on who the content is made for and who it would attract (topics, tone, products, how the creator addresses the audience), not on the creator's own gender alone. Use "both" when the evidence is mixed or thin.
+- "audience_age_min" and "audience_age_max": the age range most of the audience falls in, as whole numbers between 13 and 100 (for example 18 and 34). Keep it realistic and reasonably tight (usually 10 to 20 years wide); the minimum must not be above the maximum.
+Do not mention demographics in the description or tags. Example of the full JSON: {"description": "...", "tags": ["...", "..."], "audience_gender": "female", "audience_age_min": 18, "audience_age_max": 34}
+"""
+
 CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT = """\
 You are analyzing a content creator (Instagram or YouTube).
 

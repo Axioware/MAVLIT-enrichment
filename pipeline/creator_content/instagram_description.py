@@ -17,6 +17,7 @@ from pipeline.db import Prompt
 from pipeline.enrichment.instagram_posts import _scrape_handle
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template, record_apify_scrape
 from pipeline.helpers.prompts import (
+    CREATOR_AUDIENCE_NOTE,
     CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT,
     CREATOR_NICHE_DESCRIPTION_PROMPT_NAME,
 )
@@ -28,8 +29,18 @@ _POSTS_LIMIT = 20
 
 
 def _get_description_prompt(db: Session) -> str:
+    """
+    The description prompt (stored copy in /admin, else the code default). A stored copy
+    that predates the audience fields gets CREATOR_AUDIENCE_NOTE appended, so the same
+    single call still returns the audience gender and age range.
+    """
     row = db.query(Prompt).filter(Prompt.name == CREATOR_NICHE_DESCRIPTION_PROMPT_NAME).first()
-    return row.content if row else CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT
+    if not row:
+        return CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT
+    if "audience_gender" not in row.content:
+        logger.info("Prompt %s has no audience fields - appending the audience note", CREATOR_NICHE_DESCRIPTION_PROMPT_NAME)
+        return row.content.rstrip() + "\n" + CREATOR_AUDIENCE_NOTE
+    return row.content
 
 
 def _audience_age(value) -> int | None:

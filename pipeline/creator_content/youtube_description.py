@@ -4,8 +4,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from pipeline.creator_content.instagram_description import audience_from_result
-from pipeline.db import Prompt
+from pipeline.creator_content.instagram_description import _get_description_prompt, audience_from_result
 from pipeline.enrichment.youtube_sponsorship import (
     _CHANNELS_URL,
     _SEARCH_URL,
@@ -13,19 +12,10 @@ from pipeline.enrichment.youtube_sponsorship import (
     _yt_get,
 )
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
-from pipeline.helpers.prompts import (
-    CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT,
-    CREATOR_NICHE_DESCRIPTION_PROMPT_NAME,
-)
 
 logger = logging.getLogger(__name__)
 
 _VIDEOS_LIMIT = 20
-
-
-def _get_description_prompt(db: Session) -> str:
-    row = db.query(Prompt).filter(Prompt.name == CREATOR_NICHE_DESCRIPTION_PROMPT_NAME).first()
-    return row.content if row else CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT
 
 
 def _find_channel(username: str) -> dict | None:
