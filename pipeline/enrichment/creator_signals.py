@@ -77,16 +77,6 @@ def _extract_content_tags(db: Session, profile: CreatorProfile) -> list[str]:
 
 #  Embedding text
 
-def _gender_skew_phrase(male_pct: float | None, female_pct: float | None) -> str | None:
-    if male_pct is not None and male_pct >= 0.6:
-        return "audience skews mostly male"
-    if female_pct is not None and female_pct >= 0.6:
-        return "audience skews mostly female"
-    if male_pct is not None or female_pct is not None:
-        return "audience is gender-balanced"
-    return None
-
-
 def _top_countries_phrase(top_countries: list | None, n: int = 3) -> str | None:
     if not top_countries:
         return None
@@ -117,12 +107,12 @@ def build_creator_embedding_text(profile: CreatorProfile) -> str:
     if profile.creator_tier:
         parts.append(f"{profile.creator_tier}-tier creator")
 
-    male_pct = profile.instagram_audience_gender_male_pct
-    female_pct = profile.instagram_audience_gender_female_pct
-    if male_pct is None and female_pct is None:
-        male_pct = profile.youtube_audience_gender_male_pct
-        female_pct = profile.youtube_audience_gender_female_pct
-    gender_phrase = _gender_skew_phrase(male_pct, female_pct)
+    audience = (profile.instagram_audience_gender or profile.youtube_audience_gender or "").strip().lower()
+    gender_phrase = {
+        "male": "audience skews mostly male",
+        "female": "audience skews mostly female",
+        "both": "audience is gender-balanced",
+    }.get(audience)
     if gender_phrase:
         parts.append(gender_phrase)
 

@@ -34,8 +34,9 @@ class CreatorProfileResponse(BaseModel):
     instagram_description_status: str = "idle"
     instagram_description_job_id: str | None = None
     instagram_description_error: str | None = None
-    instagram_audience_gender_male_pct: float | None = None
-    instagram_audience_gender_female_pct: float | None = None
+    instagram_audience_gender: str | None = None   # "male" | "female" | "both"
+    instagram_audience_age_min: int | None = None
+    instagram_audience_age_max: int | None = None
     youtube_channel_name: str | None = None
     youtube_subscribers: int | None = None
     youtube_primary_niche: str | None = None
@@ -46,8 +47,9 @@ class CreatorProfileResponse(BaseModel):
     youtube_description_status: str = "idle"
     youtube_description_job_id: str | None = None
     youtube_description_error: str | None = None
-    youtube_audience_gender_male_pct: float | None = None
-    youtube_audience_gender_female_pct: float | None = None
+    youtube_audience_gender: str | None = None
+    youtube_audience_age_min: int | None = None
+    youtube_audience_age_max: int | None = None
 
     creator_tier: str | None = None
     content_tags: list[str] | None = None
@@ -96,8 +98,9 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         instagram_description_status=row.instagram_description_status or "idle",
         instagram_description_job_id=row.instagram_description_job_id,
         instagram_description_error=row.instagram_description_error,
-        instagram_audience_gender_male_pct=row.instagram_audience_gender_male_pct,
-        instagram_audience_gender_female_pct=row.instagram_audience_gender_female_pct,
+        instagram_audience_gender=row.instagram_audience_gender,
+        instagram_audience_age_min=row.instagram_audience_age_min,
+        instagram_audience_age_max=row.instagram_audience_age_max,
         youtube_channel_name=row.youtube_channel_name,
         youtube_subscribers=row.youtube_subscribers,
         youtube_primary_niche=row.youtube_primary_niche,
@@ -108,8 +111,9 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         youtube_description_status=row.youtube_description_status or "idle",
         youtube_description_job_id=row.youtube_description_job_id,
         youtube_description_error=row.youtube_description_error,
-        youtube_audience_gender_male_pct=row.youtube_audience_gender_male_pct,
-        youtube_audience_gender_female_pct=row.youtube_audience_gender_female_pct,
+        youtube_audience_gender=row.youtube_audience_gender,
+        youtube_audience_age_min=row.youtube_audience_age_min,
+        youtube_audience_age_max=row.youtube_audience_age_max,
         creator_tier=row.creator_tier,
         content_tags=_as_list(row.content_tags),
         created_at=str(row.created_at) if row.created_at else "",

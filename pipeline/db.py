@@ -615,8 +615,9 @@ class CreatorProfile(Base):
     instagram_description_status = Column(Text, nullable=False, server_default="idle", default="idle")
     instagram_description_job_id = Column(Text)
     instagram_description_error = Column(Text)
-    instagram_audience_gender_male_pct = Column(Float)
-    instagram_audience_gender_female_pct = Column(Float)
+    instagram_audience_gender = Column(Text)   # ONE dropdown value: "male" | "female" | "both"
+    instagram_audience_age_min = Column(Integer)   # youngest / oldest age of the creator's Instagram audience
+    instagram_audience_age_max = Column(Integer)
     
     youtube_channel_name = Column(Text)
     youtube_subscribers = Column(Integer)
@@ -628,8 +629,9 @@ class CreatorProfile(Base):
     youtube_description_status = Column(Text, nullable=False, server_default="idle", default="idle")
     youtube_description_job_id = Column(Text)
     youtube_description_error = Column(Text)
-    youtube_audience_gender_male_pct = Column(Float)
-    youtube_audience_gender_female_pct = Column(Float)
+    youtube_audience_gender = Column(Text)         # "male" | "female" | "both"
+    youtube_audience_age_min = Column(Integer)     # youngest / oldest age of the creator's YouTube audience
+    youtube_audience_age_max = Column(Integer)
 
     #  Derived / computed fields
     creator_tier  = Column(Text)

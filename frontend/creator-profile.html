@@ -339,15 +339,24 @@
             <textarea id="instagram_description" name="instagram_description" placeholder="Describe your Instagram content" data-required-platform="instagram"></textarea>
           </div>
           <div class="field">
-            <label for="instagram_audience_gender_male_pct">Audience male (%)</label>
-            <input id="instagram_audience_gender_male_pct" name="instagram_audience_gender_male_pct" type="number" min="0" max="100" step="0.1" placeholder="45" />
+            <label for="instagram_audience_gender">Audience gender</label>
+            <select id="instagram_audience_gender" name="instagram_audience_gender">
+              <option value="">Select audience gender…</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="both">Both</option>
+            </select>
           </div>
           <div class="field">
-            <label for="instagram_audience_gender_female_pct">Audience female (%)</label>
-            <input id="instagram_audience_gender_female_pct" name="instagram_audience_gender_female_pct" type="number" min="0" max="100" step="0.1" placeholder="55" />
+            <label for="instagram_audience_age_min">Audience age — minimum</label>
+            <input id="instagram_audience_age_min" name="instagram_audience_age_min" type="number" min="13" max="100" step="1" placeholder="18" />
+          </div>
+          <div class="field">
+            <label for="instagram_audience_age_max">Audience age — maximum</label>
+            <input id="instagram_audience_age_max" name="instagram_audience_age_max" type="number" min="13" max="100" step="1" placeholder="34" />
           </div>
           <div class="field full">
-            <p class="niche-hint">Audience demographics<br>Use your latest platform analytics.<br>1% total</p>
+            <p class="niche-hint">Audience demographics<br>Use your latest platform analytics. Choose the gender most of your audience is, or "Both" if it is mixed.</p>
           </div>
         </div>
       </div>
@@ -391,15 +400,24 @@
             </div>
           </div>
           <div class="field">
-            <label for="youtube_audience_gender_male_pct">Audience male (%)</label>
-            <input id="youtube_audience_gender_male_pct" name="youtube_audience_gender_male_pct" type="number" min="0" max="100" step="0.1" placeholder="45" />
+            <label for="youtube_audience_gender">Audience gender</label>
+            <select id="youtube_audience_gender" name="youtube_audience_gender">
+              <option value="">Select audience gender…</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="both">Both</option>
+            </select>
           </div>
           <div class="field">
-            <label for="youtube_audience_gender_female_pct">Audience female (%)</label>
-            <input id="youtube_audience_gender_female_pct" name="youtube_audience_gender_female_pct" type="number" min="0" max="100" step="0.1" placeholder="55" />
+            <label for="youtube_audience_age_min">Audience age — minimum</label>
+            <input id="youtube_audience_age_min" name="youtube_audience_age_min" type="number" min="13" max="100" step="1" placeholder="18" />
+          </div>
+          <div class="field">
+            <label for="youtube_audience_age_max">Audience age — maximum</label>
+            <input id="youtube_audience_age_max" name="youtube_audience_age_max" type="number" min="13" max="100" step="1" placeholder="34" />
           </div>
           <div class="field full">
-            <p class="niche-hint">Audience demographics<br>Use your latest platform analytics.<br>1% total</p>
+            <p class="niche-hint">Audience demographics<br>Use your latest platform analytics. Choose the gender most of your audience is, or "Both" if it is mixed.</p>
           </div>
         </div>
       </div>
@@ -615,11 +633,13 @@
     setInput('instagram_handle', profile.instagram_handle); setInput('instagram_followers', profile.instagram_followers);
     setInput('instagram_primary_niche', profile.instagram_primary_niche); setListInput('instagram_sub_niches', profile.instagram_sub_niches);
     setListInput('instagram_excluded_categories', profile.instagram_excluded_categories); setInput('instagram_description', profile.instagram_description);
-    setInput('instagram_audience_gender_male_pct', profile.instagram_audience_gender_male_pct * 100); setInput('instagram_audience_gender_female_pct', profile.instagram_audience_gender_female_pct * 100);
+    setInput('instagram_audience_gender', profile.instagram_audience_gender);
+    setInput('instagram_audience_age_min', profile.instagram_audience_age_min); setInput('instagram_audience_age_max', profile.instagram_audience_age_max);
     setInput('youtube_channel_name', profile.youtube_channel_name); setInput('youtube_subscribers', profile.youtube_subscribers);
     setInput('youtube_primary_niche', profile.youtube_primary_niche); setListInput('youtube_sub_niches', profile.youtube_sub_niches);
     setListInput('youtube_excluded_categories', profile.youtube_excluded_categories); setInput('youtube_description', profile.youtube_description);
-    setInput('youtube_audience_gender_male_pct', profile.youtube_audience_gender_male_pct * 100); setInput('youtube_audience_gender_female_pct', profile.youtube_audience_gender_female_pct * 100);
+    setInput('youtube_audience_gender', profile.youtube_audience_gender);
+    setInput('youtube_audience_age_min', profile.youtube_audience_age_min); setInput('youtube_audience_age_max', profile.youtube_audience_age_max);
     (profile.primary_platform || '').split(',').forEach(function(platform) {
       var checkbox = document.querySelector('input[name="platform_choice"][value="' + platform.trim() + '"]');
       if (checkbox) checkbox.checked = true;
@@ -941,15 +961,15 @@
       instagram_primary_niche: value('instagram_primary_niche'), instagram_sub_niches: list('instagram_sub_niches'),
       instagram_excluded_categories: list('instagram_excluded_categories'), instagram_description: value('instagram_description'),
       instagram_description_mode: mode('instagram_description_mode'),
-      instagram_audience_gender_male_pct: percent('instagram_audience_gender_male_pct'),
-      instagram_audience_gender_female_pct: percent('instagram_audience_gender_female_pct'),
+      instagram_audience_gender: value('instagram_audience_gender'),
+      instagram_audience_age_min: number('instagram_audience_age_min'), instagram_audience_age_max: number('instagram_audience_age_max'),
       youtube_channel_name: value('youtube_channel_name'),
       youtube_subscribers: number('youtube_subscribers'),
       youtube_primary_niche: value('youtube_primary_niche'), youtube_sub_niches: list('youtube_sub_niches'),
       youtube_excluded_categories: list('youtube_excluded_categories'), youtube_description: value('youtube_description'),
       youtube_description_mode: mode('youtube_description_mode'),
-      youtube_audience_gender_male_pct: percent('youtube_audience_gender_male_pct'),
-      youtube_audience_gender_female_pct: percent('youtube_audience_gender_female_pct'),
+      youtube_audience_gender: value('youtube_audience_gender'),
+      youtube_audience_age_min: number('youtube_audience_age_min'), youtube_audience_age_max: number('youtube_audience_age_max'),
     };
   }
 
@@ -970,6 +990,12 @@
     if (!body.instagram_description && !body.youtube_description) {
       throw new Error('Please add a short creator description before saving.');
     }
+    ['instagram', 'youtube'].forEach(function(p) {
+      var lo = body[p + '_audience_age_min'], hi = body[p + '_audience_age_max'];
+      if (selected.indexOf(p) !== -1 && lo !== null && hi !== null && lo > hi) {
+        throw new Error('The ' + p + ' audience minimum age cannot be above the maximum age.');
+      }
+    });
     if (selected.indexOf('instagram') !== -1 && (!body.instagram_handle || !body.instagram_followers || body.instagram_followers <= 0)) {
       throw new Error('Please complete the Instagram username and followers before saving.');
     }

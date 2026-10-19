@@ -1,5 +1,6 @@
 import logging
 import uuid
+from typing import Literal
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -8,7 +9,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Req
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
 from sqladmin.filters import AllUniqueStringValuesFilter, OperationColumnFilter
@@ -439,8 +440,13 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_description_status TEXT NOT NULL DEFAULT 'idle'",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_description_job_id TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_description_error TEXT",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_gender_male_pct FLOAT",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_gender_female_pct FLOAT",
+        # replaced by the single instagram_audience_gender / youtube_audience_gender dropdown
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS instagram_audience_gender_male_pct",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS instagram_audience_gender_female_pct",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_gender TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_gender TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_age_min INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_age_max INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_channel_name TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_subscribers INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_primary_niche TEXT",
@@ -451,8 +457,10 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_description_status TEXT NOT NULL DEFAULT 'idle'",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_description_job_id TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_description_error TEXT",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_gender_male_pct FLOAT",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_gender_female_pct FLOAT",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS youtube_audience_gender_male_pct",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS youtube_audience_gender_female_pct",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_age_min INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_age_max INTEGER",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS location_city",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS location_country",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS bio_tagline",
@@ -1595,8 +1603,9 @@ class CreatorProfileRequest(BaseModel):
     instagram_excluded_categories: list[str] | None = None
     instagram_description: str | None = None
     instagram_description_mode: str | None = None
-    instagram_audience_gender_male_pct: float | None = None
-    instagram_audience_gender_female_pct: float | None = None
+    instagram_audience_gender: Literal["male", "female", "both"] | None = None
+    instagram_audience_age_min: int | None = Field(default=None, ge=13, le=100)
+    instagram_audience_age_max: int | None = Field(default=None, ge=13, le=100)
     youtube_channel_name: str | None = None
     youtube_subscribers: int | None = None
     youtube_primary_niche: str | None = None
@@ -1604,8 +1613,17 @@ class CreatorProfileRequest(BaseModel):
     youtube_excluded_categories: list[str] | None = None
     youtube_description: str | None = None
     youtube_description_mode: str | None = None
-    youtube_audience_gender_male_pct: float | None = None
-    youtube_audience_gender_female_pct: float | None = None
+    youtube_audience_gender: Literal["male", "female", "both"] | None = None
+    youtube_audience_age_min: int | None = Field(default=None, ge=13, le=100)
+    youtube_audience_age_max: int | None = Field(default=None, ge=13, le=100)
+
+    @model_validator(mode="after")
+    def _age_range_is_ordered(self):
+        for platform in ("instagram", "youtube"):
+            low, high = getattr(self, f"{platform}_audience_age_min"), getattr(self, f"{platform}_audience_age_max")
+            if low is not None and high is not None and low > high:
+                raise ValueError(f"{platform} audience age: minimum ({low}) cannot be above maximum ({high})")
+        return self
 
 
 class CreatorDescriptionRequest(BaseModel):
