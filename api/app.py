@@ -57,7 +57,6 @@ from pipeline.db import (
     CreatorBrandLlmV3Ranking,
     CreatorNiche,
     CreatorProfile,
-    BrandBrandedContentCheck,
     FacebookBrandedContentCheck,
     InitialBrandScore,
     InstagramCreatorCommenter,
@@ -854,29 +853,6 @@ class TestCreatorBrandPartnershipPostAdmin(ModelView, model=TestCreatorBrandPart
     page_size = 15
 
 
-class BrandBrandedContentCheckAdmin(ModelView, model=BrandBrandedContentCheck):
-    """Branded-content check per brand (brand_branded_content_check.py): name, last run, result count."""
-    name         = "Brand Branded Content Check"
-    name_plural  = "Brand Branded Content Checks"
-    category     = "Test"
-    icon         = "fa-solid fa-handshake"
-    column_list  = "__all__"
-    column_searchable_list = [
-        BrandBrandedContentCheck.brand_name,
-        BrandBrandedContentCheck.instagram_handle,
-        BrandBrandedContentCheck.status,
-    ]
-    column_sortable_list = [c.name for c in BrandBrandedContentCheck.__table__.columns]
-    column_default_sort  = [(BrandBrandedContentCheck.last_run, True)]
-    column_filters = [
-        AllUniqueStringValuesFilter(BrandBrandedContentCheck.status),
-        OperationColumnFilter(BrandBrandedContentCheck.result_count),
-    ]
-    can_create = False
-    can_edit   = False
-    page_size = 25
-
-
 class FacebookBrandedContentCheckAdmin(ModelView, model=FacebookBrandedContentCheck):
     name         = "Facebook Branded Content Check"
     name_plural  = "Facebook Branded Content Checks"
@@ -1329,7 +1305,6 @@ admin.add_view(TestBrandsWithInstagramPostsAdmin)
 admin.add_view(TestNicheAdmin)
 admin.add_view(TestCreatorBrandPartnershipPostAdmin)
 admin.add_view(FacebookBrandedContentCheckAdmin)
-admin.add_view(BrandBrandedContentCheckAdmin)
 admin.add_view(CreatorNicheAdmin)
 admin.add_view(LlmUsageAdmin)
 admin.add_view(CreatorLlmCostAdmin)

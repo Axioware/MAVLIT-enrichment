@@ -544,10 +544,10 @@ python3 -m pipeline.enrichment.geo_reach.geo_reach --beach-brands-only
 
 ## Branded-content check for brands without test partnership posts
 Brands in brands_raw that are NOT linked to test_creator_brand_partnership_posts (added by
-discover_collaborator_creators.py or by hand) and have an instagram_handle. Every checked
-brand gets a row in brand_branded_content_checks: brand name, username, status, result_count
-(0 included), last_run. Usernames already in facebook_branded_content_checks are reused;
-failed checks ('error') are retried on the next run. Needs FACEBOOK_PROXIES in .env.
+discover_collaborator_creators.py or by hand), have an instagram_handle and whose username
+is not yet in facebook_branded_content_checks (or only failed there). Results are saved in
+facebook_branded_content_checks (admin: Facebook Branded Content Checks). Needs
+FACEBOOK_PROXIES in .env.
 
 python3 -m pipeline.enrichment.brand_branded_content_check --dry-run
 python3 -m pipeline.enrichment.brand_branded_content_check --limit 20
