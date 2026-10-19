@@ -730,10 +730,30 @@ class LlmUsage(Base):
     feature            = Column(Text)
 
 
+class ApifyUsage(Base):
+    """
+    One row per Apify scrape a MAVLIT user triggered (e.g. "let MAVLIT generate
+    my description" scrapes their last Instagram posts). Only the number of
+    posts is recorded - no Apify cost. Written by gpt_llm.record_apify_scrape()
+    inside an llm_usage_scope; totals per user: the creator_llm_cost view.
+    """
+    __tablename__ = "apify_usage"
+
+    id                 = Column(Integer, primary_key=True)
+    created_at         = Column(TIMESTAMP(timezone=True), server_default=func.now(), index=True)
+    creator_profile_id = Column(Integer, index=True)
+    feature            = Column(Text)      # same labels as llm_usage.feature
+    platform           = Column(Text)      # "instagram"
+    handle             = Column(Text)
+    posts_requested    = Column(Integer)
+    posts_scraped      = Column(Integer, nullable=False, default=0)
+
+
 class CreatorLlmCost(ViewBase):
     """
     Read-only admin view of the creator_llm_cost SQL view (created in the API
-    startup migrations): LLM cost per MAVLIT user, in total and per feature.
+    startup migrations): LLM cost per MAVLIT user, in total and per feature, plus
+    the Instagram posts scraped (Apify) for them.
     """
     __tablename__ = "creator_llm_cost"
 
@@ -748,6 +768,8 @@ class CreatorLlmCost(ViewBase):
     match_v3_usd       = Column(Numeric(12, 6))
     other_usd          = Column(Numeric(12, 6))
     last_call_at       = Column(TIMESTAMP(timezone=True))
+    instagram_scrapes  = Column(Integer)
+    instagram_posts_scraped = Column(Integer)
 
 
 class SavedBrand(Base):

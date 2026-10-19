@@ -100,6 +100,28 @@ def scoped(fn):
     return run
 
 
+def record_apify_scrape(platform: str, handle: str, posts_requested: int, posts_scraped: int) -> None:
+    """
+    Log how many posts an Apify scrape returned for the MAVLIT user of the current
+    llm_usage_scope (no-op outside one). No cost is recorded. Never raises.
+    """
+    scope = _usage_scope.get()
+    if scope is None:
+        return
+    try:
+        from pipeline.db import ApifyUsage, SessionLocal, engine   # lazy, as in _record_usage
+
+        ApifyUsage.__table__.create(bind=engine, checkfirst=True)
+        with SessionLocal() as db:
+            db.add(ApifyUsage(
+                creator_profile_id=scope[0], feature=scope[1], platform=platform, handle=handle,
+                posts_requested=posts_requested, posts_scraped=posts_scraped,
+            ))
+            db.commit()
+    except Exception as exc:
+        logger.warning("Apify usage: could not record scrape for %s — %s", handle, exc)
+
+
 _usage_table_ready = False
 
 

@@ -493,25 +493,50 @@ def _run_migrations() -> None:
         "ALTER TABLE IF EXISTS llm_usage ADD COLUMN IF NOT EXISTS creator_profile_id INTEGER",
         "ALTER TABLE IF EXISTS llm_usage ADD COLUMN IF NOT EXISTS feature TEXT",
         "CREATE INDEX IF NOT EXISTS ix_llm_usage_creator_profile_id ON llm_usage (creator_profile_id)",
+        "DROP VIEW IF EXISTS creator_llm_cost",
         """
-        CREATE OR REPLACE VIEW creator_llm_cost AS
-        SELECT u.creator_profile_id,
+        CREATE VIEW creator_llm_cost AS
+        WITH llm AS (
+            SELECT creator_profile_id,
+                   COUNT(*)::int                                                          AS calls,
+                   COALESCE(SUM(cost_usd), 0)                                             AS total_cost_usd,
+                   COALESCE(SUM(cost_usd) FILTER (WHERE feature = 'description'), 0)      AS description_usd,
+                   COALESCE(SUM(cost_usd) FILTER (WHERE feature = 'profile_signals'), 0)  AS profile_signals_usd,
+                   COALESCE(SUM(cost_usd) FILTER (WHERE feature = 'match_v2'), 0)         AS match_v2_usd,
+                   COALESCE(SUM(cost_usd) FILTER (WHERE feature = 'match_v3'), 0)         AS match_v3_usd,
+                   COALESCE(SUM(cost_usd) FILTER (
+                       WHERE feature IS NULL OR feature NOT IN
+                             ('description', 'profile_signals', 'match_v2', 'match_v3')), 0) AS other_usd,
+                   MAX(created_at)                                                        AS last_call_at
+            FROM llm_usage
+            WHERE creator_profile_id IS NOT NULL
+            GROUP BY creator_profile_id
+        ),
+        scrapes AS (
+            SELECT creator_profile_id,
+                   COUNT(*)::int                        AS instagram_scrapes,
+                   COALESCE(SUM(posts_scraped), 0)::int AS instagram_posts_scraped,
+                   MAX(created_at)                      AS last_scrape_at
+            FROM apify_usage
+            WHERE platform = 'instagram' AND creator_profile_id IS NOT NULL
+            GROUP BY creator_profile_id
+        )
+        SELECT COALESCE(l.creator_profile_id, s.creator_profile_id)  AS creator_profile_id,
                cp.email,
                cp.full_name,
-               COUNT(*)::int                                                              AS calls,
-               COALESCE(SUM(u.cost_usd), 0)                                               AS total_cost_usd,
-               COALESCE(SUM(u.cost_usd) FILTER (WHERE u.feature = 'description'), 0)      AS description_usd,
-               COALESCE(SUM(u.cost_usd) FILTER (WHERE u.feature = 'profile_signals'), 0)  AS profile_signals_usd,
-               COALESCE(SUM(u.cost_usd) FILTER (WHERE u.feature = 'match_v2'), 0)         AS match_v2_usd,
-               COALESCE(SUM(u.cost_usd) FILTER (WHERE u.feature = 'match_v3'), 0)         AS match_v3_usd,
-               COALESCE(SUM(u.cost_usd) FILTER (
-                   WHERE u.feature IS NULL OR u.feature NOT IN
-                         ('description', 'profile_signals', 'match_v2', 'match_v3')), 0)  AS other_usd,
-               MAX(u.created_at)                                                          AS last_call_at
-        FROM llm_usage u
-        LEFT JOIN creator_profiles cp ON cp.id = u.creator_profile_id
-        WHERE u.creator_profile_id IS NOT NULL
-        GROUP BY u.creator_profile_id, cp.email, cp.full_name
+               COALESCE(l.calls, 0)                 AS calls,
+               COALESCE(l.total_cost_usd, 0)        AS total_cost_usd,
+               COALESCE(l.description_usd, 0)       AS description_usd,
+               COALESCE(l.profile_signals_usd, 0)   AS profile_signals_usd,
+               COALESCE(l.match_v2_usd, 0)          AS match_v2_usd,
+               COALESCE(l.match_v3_usd, 0)          AS match_v3_usd,
+               COALESCE(l.other_usd, 0)             AS other_usd,
+               GREATEST(l.last_call_at, s.last_scrape_at) AS last_call_at,
+               COALESCE(s.instagram_scrapes, 0)       AS instagram_scrapes,
+               COALESCE(s.instagram_posts_scraped, 0) AS instagram_posts_scraped
+        FROM llm l
+        FULL OUTER JOIN scrapes s ON s.creator_profile_id = l.creator_profile_id
+        LEFT JOIN creator_profiles cp ON cp.id = COALESCE(l.creator_profile_id, s.creator_profile_id)
         """,
         # Matches v3 — LLM ranking with taglines (pipeline/matching/llm_ranking_v3.py)
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_v3_ranking_status TEXT NOT NULL DEFAULT 'idle'",
@@ -881,11 +906,13 @@ class CreatorLlmCostAdmin(ModelView, model=CreatorLlmCost):
     LLM cost per MAVLIT user: one row per creator with calls, total cost and the
     cost of each user-triggered feature (generate my description, profile
     signals, matches v2, matches v3; other = pitch / rate estimate / contract
-    advice). Built from llm_usage rows that carry a creator_profile_id - open
+    advice), and how many Instagram posts were scraped (Apify, e.g. 20 for one
+    "generate my description" click; count only, no Apify cost). Built from
+    llm_usage / apify_usage rows that carry a creator_profile_id - open
     "LLM Usage (cost)" and filter by MAVLIT user id for the individual calls.
     """
     name         = "LLM Cost per User"
-    name_plural  = "LLM Cost per User"
+    name_plural  = "LLM Cost + Posts per User"
     category     = "Test"
     icon         = "fa-solid fa-user-tag"
     column_list  = "__all__"
@@ -897,6 +924,8 @@ class CreatorLlmCostAdmin(ModelView, model=CreatorLlmCost):
         CreatorLlmCost.match_v2_usd: "Matches v2 (USD)",
         CreatorLlmCost.match_v3_usd: "Matches v3 (USD)",
         CreatorLlmCost.other_usd: "Other (USD)",
+        CreatorLlmCost.instagram_scrapes: "Instagram scrapes",
+        CreatorLlmCost.instagram_posts_scraped: "Instagram posts scraped",
     }
     column_searchable_list = [CreatorLlmCost.email, CreatorLlmCost.full_name]
     column_sortable_list   = [c.name for c in CreatorLlmCost.__table__.columns]

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from pipeline.db import Prompt
 from pipeline.enrichment.instagram_posts import _scrape_handle
-from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.helpers.gpt_llm import call_gpt_json, fill_template, record_apify_scrape
 from pipeline.helpers.prompts import (
     CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT,
     CREATOR_NICHE_DESCRIPTION_PROMPT_NAME,
@@ -68,6 +68,7 @@ def generate_instagram_description(db: Session, username: str, niche: str) -> di
     items = _scrape_handle(handle, _POSTS_LIMIT)
     if items is None:
         raise RuntimeError("Instagram content could not be fetched")
+    record_apify_scrape("instagram", handle, _POSTS_LIMIT, len(items[:_POSTS_LIMIT]))
 
     bio = ""
     captions: list[str] = []
