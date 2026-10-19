@@ -1041,8 +1041,8 @@
         window.setTimeout(function() { window.location.replace('/dashboard'); }, 400);
       })
       .catch(function(err) {
-        // Keep the data around so the user doesn't lose it on a failed save
-        localStorage.setItem(PENDING_KEY, JSON.stringify(body));
+        // The form stays filled in on screen, so nothing is stored: a stored draft
+        // would be re-submitted automatically on the next visit (see checkAuth).
         setStatus(err.message || 'Something went wrong — please try again.', true);
       })
       .finally(function() {
@@ -1080,10 +1080,24 @@
       // Stash the filled-out form, then send the user to sign in.
       // login.html reads return_to and lands them back here so this same
       // page can finish the save once a session exists.
-      localStorage.setItem(PENDING_KEY, JSON.stringify(body));
+      localStorage.setItem(PENDING_KEY, JSON.stringify({ savedAt: Date.now(), body: body }));
       window.location.href = '/signin?return_to=' + encodeURIComponent('/creator-profile');
     }
     return false;
+  }
+
+  // The form stashed before sending a signed-out user to /signin. Only a draft saved
+  // in the last 30 minutes counts; older or old-format entries are dropped, so a
+  // stale draft can never overwrite the saved profile or start a generation.
+  function readPending() {
+    try {
+      var raw = localStorage.getItem(PENDING_KEY);
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (parsed && parsed.savedAt && parsed.body && Date.now() - parsed.savedAt < 30 * 60 * 1000) return parsed.body;
+    } catch (e) { /* fall through */ }
+    try { localStorage.removeItem(PENDING_KEY); } catch (e) { /* ignore */ }
+    return null;
   }
 
   function checkAuth() {
@@ -1094,11 +1108,11 @@
         if (user) window.mavlitIdentifyUser(user);
         setButtonMode();
 
-        var pending = localStorage.getItem(PENDING_KEY);
+        var pending = readPending();
 
         if (isLoggedIn && pending) {
           localStorage.removeItem(PENDING_KEY);
-          var body = JSON.parse(pending);
+          var body = pending;
           applyProfileToForm(body);
           showForm();
           submitProfile(body, 'Signed in — your profile has been saved.');
@@ -1112,7 +1126,7 @@
 
         // Not logged in — restore any unsaved draft so a reload doesn't lose it
         if (pending) {
-          try { applyProfileToForm(JSON.parse(pending)); } catch (e) { /* ignore bad draft */ }
+          try { applyProfileToForm(pending); } catch (e) { /* ignore bad draft */ }
         }
         showForm();
       })
