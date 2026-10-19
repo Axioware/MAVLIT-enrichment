@@ -26,6 +26,85 @@ _EMBED_DIMENSIONS = 1024
 _TIMEOUT = 60.0
 
 # ---------------------------------------------------------------------------
+# LLM cost tracking
+# ---------------------------------------------------------------------------
+# Every successful _post_openai call is logged to the llm_usage table with its
+# token usage and cost. USD per 1M tokens: (input, cached input, output).
+# Reasoning tokens are billed as output (they are part of completion_tokens).
+# Matched by longest model-name prefix, so dated snapshots such as
+# "gpt-5-2025-08-07" use the "gpt-5" price. Update when OpenAI changes prices;
+# a model missing here is still logged, with cost_usd NULL.
+_PRICES = {
+    "gpt-5":                  (1.25, 0.125, 10.00),
+    "gpt-5-mini":             (0.25, 0.025, 2.00),
+    "gpt-5-nano":             (0.05, 0.005, 0.40),
+    "gpt-5.4-mini":           (0.75, 0.075, 4.50),
+    "text-embedding-3-small": (0.02, 0.02, 0.0),
+    "text-embedding-3-large": (0.13, 0.13, 0.0),
+}
+
+
+def _price_for(model: str) -> tuple[float, float, float] | None:
+    matches = [name for name in _PRICES if model == name or model.startswith(name + "-")]
+    return _PRICES[max(matches, key=len)] if matches else None
+
+
+def llm_cost_usd(model: str, prompt_tokens: int, cached_tokens: int, completion_tokens: int) -> float | None:
+    """Cost of one call in USD from its token usage, or None if the model has no price in _PRICES."""
+    price = _price_for(model)
+    if price is None:
+        return None
+    input_price, cached_price, output_price = price
+    return (
+        (prompt_tokens - cached_tokens) * input_price
+        + cached_tokens * cached_price
+        + completion_tokens * output_price
+    ) / 1_000_000
+
+
+_usage_table_ready = False
+
+
+def _record_usage(path: str, payload: dict, body: dict, context: str, seconds: float) -> None:
+    """Log one successful call to llm_usage. Never raises — tracking must not break an LLM call."""
+    global _usage_table_ready
+    try:
+        from pipeline.db import LlmUsage, SessionLocal, engine   # lazy: pipeline.db must not load at import time
+
+        if not _usage_table_ready:
+            # Scripts can run before the API's create_all has made the table.
+            LlmUsage.__table__.create(bind=engine, checkfirst=True)
+            _usage_table_ready = True
+
+        usage = body.get("usage") or {}
+        model = str(payload.get("model") or body.get("model") or "unknown")
+        prompt_tokens = int(usage.get("prompt_tokens") or 0)
+        cached_tokens = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
+        completion_tokens = int(usage.get("completion_tokens") or 0)
+        reasoning_tokens = int((usage.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0)
+        cost = llm_cost_usd(model, prompt_tokens, cached_tokens, completion_tokens)
+        if cost is None:
+            logger.warning("LLM cost: no price for model %r in gpt_llm._PRICES — logged without cost", model)
+        db = SessionLocal()
+        try:
+            db.add(LlmUsage(
+                model=model,
+                endpoint=path,
+                context=context or None,
+                prompt_tokens=prompt_tokens,
+                cached_tokens=cached_tokens,
+                completion_tokens=completion_tokens,
+                reasoning_tokens=reasoning_tokens,
+                cost_usd=cost,
+                duration_ms=round(seconds * 1000),
+            ))
+            db.commit()
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("LLM cost: could not record usage%s — %s", f" ({context})" if context else "", exc)
+
+# ---------------------------------------------------------------------------
 # OpenAI unavailable (credits / quota / rate limit / outage)
 # ---------------------------------------------------------------------------
 # Before, every failure came back as {} / "" / [] and callers treated that as
@@ -113,11 +192,14 @@ def _post_openai(path: str, payload: dict, timeout: float, context: str = "") ->
     label = f" ({context})" if context else ""
     while True:
         try:
+            started = time.monotonic()
             resp = httpx.post(f"{_BASE_URL}{path}", headers=_headers(), json=payload, timeout=timeout)
             resp.raise_for_status()
             with _state_lock:
                 _consecutive_failures = 0
-            return resp.json()
+            body = resp.json()
+            _record_usage(path, payload, body, context, time.monotonic() - started)
+            return body
         except (httpx.HTTPStatusError, httpx.TransportError) as exc:
             kind, detail, delay = _classify_failure(exc)
             if kind is None:

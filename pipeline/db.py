@@ -693,6 +693,29 @@ class CreatorBrandLlmV3Ranking(Base):
     computed_at         = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
+class LlmUsage(Base):
+    """
+    One row per successful OpenAI call (chat completion or embedding), written
+    by pipeline/helpers/gpt_llm.py. cost_usd is computed from the token usage
+    OpenAI returns and gpt_llm._PRICES; NULL when the model has no price there.
+    context is the caller's label (e.g. "llm brand ranking creator_id=4 (20 brands)").
+    Report: python -m scripts.llm_cost_report
+    """
+    __tablename__ = "llm_usage"
+
+    id                = Column(Integer, primary_key=True)
+    created_at        = Column(TIMESTAMP(timezone=True), server_default=func.now(), index=True)
+    model             = Column(Text, nullable=False)
+    endpoint          = Column(Text, nullable=False)   # "/chat/completions" or "/embeddings"
+    context           = Column(Text)
+    prompt_tokens     = Column(Integer, nullable=False, default=0)
+    cached_tokens     = Column(Integer, nullable=False, default=0)
+    completion_tokens = Column(Integer, nullable=False, default=0)
+    reasoning_tokens  = Column(Integer, nullable=False, default=0)
+    cost_usd          = Column(Numeric(12, 6))
+    duration_ms       = Column(Integer)
+
+
 class SavedBrand(Base):
     """A creator's save-for-later list — a brand they want to keep track of."""
     __tablename__ = "saved_brands"
