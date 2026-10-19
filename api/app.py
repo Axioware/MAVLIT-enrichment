@@ -1811,6 +1811,10 @@ def _run_creator_description_job(
         if not row or getattr(row, job_field) != job_id:
             return
         setattr(row, description_field, result["description"])
+        # Audience gender / age range generated together with the description.
+        for key in ("audience_gender", "audience_age_min", "audience_age_max"):
+            if result.get(key) is not None:
+                setattr(row, f"{platform}_{key}", result[key])
         setattr(row, status_field, "completed")
         setattr(row, error_field, None)
         db.commit()

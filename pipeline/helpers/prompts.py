@@ -1065,7 +1065,7 @@ Use empty lists if there isn't enough information to extract either one — do n
 
 CREATOR_NICHE_DESCRIPTION_PROMPT_NAME = "creator_niche_description"
 CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT = """\
-You are analyzing an Instagram creator.
+You are analyzing a content creator (Instagram or YouTube).
 
 Niche:
 {niche}
@@ -1078,7 +1078,10 @@ Recent captions:
 
 Your task:
 
-Determine what this creator primarily creates content about.
+1. Determine what this creator primarily creates content about (description and tags).
+2. Estimate who the creator's AUDIENCE is - a best estimate from the bio and content, since no analytics are available:
+   - audience_gender: the gender most of the audience is - "male", "female" or "both" (mixed, or you cannot tell). Base it on who the content is made for and who it would attract (topics, tone, products, how the creator addresses the audience), not on the creator's own gender alone. Use "both" when the evidence is mixed or thin.
+   - audience_age_min and audience_age_max: the age range most of the audience falls in, as whole numbers between 13 and 100 (for example 18 and 34). Keep it realistic and reasonably tight (usually 10 to 20 years wide); the minimum must not be above the maximum.
 
 Return ONLY valid JSON.
 
@@ -1097,23 +1100,27 @@ Rules:
 - Third-person style.
 - Do not mention follower counts.
 - Do not mention engagement.
-- Do not mention demographics.
+- Do not mention demographics in the description or tags (they belong only in the audience fields).
 - Do not mention location unless clearly central to the content.
+- Base the audience estimate only on the information provided; do not invent facts.
 
 Return:
 
 {{
 "description": "short creator summary",
-"tags": ["tag1", "tag2", "tag3"]
+"tags": ["tag1", "tag2", "tag3"],
+"audience_gender": "male|female|both",
+"audience_age_min": 18,
+"audience_age_max": 34
 }}
 
 Examples:
 
 Fitness creator:
-{{"description": "Fitness creator focused on strength training, gym workouts, muscle building, and performance-focused health content.", "tags": ["strength training", "gym workouts", "muscle building", "sports nutrition", "fitness motivation"]}}
+{{"description": "Fitness creator focused on strength training, gym workouts, muscle building, and performance-focused health content.", "tags": ["strength training", "gym workouts", "muscle building", "sports nutrition", "fitness motivation"], "audience_gender": "male", "audience_age_min": 18, "audience_age_max": 34}}
 
 Beauty creator:
-{{"description": "Beauty creator sharing skincare routines, makeup tutorials, cosmetic reviews, and self-care content.", "tags": ["skincare", "makeup", "beauty reviews", "cosmetics", "self care"]}}
+{{"description": "Beauty creator sharing skincare routines, makeup tutorials, cosmetic reviews, and self-care content.", "tags": ["skincare", "makeup", "beauty reviews", "cosmetics", "self care"], "audience_gender": "female", "audience_age_min": 18, "audience_age_max": 34}}
 """
 
 

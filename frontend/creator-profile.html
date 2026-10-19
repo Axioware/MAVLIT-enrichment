@@ -844,6 +844,20 @@
     menu.classList.add('open');
   }
 
+  // MAVLIT also estimates the audience gender and age range together with the
+  // generated description. Fill those boxes from the finished job, but only the
+  // ones the user left empty - anything they typed themselves wins.
+  function applyGeneratedAudience(platform, profile, body) {
+    ['audience_gender', 'audience_age_min', 'audience_age_max'].forEach(function(key) {
+      var id = platform + '_' + key;
+      var input = document.getElementById(id);
+      var generated = profile[id];
+      if (!input || generated === null || generated === undefined || input.value) return;
+      input.value = generated;
+      if (body) body[id] = key === 'audience_gender' ? generated : Number(generated);
+    });
+  }
+
   function pollDescriptionGeneration(platform, jobId, body) {
     return fetch('/creator-profile/me', { credentials: 'include' })
       .then(function(response) {
@@ -866,6 +880,7 @@
           if (body) {
             body[platform + '_description'] = description;
           }
+          applyGeneratedAudience(platform, profile, body);
           return profile;
         }
         if (status === 'failed') {

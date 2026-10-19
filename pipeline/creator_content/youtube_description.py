@@ -4,6 +4,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
+from pipeline.creator_content.instagram_description import audience_from_result
 from pipeline.db import Prompt
 from pipeline.enrichment.youtube_sponsorship import (
     _CHANNELS_URL,
@@ -89,15 +90,12 @@ def generate_youtube_description(db: Session, username: str, niche: str) -> dict
     if not bio and not captions:
         raise RuntimeError("YouTube channel has no bio or video descriptions to analyze")
 
-    prompt = fill_template(
-        _get_description_prompt(db),
-        niche=niche.strip(),
-        bio=bio,
-        captions="\n\n".join(f"Video {index}: {caption}" for index, caption in enumerate(captions, 1)),
-    )
+    caption_text = "\n\n".join(f"Video {index}: {caption}" for index, caption in enumerate(captions, 1))
+    prompt = fill_template(_get_description_prompt(db), niche=niche.strip(), bio=bio, captions=caption_text)
     result = call_gpt_json(prompt, context=f"creator YouTube {username.strip()}")
     description = (result.get("description") or "").strip()
     if not description:
         raise RuntimeError("The LLM did not return a creator description")
 
-    return {"description": description, "videos_analyzed": len(captions), "bio_found": bool(bio)}
+    return {"description": description, "videos_analyzed": len(captions), "bio_found": bool(bio),
+            **audience_from_result(result)}
