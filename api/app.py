@@ -60,6 +60,7 @@ from pipeline.db import (
     InstagramCreatorCommenter,
     InstagramPost,
     InstagramUser,
+    LlmUsage,
     MetaAd,
     Pitch,
     Prompt,
@@ -808,6 +809,30 @@ class FacebookBrandedContentCheckAdmin(ModelView, model=FacebookBrandedContentCh
     page_size = 15
 
 
+class LlmUsageAdmin(ModelView, model=LlmUsage):
+    """
+    LLM cost log: one read-only row per successful OpenAI call (written by
+    pipeline/helpers/gpt_llm.py). Sort by cost_usd to find the expensive
+    calls, filter by model / endpoint, search the context label (e.g.
+    "llm brand ranking creator_id=4"). Totals by day / model / feature:
+    python scripts/llm_cost_report.py --days 30
+    """
+    name         = "LLM Usage"
+    name_plural  = "LLM Usage (cost)"
+    category     = "Test"
+    icon         = "fa-solid fa-coins"
+    column_list  = "__all__"
+    column_labels = {LlmUsage.cost_usd: "Cost (USD)", LlmUsage.duration_ms: "Duration (ms)"}
+    column_searchable_list = [LlmUsage.context, LlmUsage.model, LlmUsage.endpoint]
+    column_sortable_list   = [c.name for c in LlmUsage.__table__.columns]
+    column_default_sort    = [(LlmUsage.created_at, True)]
+    column_filters = [LlmUsage.model, LlmUsage.endpoint, LlmUsage.created_at, LlmUsage.cost_usd]
+    can_create = False
+    can_edit   = False
+    can_delete = False
+    page_size  = 25
+
+
 class CreatorNicheAdmin(ModelView, model=CreatorNiche):
     name         = "Creator Niche"
     name_plural  = "Creator Niches"
@@ -1178,6 +1203,7 @@ admin.add_view(TestNicheAdmin)
 admin.add_view(TestCreatorBrandPartnershipPostAdmin)
 admin.add_view(FacebookBrandedContentCheckAdmin)
 admin.add_view(CreatorNicheAdmin)
+admin.add_view(LlmUsageAdmin)
 admin.add_view(InstagramUserAdmin)
 admin.add_view(ContentCreatorREAdmin)
 admin.add_view(BrandInstagramUserAdmin)
