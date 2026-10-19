@@ -28,7 +28,7 @@ from pipeline.helpers.prompts import (
 )
 
 MIN_INSTAGRAM_POSTS = 10
-LLM_MODEL = "gpt-5"
+LLM_MODEL = "gpt-5-mini"
 
 # Candidate brands: refferls = false, geo_reach_score 0-40, no audience
 # results yet, and partnership evidence from EITHER source:

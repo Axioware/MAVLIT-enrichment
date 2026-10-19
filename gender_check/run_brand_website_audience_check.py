@@ -37,7 +37,7 @@ from pipeline.enrichment.geo_reach.geo_reach import (
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 
 MAX_INSTAGRAM_POSTS_FOR_LLM = 10
-LLM_MODEL = "gpt-5"
+LLM_MODEL = "gpt-5-mini"
 MAX_WEBSITE_PAGES = 5
 AUDIENCE_STOP_CONFIDENCE = 90
 UNSURE_TARGET_GENDER_CONFIDENCE = 50   # saved with target gender "both" when the LLM still returns none
