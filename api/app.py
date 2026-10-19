@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
+from sqladmin.filters import AllUniqueStringValuesFilter, OperationColumnFilter
 from sqlalchemy import String, cast, or_, text
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql import Select
@@ -826,7 +827,12 @@ class LlmUsageAdmin(ModelView, model=LlmUsage):
     column_searchable_list = [LlmUsage.context, LlmUsage.model, LlmUsage.endpoint]
     column_sortable_list   = [c.name for c in LlmUsage.__table__.columns]
     column_default_sort    = [(LlmUsage.created_at, True)]
-    column_filters = [LlmUsage.model, LlmUsage.endpoint, LlmUsage.created_at, LlmUsage.cost_usd]
+    column_filters = [
+        AllUniqueStringValuesFilter(LlmUsage.model),
+        AllUniqueStringValuesFilter(LlmUsage.endpoint),
+        OperationColumnFilter(LlmUsage.cost_usd),
+        OperationColumnFilter(LlmUsage.created_at),
+    ]
     can_create = False
     can_edit   = False
     can_delete = False
