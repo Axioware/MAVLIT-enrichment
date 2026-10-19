@@ -128,6 +128,7 @@ from pipeline.db import (
     InstagramUser,
     TestCreatorBrandPartnershipPost,
 )
+from pipeline.helpers.creator_gender import creator_match_gender
 from pipeline.matching.match_text import collect_match_reasons, generate_match_reasons
 from pipeline.matching.scoring import score_match
 
@@ -342,7 +343,7 @@ def _hard_filtered_query(db: Session, creator: CreatorProfile, apply_gender_filt
     #   - at least one reverse-engineered creator (instagram_users row with
     #     user_type "contentcreatorRE") has the creator's gender, via a
     #     sponsorship_confidence >= 90 test partnership post
-    creator_gender = (creator.gender or "").strip().lower()
+    creator_gender = creator_match_gender(creator)   # audience gender, else the creator's own
     if apply_gender_filter and creator_gender in ("male", "female"):
         audience_gender_match = func.lower(func.trim(BrandRaw.target_audience_gender)).in_((creator_gender, "both"))
         collaborator_gender_match, re_creator_gender_match = _creator_gender_evidence(db, creator_gender)

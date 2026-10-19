@@ -41,6 +41,7 @@ from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 
 from pipeline.db import CreatorBrandLlmV3Ranking, CreatorProfile, Prompt
+from pipeline.helpers.creator_gender import creator_match_gender
 from pipeline.helpers.prompts import (
     LLM_BRAND_RANKING_V3_BEACH_NOTE,
     LLM_BRAND_RANKING_V3_DEFAULT_PROMPT,
@@ -126,7 +127,7 @@ def rank_brands_with_llm_v3(db: Session, creator_id: int) -> int:
         payload["beach_brand"] = beach_flag[payload["id"]]
     creator_fields = {
         **_creator_fields(creator),
-        "creator_gender": _creator_gender_label(creator.gender),
+        "creator_gender": _creator_gender_label(creator_match_gender(creator)),
         # What the creator typed in the profile's "Brand preferences" box:
         # brand types to rank higher / never show (prompt: CREATOR PREFERENCE RULES).
         "creator_preferences": (creator.brand_preferences or "").strip() or "none",

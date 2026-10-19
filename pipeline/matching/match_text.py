@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import func
 
+from pipeline.helpers.creator_gender import creator_match_gender
 from pipeline.db import (
     BrandContact,
     BrandInstagramUser,
@@ -364,7 +365,7 @@ def _target_gender_reason(creator: CreatorProfile, brand: BrandRaw, db) -> str |
     if not target_label:
         return None
     line = f"{brand.name}'s target audience is {target_label}."
-    creator_gender = (creator.gender or "").strip().lower()
+    creator_gender = creator_match_gender(creator)   # audience gender, else the creator's own
 
     if brand_gender == "both":
         if creator_gender in ("male", "female"):
