@@ -138,7 +138,7 @@ _ACTIVITY_FLOOR = 0   # brands with a CONFIRMED score at or below this are dropp
 _FOLLOWER_TOLERANCE = 2   # +/-200% buffer beyond the brand's confirmed collaborator follower range
 # Brand categories always avoided, for every creator — brands_raw.niche values
 # (compared case-insensitively). Brands with no niche are kept.
-_EXCLUDED_BRAND_NICHES = ("band",)
+_EXCLUDED_BRAND_NICHES = ("band", "creator")
 
 # The four niches the creator-niche hard filter protects. Brands whose niche
 # and whose >= 90-confidence creators' niches are all OUTSIDE these four are
