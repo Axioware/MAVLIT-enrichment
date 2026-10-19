@@ -62,6 +62,7 @@ from pipeline.db import (
     InstagramCreatorCommenter,
     InstagramPost,
     InstagramUser,
+    CreatorLlmCost,
     LlmUsage,
     MetaAd,
     Pitch,
@@ -80,6 +81,7 @@ from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 from pipeline.enrichment.orchestrator import run_signal_enrichment
 from pipeline.enrichment_re.content_creator_re import add_content_creator_re
 from pipeline.helpers.creator_tier import bucket_creator_tier
+from pipeline.helpers.gpt_llm import llm_usage_scope
 from pipeline.helpers.passwords import hash_password
 from pipeline.helpers.prompts import (
     APOLLO_RANK_DEFAULT_PROMPT,
@@ -487,6 +489,30 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_ranking_error TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_ranked_at TIMESTAMPTZ",
         "ALTER TABLE creator_brand_llm_rankings ADD COLUMN IF NOT EXISTS reasons JSONB",
+        # LLM cost per MAVLIT user (llm_usage.creator_profile_id / feature) + the per-user totals view
+        "ALTER TABLE IF EXISTS llm_usage ADD COLUMN IF NOT EXISTS creator_profile_id INTEGER",
+        "ALTER TABLE IF EXISTS llm_usage ADD COLUMN IF NOT EXISTS feature TEXT",
+        "CREATE INDEX IF NOT EXISTS ix_llm_usage_creator_profile_id ON llm_usage (creator_profile_id)",
+        """
+        CREATE OR REPLACE VIEW creator_llm_cost AS
+        SELECT u.creator_profile_id,
+               cp.email,
+               cp.full_name,
+               COUNT(*)::int                                                              AS calls,
+               COALESCE(SUM(u.cost_usd), 0)                                               AS total_cost_usd,
+               COALESCE(SUM(u.cost_usd) FILTER (WHERE u.feature = 'description'), 0)      AS description_usd,
+               COALESCE(SUM(u.cost_usd) FILTER (WHERE u.feature = 'profile_signals'), 0)  AS profile_signals_usd,
+               COALESCE(SUM(u.cost_usd) FILTER (WHERE u.feature = 'match_v2'), 0)         AS match_v2_usd,
+               COALESCE(SUM(u.cost_usd) FILTER (WHERE u.feature = 'match_v3'), 0)         AS match_v3_usd,
+               COALESCE(SUM(u.cost_usd) FILTER (
+                   WHERE u.feature IS NULL OR u.feature NOT IN
+                         ('description', 'profile_signals', 'match_v2', 'match_v3')), 0)  AS other_usd,
+               MAX(u.created_at)                                                          AS last_call_at
+        FROM llm_usage u
+        LEFT JOIN creator_profiles cp ON cp.id = u.creator_profile_id
+        WHERE u.creator_profile_id IS NOT NULL
+        GROUP BY u.creator_profile_id, cp.email, cp.full_name
+        """,
         # Matches v3 — LLM ranking with taglines (pipeline/matching/llm_ranking_v3.py)
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_v3_ranking_status TEXT NOT NULL DEFAULT 'idle'",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_v3_ranking_error TEXT",
@@ -831,16 +857,50 @@ class LlmUsageAdmin(ModelView, model=LlmUsage):
     category     = "Test"
     icon         = "fa-solid fa-coins"
     column_list  = "__all__"
-    column_labels = {LlmUsage.cost_usd: "Cost (USD)", LlmUsage.duration_ms: "Duration (ms)"}
-    column_searchable_list = [LlmUsage.context, LlmUsage.model, LlmUsage.endpoint]
+    column_labels = {LlmUsage.cost_usd: "Cost (USD)", LlmUsage.duration_ms: "Duration (ms)",
+                     LlmUsage.creator_profile_id: "MAVLIT user id"}
+    column_searchable_list = [LlmUsage.context, LlmUsage.model, LlmUsage.endpoint, LlmUsage.feature]
     column_sortable_list   = [c.name for c in LlmUsage.__table__.columns]
     column_default_sort    = [(LlmUsage.created_at, True)]
     column_filters = [
         AllUniqueStringValuesFilter(LlmUsage.model),
         AllUniqueStringValuesFilter(LlmUsage.endpoint),
+        AllUniqueStringValuesFilter(LlmUsage.feature),
+        OperationColumnFilter(LlmUsage.creator_profile_id),
         OperationColumnFilter(LlmUsage.cost_usd),
         OperationColumnFilter(LlmUsage.created_at),
     ]
+    can_create = False
+    can_edit   = False
+    can_delete = False
+    page_size  = 25
+
+
+class CreatorLlmCostAdmin(ModelView, model=CreatorLlmCost):
+    """
+    LLM cost per MAVLIT user: one row per creator with calls, total cost and the
+    cost of each user-triggered feature (generate my description, profile
+    signals, matches v2, matches v3; other = pitch / rate estimate / contract
+    advice). Built from llm_usage rows that carry a creator_profile_id - open
+    "LLM Usage (cost)" and filter by MAVLIT user id for the individual calls.
+    """
+    name         = "LLM Cost per User"
+    name_plural  = "LLM Cost per User"
+    category     = "Test"
+    icon         = "fa-solid fa-user-tag"
+    column_list  = "__all__"
+    column_labels = {
+        CreatorLlmCost.creator_profile_id: "MAVLIT user id",
+        CreatorLlmCost.total_cost_usd: "Total (USD)",
+        CreatorLlmCost.description_usd: "Description (USD)",
+        CreatorLlmCost.profile_signals_usd: "Profile signals (USD)",
+        CreatorLlmCost.match_v2_usd: "Matches v2 (USD)",
+        CreatorLlmCost.match_v3_usd: "Matches v3 (USD)",
+        CreatorLlmCost.other_usd: "Other (USD)",
+    }
+    column_searchable_list = [CreatorLlmCost.email, CreatorLlmCost.full_name]
+    column_sortable_list   = [c.name for c in CreatorLlmCost.__table__.columns]
+    column_default_sort    = [(CreatorLlmCost.total_cost_usd, True)]
     can_create = False
     can_edit   = False
     can_delete = False
@@ -1218,6 +1278,7 @@ admin.add_view(TestCreatorBrandPartnershipPostAdmin)
 admin.add_view(FacebookBrandedContentCheckAdmin)
 admin.add_view(CreatorNicheAdmin)
 admin.add_view(LlmUsageAdmin)
+admin.add_view(CreatorLlmCostAdmin)
 admin.add_view(InstagramUserAdmin)
 admin.add_view(ContentCreatorREAdmin)
 admin.add_view(BrandInstagramUserAdmin)
@@ -1802,10 +1863,11 @@ def _run_creator_description_job(
         setattr(row, status_field, "running")
         db.commit()
 
-        if platform == "instagram":
-            result = generate_instagram_description(db, username, niche)
-        else:
-            result = generate_youtube_description(db, username, niche)
+        with llm_usage_scope(creator_id, "description"):
+            if platform == "instagram":
+                result = generate_instagram_description(db, username, niche)
+            else:
+                result = generate_youtube_description(db, username, niche)
 
         row = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
         if not row or getattr(row, job_field) != job_id:
@@ -1918,7 +1980,8 @@ def _run_ai_ranking_job(creator_id: int, version: str) -> None:
         setattr(row, error_field, None)
         db.commit()
 
-        config["rank"](db, creator_id)
+        with llm_usage_scope(creator_id, f"match_{version}"):
+            config["rank"](db, creator_id)
 
         row = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
         setattr(row, status_field, "completed")
@@ -1949,7 +2012,8 @@ def _run_llm_v3_ranking_job(creator_id: int) -> None:
 def _run_creator_signals_job(creator_id: int) -> None:
     db = SessionLocal()
     try:
-        compute_creator_signals(db, creator_id)
+        with llm_usage_scope(creator_id, "profile_signals"):
+            compute_creator_signals(db, creator_id)
     except Exception:
         logger.exception("Creator signals background job failed for creator_id=%d", creator_id)
     finally:

@@ -38,6 +38,11 @@ class Base(DeclarativeBase):
     pass
 
 
+class ViewBase(DeclarativeBase):
+    """Models of SQL views: kept off Base so create_all never tries to create a table for them."""
+    pass
+
+
 class BrandRaw(Base):
     __tablename__ = "brands_raw"
 
@@ -716,6 +721,33 @@ class LlmUsage(Base):
     reasoning_tokens  = Column(Integer, nullable=False, default=0)
     cost_usd          = Column(Numeric(12, 6))
     duration_ms       = Column(Integer)
+    # The MAVLIT user (creator_profiles.id) whose action caused the call, and
+    # which feature ("description", "profile_signals", "match_v2", "match_v3",
+    # "pitch", "rate_estimate", "contract_advice"). NULL for batch-pipeline
+    # calls. Set via gpt_llm.llm_usage_scope(). No FK: usage rows must outlive
+    # a deleted creator. Per-user totals: the creator_llm_cost view.
+    creator_profile_id = Column(Integer, index=True)
+    feature            = Column(Text)
+
+
+class CreatorLlmCost(ViewBase):
+    """
+    Read-only admin view of the creator_llm_cost SQL view (created in the API
+    startup migrations): LLM cost per MAVLIT user, in total and per feature.
+    """
+    __tablename__ = "creator_llm_cost"
+
+    creator_profile_id = Column(Integer, primary_key=True)
+    email              = Column(Text)
+    full_name          = Column(Text)
+    calls              = Column(Integer)
+    total_cost_usd     = Column(Numeric(12, 6))
+    description_usd    = Column(Numeric(12, 6))
+    profile_signals_usd = Column(Numeric(12, 6))
+    match_v2_usd       = Column(Numeric(12, 6))
+    match_v3_usd       = Column(Numeric(12, 6))
+    other_usd          = Column(Numeric(12, 6))
+    last_call_at       = Column(TIMESTAMP(timezone=True))
 
 
 class SavedBrand(Base):

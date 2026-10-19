@@ -31,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 
 from pipeline.db import BrandNiche, CreatorBrandLlmRanking, CreatorProfile, Prompt
-from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.helpers.gpt_llm import call_gpt_json, fill_template, scoped
 from pipeline.helpers.prompts import (
     LLM_BRAND_RANKING_DEFAULT_PROMPT,
     LLM_BRAND_RANKING_PROMPT_NAME,
@@ -163,7 +163,9 @@ def rank_brands_with_llm(db: Session, creator_id: int) -> int:
     scored: dict[int, tuple[int, str]] = {}
     if batches:
         with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
-            for batch_result in pool.map(lambda b: _rank_batch(template, creator_fields, b, creator_id), batches):
+            for batch_result in pool.map(
+                scoped(lambda b: _rank_batch(template, creator_fields, b, creator_id)), batches,
+            ):
                 scored.update(batch_result)
 
     # Highest confidence first; ties keep the nearest-first embedding order.

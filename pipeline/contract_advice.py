@@ -10,7 +10,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from pipeline.db import ContractReview, CreatorProfile, Prompt
-from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.helpers.gpt_llm import call_gpt_json, fill_template, llm_usage_scope
 from pipeline.helpers.prompts import (
     CONTRACT_ADVICE_DEFAULT_PROMPT,
     CONTRACT_ADVICE_PROMPT_NAME,
@@ -27,7 +27,8 @@ def _get_contract_advice_prompt(db: Session) -> str:
 def review_contract(db: Session, creator: CreatorProfile, contract_text: str) -> ContractReview:
     """Raises RuntimeError if the LLM call comes back empty — nothing is persisted in that case."""
     prompt = fill_template(_get_contract_advice_prompt(db), contract_text=contract_text)
-    result = call_gpt_json(prompt, context=f"contract advice for creator_id={creator.id}")
+    with llm_usage_scope(creator.id, "contract_advice"):
+        result = call_gpt_json(prompt, context=f"contract advice for creator_id={creator.id}")
     if not isinstance(result, dict) or not result:
         raise RuntimeError("Contract review failed — LLM returned no content")
 

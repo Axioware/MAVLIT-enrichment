@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from pipeline.brand_detail import _top_contact
 from pipeline.db import BrandRaw, CreatorProfile, Pitch, Prompt
-from pipeline.helpers.gpt_llm import call_gpt_text, fill_template
+from pipeline.helpers.gpt_llm import call_gpt_text, fill_template, llm_usage_scope
 from pipeline.helpers.prompts import PITCH_DEFAULT_PROMPT, PITCH_PROMPT_NAME
 
 logger = logging.getLogger(__name__)
@@ -72,7 +72,8 @@ def generate_pitch(
         past_brand_partnership=past_brand_partnership or "none provided",
         content_link=content_link or "none provided",
     )
-    pitch_text = call_gpt_text(prompt, context=f"pitch for creator_id={creator.id} brand={brand_name}")
+    with llm_usage_scope(creator.id, "pitch"):
+        pitch_text = call_gpt_text(prompt, context=f"pitch for creator_id={creator.id} brand={brand_name}")
     if not pitch_text:
         raise RuntimeError("Pitch generation failed — LLM returned no content")
 

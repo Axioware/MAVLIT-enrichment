@@ -42,6 +42,7 @@ from sqlalchemy.orm import Session
 
 from pipeline.db import CreatorBrandLlmV3Ranking, CreatorProfile, Prompt
 from pipeline.helpers.creator_gender import creator_match_gender
+from pipeline.helpers.gpt_llm import scoped
 from pipeline.helpers.prompts import (
     LLM_BRAND_RANKING_V3_BEACH_NOTE,
     LLM_BRAND_RANKING_V3_DEFAULT_PROMPT,
@@ -142,7 +143,7 @@ def rank_brands_with_llm_v3(db: Session, creator_id: int) -> int:
     if batches:
         with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
             for batch_result in pool.map(
-                lambda b: _rank_batch(template, creator_fields, b, creator_id, model=_MODEL), batches,
+                scoped(lambda b: _rank_batch(template, creator_fields, b, creator_id, model=_MODEL)), batches,
             ):
                 scored.update(batch_result)
 

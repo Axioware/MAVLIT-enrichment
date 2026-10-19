@@ -10,7 +10,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from pipeline.db import BrandProfile, BrandRaw, CreatorProfile, Prompt, RateEstimate
-from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.helpers.gpt_llm import call_gpt_json, fill_template, llm_usage_scope
 from pipeline.helpers.prompts import RATE_INTEL_DEFAULT_PROMPT, RATE_INTEL_PROMPT_NAME
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,8 @@ def estimate_rate(
         usage=usage or "none specified",
         duration_months=str(duration_months) if duration_months is not None else "one-off / not specified",
     )
-    result = call_gpt_json(prompt, context=f"rate estimate for creator_id={creator.id} brand_id={brand_id}")
+    with llm_usage_scope(creator.id, "rate_estimate"):
+        result = call_gpt_json(prompt, context=f"rate estimate for creator_id={creator.id} brand_id={brand_id}")
     if not isinstance(result, dict) or not result:
         raise RuntimeError("Rate estimation failed — LLM returned no content")
 

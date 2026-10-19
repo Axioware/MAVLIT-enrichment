@@ -3,10 +3,11 @@
     .venv/bin/python scripts/llm_cost_report.py                 # last 7 days
     .venv/bin/python scripts/llm_cost_report.py --days 30
     .venv/bin/python scripts/llm_cost_report.py --since 2026-10-19
-    .venv/bin/python scripts/llm_cost_report.py --creator-id 4  # matching runs for one creator
+    .venv/bin/python scripts/llm_cost_report.py --creator-id 4  # everything one MAVLIT user triggered
 
 Prints the total, then cost by day, by model, by feature (grouped from each
-call's context label) and by creator for matching runs.
+call's context label) and by MAVLIT user (calls triggered from the app: description,
+profile signals, matches v2/v3, pitch, rate estimate, contract advice).
 """
 
 import argparse
@@ -81,7 +82,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Summarise LLM cost from llm_usage.")
     parser.add_argument("--days", type=int, default=7, help="Look back this many days (default 7).")
     parser.add_argument("--since", help="Start date YYYY-MM-DD (UTC); overrides --days.")
-    parser.add_argument("--creator-id", type=int, help="Only matching-ranking calls for this creator.")
+    parser.add_argument("--creator-id", type=int, help="Only the calls triggered by this MAVLIT user (creator_profiles.id).")
     args = parser.parse_args()
 
     since = (
@@ -95,12 +96,13 @@ def main() -> int:
             print("llm_usage table does not exist yet — it is created on the first logged LLM call.")
             return 0
         rows = conn.execute(text("""
-            SELECT created_at, model, context, prompt_tokens, completion_tokens, reasoning_tokens, cost_usd
+            SELECT created_at, model, context, prompt_tokens, completion_tokens, reasoning_tokens, cost_usd,
+                   creator_profile_id, feature
             FROM llm_usage WHERE created_at >= :since ORDER BY created_at
         """), {"since": since}).all()
 
     if args.creator_id is not None:
-        rows = [r for r in rows if r.context and f"creator_id={args.creator_id} " in f"{r.context} "]
+        rows = [r for r in rows if r.creator_profile_id == args.creator_id]
 
     empty = lambda: {"calls": 0, "input": 0, "output": 0, "cost": 0.0}  # noqa: E731
     by_day, by_model, by_feature, by_creator = (defaultdict(empty) for _ in range(4))
@@ -109,10 +111,10 @@ def main() -> int:
     for r in rows:
         cost = float(r.cost_usd) if r.cost_usd is not None else 0.0
         unpriced += r.cost_usd is None
-        groups = [total, by_day[r.created_at.date().isoformat()], by_model[r.model], by_feature[_feature(r.context)]]
-        match = re.search(r"llm brand ranking creator_id=(\d+)", r.context or "")
-        if match:
-            groups.append(by_creator[f"creator {match.group(1)} ({r.model})"])
+        feature = r.feature or _feature(r.context)
+        groups = [total, by_day[r.created_at.date().isoformat()], by_model[r.model], by_feature[feature]]
+        if r.creator_profile_id is not None:
+            groups.append(by_creator[f"user {r.creator_profile_id} - {r.feature}"])
         for g in groups:
             g["calls"] += 1
             g["input"] += r.prompt_tokens
@@ -129,7 +131,7 @@ def main() -> int:
     _print_table("By model", by_model, total["cost"])
     _print_table("By feature", by_feature, total["cost"])
     if by_creator:
-        _print_table("Matching ranking by creator", by_creator, total["cost"])
+        _print_table("By MAVLIT user and feature", by_creator, total["cost"])
     return 0
 
 

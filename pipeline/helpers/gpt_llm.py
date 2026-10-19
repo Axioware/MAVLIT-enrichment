@@ -1,3 +1,5 @@
+import contextlib
+import contextvars
 import json
 import logging
 import re
@@ -62,6 +64,42 @@ def llm_cost_usd(model: str, prompt_tokens: int, cached_tokens: int, completion_
     ) / 1_000_000
 
 
+# Who triggered the call. A MAVLIT-user action (generate my description, profile
+# signals, matches v2/v3, pitch, ...) wraps its work in llm_usage_scope(); every
+# call logged inside it carries that creator_profile_id + feature, so the cost
+# can be totalled per user. Calls made outside a scope (the batch pipeline)
+# stay NULL. Worker threads do not inherit it - wrap their function with scoped().
+_usage_scope: contextvars.ContextVar[tuple[int, str] | None] = contextvars.ContextVar("llm_usage_scope", default=None)
+
+
+@contextlib.contextmanager
+def llm_usage_scope(creator_profile_id: int, feature: str):
+    """Attribute every LLM call made inside this block to a MAVLIT user and feature."""
+    token = _usage_scope.set((creator_profile_id, feature))
+    try:
+        yield
+    finally:
+        _usage_scope.reset(token)
+
+
+def scoped(fn):
+    """
+    Wrap fn so that, when it runs in a ThreadPoolExecutor worker, its LLM calls
+    are attributed like the scope active HERE (call scoped() in the submitting
+    thread, e.g. `pool.map(scoped(work), items)`).
+    """
+    scope = _usage_scope.get()
+
+    def run(*args, **kwargs):
+        token = _usage_scope.set(scope)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _usage_scope.reset(token)
+
+    return run
+
+
 _usage_table_ready = False
 
 
@@ -85,9 +123,12 @@ def _record_usage(path: str, payload: dict, body: dict, context: str, seconds: f
         cost = llm_cost_usd(model, prompt_tokens, cached_tokens, completion_tokens)
         if cost is None:
             logger.warning("LLM cost: no price for model %r in gpt_llm._PRICES — logged without cost", model)
+        scope = _usage_scope.get()
         db = SessionLocal()
         try:
             db.add(LlmUsage(
+                creator_profile_id=scope[0] if scope else None,
+                feature=scope[1] if scope else None,
                 model=model,
                 endpoint=path,
                 context=context or None,
