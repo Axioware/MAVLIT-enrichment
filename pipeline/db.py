@@ -925,6 +925,35 @@ class FacebookBrandedContentCheck(Base):
         return f"@{self.username} {self.status} ({self.result_count})"
 
 
+class BrandBrandedContentCheck(Base):
+    """
+    One row per brand checked against Meta's Branded Content Library by
+    pipeline/enrichment/brand_branded_content_check.py - brands in brands_raw that
+    are NOT linked to test_creator_brand_partnership_posts (added by
+    discover_collaborator_creators.py or by hand). Every checked brand gets a row,
+    including result_count = 0. Re-checking a brand updates its row.
+
+    status: found (result_count >= 1) / not_found (account found, 0 results) /
+            not_in_dropdown (username never appeared in the search) /
+            error (check failed; `error` has the message, result_count is NULL).
+    """
+    __tablename__ = "brand_branded_content_checks"
+
+    id               = Column(Integer, primary_key=True)
+    brand_raw_id     = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, unique=True, index=True)
+    brand_name       = Column(Text)
+    instagram_handle = Column(Text)   # username that was checked
+    status           = Column(Text, nullable=False, index=True)
+    result_count     = Column(Integer)
+    error            = Column(Text)
+    start_date       = Column(Text)   # date window the check used (YYYY-MM-DD)
+    end_date         = Column(Text)
+    last_run         = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __str__(self) -> str:
+        return f"{self.brand_name or self.brand_raw_id} {self.status} ({self.result_count})"
+
+
 class TestCreatorBrandPartnershipPost(Base):
     """
     Scratch/test table for content_creator_re evidence. One row per
