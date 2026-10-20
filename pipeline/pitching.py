@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from pipeline.brand_detail import _top_contact
 from pipeline.db import BrandRaw, CreatorProfile, InstagramPost, Pitch, Prompt
 from pipeline.helpers.creator_gender import creator_match_gender
-from pipeline.helpers.gpt_llm import call_gpt_text, fill_template, llm_usage_scope
+from pipeline.helpers.gpt_llm import call_gpt_text, fill_template, llm_usage_scope, stream_gpt_text
 from pipeline.helpers.prompts import (
     PITCH_DEFAULT_PROMPT,
     PITCH_PRODUCT_INPUT_LINE,
@@ -163,7 +163,7 @@ def _brand_instagram_followers(db: Session, brand_id: int) -> str:
     return f"{row[0]:,}" if row else "unknown"
 
 
-def generate_pitch(
+def _build_pitch_prompt(
     db: Session,
     creator: CreatorProfile,
     *,
@@ -174,11 +174,11 @@ def generate_pitch(
     product_reference: str | None,
     past_brand_partnership: str | None,
     content_link: str | None,
-) -> Pitch:
+) -> dict:
     """
-    Raises ValueError if brand_id doesn't exist. Raises RuntimeError if the
-    LLM call comes back empty — callers should not persist a blank pitch as
-    "sent", so nothing is written to the DB in that case.
+    The filled-in pitch prompt plus the brand/contact it was built for:
+    {"prompt", "brand", "brand_name", "contact"}. Writes nothing. Raises ValueError if
+    brand_id doesn't exist.
     """
     brand: BrandRaw | None = None
     contact: dict | None = None
@@ -236,16 +236,19 @@ def generate_pitch(
         past_brand_partnership=past_brand_partnership or "none provided",
         content_link=content_link or "none provided",
     )
-    with llm_usage_scope(creator.id, "pitch"):
-        pitch_text = call_gpt_text(prompt, context=f"pitch for creator_id={creator.id} brand={brand_name}")
-    if not pitch_text:
-        raise RuntimeError("Pitch generation failed — LLM returned no content")
+    return {"prompt": prompt, "brand": brand, "brand_name": brand_name, "contact": contact}
 
+
+def _save_pitch(
+    db: Session, creator: CreatorProfile, built: dict, pitch_text: str, *, is_custom: bool, story: str,
+    product_reference: str | None, past_brand_partnership: str | None, content_link: str | None,
+) -> Pitch:
+    brand, contact = built["brand"], built["contact"]
     pitch = Pitch(
         creator_profile_id=creator.id,
         brand_raw_id=brand.id if brand else None,
         is_custom=is_custom,
-        brand_name=brand_name,
+        brand_name=built["brand_name"],
         story=story,
         product_reference=product_reference,
         past_brand_partnership=past_brand_partnership,
@@ -258,5 +261,68 @@ def generate_pitch(
     db.add(pitch)
     db.commit()
     db.refresh(pitch)
-    logger.info("Pitch generated: creator_id=%d brand=%s pitch_id=%d", creator.id, brand_name, pitch.id)
+    logger.info("Pitch generated: creator_id=%d brand=%s pitch_id=%d", creator.id, built["brand_name"], pitch.id)
     return pitch
+
+
+def generate_pitch(
+    db: Session,
+    creator: CreatorProfile,
+    *,
+    is_custom: bool,
+    brand_id: int | None,
+    custom_brand_name: str | None,
+    story: str,
+    product_reference: str | None,
+    past_brand_partnership: str | None,
+    content_link: str | None,
+) -> Pitch:
+    """
+    Raises ValueError if brand_id doesn't exist. Raises RuntimeError if the
+    LLM call comes back empty — callers should not persist a blank pitch as
+    "sent", so nothing is written to the DB in that case.
+    """
+    fields = dict(story=story, product_reference=product_reference,
+                  past_brand_partnership=past_brand_partnership, content_link=content_link)
+    built = _build_pitch_prompt(db, creator, is_custom=is_custom, brand_id=brand_id,
+                                custom_brand_name=custom_brand_name, **fields)
+    with llm_usage_scope(creator.id, "pitch"):
+        pitch_text = call_gpt_text(built["prompt"], context=f"pitch for creator_id={creator.id} brand={built['brand_name']}")
+    if not pitch_text:
+        raise RuntimeError("Pitch generation failed — LLM returned no content")
+    return _save_pitch(db, creator, built, pitch_text, is_custom=is_custom, **fields)
+
+
+def stream_pitch(
+    db: Session,
+    creator: CreatorProfile,
+    *,
+    is_custom: bool,
+    brand_id: int | None,
+    custom_brand_name: str | None,
+    story: str,
+    product_reference: str | None,
+    past_brand_partnership: str | None,
+    content_link: str | None,
+):
+    """
+    Same as generate_pitch, but yields the email piece by piece while the LLM writes it (so the
+    page can show it live), then saves it. Yields ("delta", text) for every piece and, last,
+    ("done", Pitch). The Pitch is saved only after the full text arrived; if the stream fails
+    nothing is saved and the exception (ValueError / LLMUnavailableError / RuntimeError) is raised.
+    """
+    fields = dict(story=story, product_reference=product_reference,
+                  past_brand_partnership=past_brand_partnership, content_link=content_link)
+    built = _build_pitch_prompt(db, creator, is_custom=is_custom, brand_id=brand_id,
+                                custom_brand_name=custom_brand_name, **fields)
+    parts: list[str] = []
+    for piece in stream_gpt_text(
+        built["prompt"], context=f"pitch for creator_id={creator.id} brand={built['brand_name']}",
+        scope=(creator.id, "pitch"),
+    ):
+        parts.append(piece)
+        yield "delta", piece
+    pitch_text = "".join(parts).strip()
+    if not pitch_text:
+        raise RuntimeError("Pitch generation failed — LLM returned no content")
+    yield "done", _save_pitch(db, creator, built, pitch_text, is_custom=is_custom, **fields)

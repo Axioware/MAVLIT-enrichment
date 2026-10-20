@@ -354,6 +354,14 @@ The following endpoints are authenticated and implemented for API consumers, but
 - **Response:** `200`, `PitchResponse` with `id`, brand fields, submitted story fields, optional contact fields, generated `pitch_text`, canonical `status`, `source`, `sent_at`, `agreed_rate`, and `created_at`.
 - **Errors:** `400` invalid custom/non-custom combination; `401` unauthenticated; `404` brand not found; `502` LLM generation failed and no pitch is saved; `422` malformed body.
 
+#### `POST /pitches/stream`
+
+- **Purpose:** Same as `POST /pitches` (same body, same prompt, saved as a `generated`, unsent pitch), but the email is streamed while the LLM writes it so the page can show it live.
+- **Auth:** Required.
+- **Response:** `200`, `text/event-stream`. Each event is one `data: {json}` line followed by a blank line: `{"type":"delta","text":"..."}` for every piece of the email, in order; then `{"type":"done","pitch":{...PitchResponse}}` when the pitch has been saved; or `{"type":"error","detail":"..."}` if generation failed (nothing is saved).
+- **Errors before the stream starts:** `400` invalid custom/non-custom combination; `401` unauthenticated; `404` brand not found.
+- **Note:** the first piece arrives after the model has finished "thinking" (a few seconds); the text itself then streams in about a second or two. A reverse proxy must not buffer the response (`X-Accel-Buffering: no` is sent).
+
 #### `POST /pitches/manual`
 
 - **Purpose:** Record outreach performed outside MAVLIT without generating an AI email.

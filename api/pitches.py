@@ -1,4 +1,7 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
@@ -10,8 +13,9 @@ from api.schemas import (
     PitchUpdateRequest,
     pitch_to_response,
 )
-from pipeline.db import BrandRaw, CreatorProfile, Pitch, get_db
-from pipeline.pitching import generate_pitch
+from pipeline.db import BrandRaw, CreatorProfile, Pitch, SessionLocal, get_db
+from pipeline.helpers.gpt_llm import LLMUnavailableError
+from pipeline.pitching import generate_pitch, stream_pitch
 
 router = APIRouter(prefix="/pitches", tags=["pitches"])
 
@@ -54,6 +58,62 @@ def create_pitch(
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     return pitch_to_response(pitch)
+
+
+def _sse(event: dict) -> str:
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+@router.post("/stream")
+def stream_pitch_endpoint(
+    body: PitchRequest,
+    db: Session = Depends(get_db),
+    current_user: CreatorProfile = Depends(get_current_user),
+):
+    """
+    Same as POST /pitches (same body, same prompt, saved as a generated, unsent pitch), but the
+    email is sent while the LLM writes it, as server-sent events (text/event-stream), one per line:
+      {"type": "delta", "text": "..."}     a piece of the email, in order
+      {"type": "done", "pitch": {...}}     the saved pitch (PitchResponse), last event on success
+      {"type": "error", "detail": "..."}   generation failed; nothing was saved
+    Request errors (400 / 404) are returned as normal HTTP errors before the stream starts.
+    """
+    if body.is_custom:
+        if not body.custom_brand_name or body.brand_id is not None:
+            raise HTTPException(status_code=400, detail="custom_brand_name is required (and brand_id must be omitted) for a custom pitch")
+    elif body.brand_id is None:
+        raise HTTPException(status_code=400, detail="brand_id is required for a non-custom pitch")
+    elif not db.query(BrandRaw.id).filter(BrandRaw.id == body.brand_id).first():
+        raise HTTPException(status_code=404, detail=f"brand_id={body.brand_id} not found")
+    creator_id = current_user.id
+
+    def events():
+        # its own session: the request's session may be closed before the stream ends
+        with SessionLocal() as stream_db:
+            creator = stream_db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
+            try:
+                for kind, value in stream_pitch(
+                    stream_db, creator,
+                    is_custom=body.is_custom,
+                    brand_id=body.brand_id,
+                    custom_brand_name=body.custom_brand_name,
+                    story=body.story,
+                    product_reference=body.product_reference,
+                    past_brand_partnership=body.past_brand_partnership,
+                    content_link=body.content_link,
+                ):
+                    if kind == "delta":
+                        yield _sse({"type": "delta", "text": value})
+                    else:
+                        yield _sse({"type": "done", "pitch": json.loads(pitch_to_response(value).model_dump_json())})
+            except (LLMUnavailableError, RuntimeError, ValueError) as exc:
+                yield _sse({"type": "error", "detail": str(exc)})
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},   # no proxy buffering
+    )
 
 
 @router.post("/manual", response_model=PitchResponse)

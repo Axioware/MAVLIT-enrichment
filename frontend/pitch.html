@@ -305,32 +305,90 @@
       past_brand_partnership: past || null,
       content_link: link,
     };
-    fetch('/pitches', {
+    // The draft card opens at once and the email is written into it live, as the LLM produces it.
+    var box = $('draftText');
+    var finished = false;
+    state.pitchId = null;
+    box.value = '';
+    box.readOnly = true;
+    box.placeholder = 'MAVLIT is writing your pitch…';
+    $('saveEditBtn').disabled = true;
+    $('contactNote').textContent = '';
+    setDraftStatus('Writing your pitch…', '');
+    $('draftCard').style.display = 'block';
+    $('draftCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    function handleEvent(ev) {
+      if (ev.type === 'delta') {
+        box.value += ev.text;
+        box.scrollTop = box.scrollHeight;
+      } else if (ev.type === 'done') {
+        var pitch = ev.pitch;
+        finished = true;
+        state.pitchId = pitch.id;
+        state.savedText = pitch.pitch_text || '';
+        box.value = state.savedText;
+        $('contactNote').textContent = pitch.contact_name
+          ? 'Suggested contact at ' + pitch.brand_name + ': ' + pitch.contact_name + (pitch.contact_email ? ' (' + pitch.contact_email + ')' : '')
+          : '';
+        setDraftStatus('', '');
+      } else if (ev.type === 'error') {
+        throw new Error(ev.detail || 'Could not generate the pitch. Please try again.');
+      }
+    }
+
+    // Server-sent events: "data: {json}" blocks separated by a blank line.
+    function readEvents(buffer, flush) {
+      var blocks = buffer.split('\n\n');
+      var rest = flush ? '' : blocks.pop();
+      blocks.forEach(function(block) {
+        block.split('\n').forEach(function(line) {
+          if (line.indexOf('data:') === 0) handleEvent(JSON.parse(line.slice(5).trim()));
+        });
+      });
+      return rest;
+    }
+
+    fetch('/pitches/stream', {
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
       .then(function(r) {
-        return r.json().catch(function() { return {}; }).then(function(data) {
-          if (r.status === 401) { window.location.replace('/signin?return_to=/pitch'); throw new Error('auth'); }
-          if (!r.ok) throw new Error(data.detail || 'Could not generate the pitch. Please try again.');
-          return data;
-        });
+        if (r.status === 401) { window.location.replace('/signin?return_to=/pitch'); throw new Error('auth'); }
+        if (!r.ok) {
+          return r.json().catch(function() { return {}; }).then(function(data) {
+            throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not generate the pitch. Please try again.');
+          });
+        }
+        if (!r.body || !r.body.getReader) {   // browser without streaming: show the whole email at the end
+          return r.text().then(function(all) { readEvents(all, true); });
+        }
+        var reader = r.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+        function pump() {
+          return reader.read().then(function(chunk) {
+            if (chunk.done) { readEvents(buffer + decoder.decode(), true); return; }
+            buffer = readEvents(buffer + decoder.decode(chunk.value, { stream: true }), false);
+            return pump();
+          });
+        }
+        return pump();
       })
-      .then(function(pitch) {
-        state.pitchId = pitch.id;
-        state.savedText = pitch.pitch_text || '';
-        $('draftText').value = state.savedText;
-        $('saveEditBtn').disabled = true;
-        $('contactNote').textContent = pitch.contact_name
-          ? 'Suggested contact at ' + pitch.brand_name + ': ' + pitch.contact_name + (pitch.contact_email ? ' (' + pitch.contact_email + ')' : '')
-          : '';
-        $('draftStatus').textContent = '';
-        $('draftCard').style.display = 'block';
-        $('draftCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      .then(function() {
+        if (!finished) throw new Error('The connection ended before your pitch was finished. Please try again.');
       })
-      .catch(function(err) { if (!err || err.message !== 'auth') setStatus(err.message || 'Something went wrong. Please try again.', 'error'); })
+      .catch(function(err) {
+        if (err && err.message === 'auth') return;
+        $('draftCard').style.display = 'none';   // nothing was saved: drop the partial text
+        box.value = '';
+        setStatus(err.message || 'Something went wrong. Please try again.', 'error');
+      })
       .finally(function() {
+        box.readOnly = false;
+        box.placeholder = '';
+        $('saveEditBtn').disabled = true;
         state.busy = false;
         $('generateBtn').disabled = false; $('regenBtn').disabled = false;
         $('generateBtn').textContent = 'Generate pitch email draft';

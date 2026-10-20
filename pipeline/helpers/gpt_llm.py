@@ -358,6 +358,57 @@ def call_gpt_text(prompt: str, context: str = "") -> str:
         return ""
 
 
+def stream_gpt_text(prompt: str, context: str = "", scope: tuple[int, str] | None = None):
+    """
+    Like call_gpt_text, but yields the answer in pieces as OpenAI writes it (chat completions
+    with stream=true), so a caller can show it live. The call is logged to llm_usage when the
+    stream ends, with the real token usage. Raises LLMUnavailableError when OpenAI is unavailable
+    (credits, key, rate limit, outage, network) and RuntimeError for any other failure; text already
+    yielded before an error cannot be taken back, so callers should treat the whole as failed.
+    scope=(creator_profile_id, feature) attributes the logged cost to a MAVLIT user (passed in rather
+    than read from llm_usage_scope: a generator can resume in a different context).
+    """
+    if not OPENAI_KEY:
+        raise RuntimeError("OPENAI_KEY not set")
+    with _state_lock:
+        if time.monotonic() < _stopped_until:
+            raise LLMUnavailableError(_stopped_reason)
+    path = "/chat/completions"
+    payload = {
+        "model": _MODEL, "messages": [{"role": "user", "content": prompt}],
+        "stream": True, "stream_options": {"include_usage": True},
+    }
+    started = time.monotonic()
+    usage: dict = {}
+    try:
+        with httpx.stream("POST", f"{_BASE_URL}{path}", headers=_headers(), json=payload, timeout=_TIMEOUT) as resp:
+            if resp.status_code >= 400:
+                resp.read()
+                resp.raise_for_status()
+            for line in resp.iter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                chunk = json.loads(data)
+                usage = chunk.get("usage") or usage
+                for choice in chunk.get("choices") or []:
+                    piece = (choice.get("delta") or {}).get("content")
+                    if piece:
+                        yield piece
+    except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+        kind, detail, _ = _classify_failure(exc)
+        if kind is not None:
+            raise LLMUnavailableError(f"OpenAI unavailable ({kind}): {detail}") from exc
+        raise RuntimeError(f"OpenAI request failed: {detail}") from exc
+    if scope is not None:
+        with llm_usage_scope(*scope):
+            _record_usage(path, payload, {"usage": usage, "model": _MODEL}, context, time.monotonic() - started)
+    else:
+        _record_usage(path, payload, {"usage": usage, "model": _MODEL}, context, time.monotonic() - started)
+
+
 def embed_text(text: str, context: str = "") -> list[float]:
     """
     Embed a string via OpenAI's text-embedding-3-small model, requested at
