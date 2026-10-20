@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from pipeline.db import BrandRaw, ContractReview, CreatorProfile, Pitch, RateEstimate
 
@@ -212,6 +212,14 @@ class PitchUpdateRequest(BaseModel):
     status: str | None = None
     sent_at: date | None = None
     agreed_rate: Decimal | None = Field(default=None, ge=0)
+    pitch_text: str | None = Field(default=None, max_length=20000)   # the creator's edited email
+
+    @field_validator("pitch_text")
+    @classmethod
+    def _pitch_text_not_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("pitch_text cannot be blank")
+        return value
 
 
 class ManualPitchRequest(BaseModel):

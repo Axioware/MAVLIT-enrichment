@@ -109,6 +109,10 @@ def update_pitch(
         raise HTTPException(status_code=403, detail="You do not own this pitch")
     if not body.model_fields_set:
         raise HTTPException(status_code=400, detail="At least one field is required")
+    if body.pitch_text is not None:
+        if pitch.is_manual:
+            raise HTTPException(status_code=400, detail="A manually recorded pitch has no email text to edit")
+        pitch.pitch_text = body.pitch_text   # the exact text the creator edited
 
     if body.status is not None:
         if body.status not in _ALLOWED_STATUSES:

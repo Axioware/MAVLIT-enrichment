@@ -149,9 +149,10 @@
     <div class="card" id="draftCard">
       <h2>Your pitch email — rough draft</h2>
       <div class="contact-note" id="contactNote"></div>
-      <textarea id="draftText"></textarea>
-      <p class="hint">This is a first draft. Edit it as you like before you send it. It is saved under your pitches.</p>
+      <textarea id="draftText" oninput="onDraftEdit()"></textarea>
+      <p class="hint">This is a first draft. Edit it as you like, then click "Save changes" to keep your version. It is saved under your pitches and nothing is sent.</p>
       <div class="actions">
+        <button type="button" class="btn" id="saveEditBtn" onclick="saveEdits()" disabled>Save changes</button>
         <button type="button" class="btn secondary" onclick="copyDraft()">Copy</button>
         <button type="button" class="btn secondary" id="regenBtn" onclick="generatePitch()">Generate again</button>
       </div>
@@ -160,7 +161,7 @@
   </div>
 
 <script>
-  var state = { tab: 'matches', matches: [], selected: null, busy: false };
+  var state = { tab: 'matches', matches: [], selected: null, busy: false, pitchId: null, savedText: '' };
 
   function $(id) { return document.getElementById(id); }
 
@@ -261,6 +262,8 @@
 
   function generatePitch() {
     if (state.busy) return;
+    if (state.pitchId !== null && $('draftText').value !== state.savedText &&
+        !confirm('You have unsaved changes to this email. Generate a new one anyway?')) return;
     var brand = currentBrand();
     var story = $('story').value.trim();
     var past = $('pastPartnerships').value.trim();
@@ -297,7 +300,10 @@
         });
       })
       .then(function(pitch) {
-        $('draftText').value = pitch.pitch_text || '';
+        state.pitchId = pitch.id;
+        state.savedText = pitch.pitch_text || '';
+        $('draftText').value = state.savedText;
+        $('saveEditBtn').disabled = true;
         $('contactNote').textContent = pitch.contact_name
           ? 'Suggested contact at ' + pitch.brand_name + ': ' + pitch.contact_name + (pitch.contact_email ? ' (' + pitch.contact_email + ')' : '')
           : '';
@@ -311,6 +317,46 @@
         $('generateBtn').disabled = false; $('regenBtn').disabled = false;
         $('generateBtn').textContent = 'Generate pitch email draft';
       });
+  }
+
+  // Edits are only stored when the creator clicks "Save changes".
+  function onDraftEdit() {
+    $('saveEditBtn').disabled = $('draftText').value === state.savedText;
+    $('draftStatus').textContent = $('saveEditBtn').disabled ? '' : 'You have unsaved changes.';
+    $('draftStatus').className = 'status';
+  }
+
+  function saveEdits() {
+    var text = $('draftText').value;
+    if (!text.trim()) { setDraftStatus('The email cannot be empty.', 'error'); return; }
+    $('saveEditBtn').disabled = true;
+    fetch('/pitches/' + encodeURIComponent(state.pitchId), {
+      method: 'PATCH', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pitch_text: text }),
+    })
+      .then(function(r) {
+        return r.json().catch(function() { return {}; }).then(function(data) {
+          if (r.status === 401) { window.location.replace('/signin?return_to=/pitch'); throw new Error('auth'); }
+          if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not save your changes. Please try again.');
+          return data;
+        });
+      })
+      .then(function(pitch) {
+        state.savedText = pitch.pitch_text || text;
+        setDraftStatus('Your changes were saved.', 'ok');
+      })
+      .catch(function(err) {
+        if (err && err.message === 'auth') return;
+        $('saveEditBtn').disabled = false;
+        setDraftStatus(err.message || 'Could not save your changes.', 'error');
+      });
+  }
+
+  function setDraftStatus(message, kind) {
+    var el = $('draftStatus');
+    el.textContent = message;
+    el.className = 'status' + (kind ? ' ' + kind : '');
   }
 
   function copyDraft() {
