@@ -20,18 +20,21 @@ Runs on every page load; designed to be cheap:
                are dropped here, not just confirmed-absent ones
              - if the creator also gave a follower_count, it must fall
                within the brand's confirmed insta_lowest/insta_highest
-               range, extended by _FOLLOWER_TOLERANCE on each side (that
-               range is already a min/max over every confirmed collaborator
-               for the brand, however many there are)
+               range, widened: insta_lowest / _FOLLOWER_LOWER_DIVISOR up to
+               insta_highest * _FOLLOWER_UPPER_MULTIPLIER (that range is
+               already a min/max over every confirmed collaborator for the
+               brand, however many there are). E.g. a brand with partners
+               from 914 to 1,916 followers is shown to creators with
+               304.67 to 3,832 followers.
 
            YouTube-specific filter, gated on primary_platform == "youtube":
              - if the creator gave youtube_followers (their subscriber
                count), it must fall within the brand's confirmed
-               youtube_lowest/youtube_highest collaborator range, extended
-               by _FOLLOWER_TOLERANCE on each side — same shape as the
-               Instagram follower-range check above, just no equivalent of
-               the has_instagram/insta_lowest presence checks was asked for
-               on the YouTube side.
+               youtube_lowest / _FOLLOWER_LOWER_DIVISOR up to
+               youtube_highest * _FOLLOWER_UPPER_MULTIPLIER collaborator
+               range — same shape as the Instagram follower-range check
+               above, just no equivalent of the has_instagram/insta_lowest
+               presence checks was asked for on the YouTube side.
 
            Creators must also share at least one EXACT (case-insensitive)
            niche string with ANY of:
@@ -142,7 +145,10 @@ logger = logging.getLogger(__name__)
 
 _ACTIVITY_FLOOR = 0   # brands with a CONFIRMED score at or below this are dropped; unscored (NULL) brands are kept
 _MIN_PARTNERSHIP_CONFIDENCE = 90   # a shown brand needs a post at/above this in test_creator_brand_partnership_posts or instagram_posts
-_FOLLOWER_TOLERANCE = 2   # +/-200% buffer beyond the brand's confirmed collaborator follower range
+# Follower-range widening around the brand's confirmed collaborator range: a creator
+# fits when  lowest / _FOLLOWER_LOWER_DIVISOR  <=  followers  <=  highest * _FOLLOWER_UPPER_MULTIPLIER.
+_FOLLOWER_LOWER_DIVISOR = 3
+_FOLLOWER_UPPER_MULTIPLIER = 2
 # Brand categories always avoided, for every creator — brands_raw.niche values
 # (compared case-insensitively). Brands with no niche are kept.
 _EXCLUDED_BRAND_NICHES = ("band", "creator")
@@ -296,8 +302,8 @@ def _hard_filtered_query(db: Session, creator: CreatorProfile, apply_gender_filt
         query = query.filter(BrandProfile.insta_lowest.isnot(None), BrandProfile.insta_highest.isnot(None))
         if creator.follower_count is not None:
             query = query.filter(
-                creator.follower_count >= BrandProfile.insta_lowest * (1 - _FOLLOWER_TOLERANCE),
-                creator.follower_count <= BrandProfile.insta_highest * (1 + _FOLLOWER_TOLERANCE),
+                creator.follower_count >= BrandProfile.insta_lowest / _FOLLOWER_LOWER_DIVISOR,
+                creator.follower_count <= BrandProfile.insta_highest * _FOLLOWER_UPPER_MULTIPLIER,
             )
 
     # YouTube follower-range fit, gated on primary_platform == "youtube" —
@@ -310,8 +316,8 @@ def _hard_filtered_query(db: Session, creator: CreatorProfile, apply_gender_filt
     ):
         query = query.filter(
             BrandProfile.youtube_lowest.isnot(None), BrandProfile.youtube_highest.isnot(None),
-            creator.youtube_followers >= BrandProfile.youtube_lowest * (1 - _FOLLOWER_TOLERANCE),
-            creator.youtube_followers <= BrandProfile.youtube_highest * (1 + _FOLLOWER_TOLERANCE),
+            creator.youtube_followers >= BrandProfile.youtube_lowest / _FOLLOWER_LOWER_DIVISOR,
+            creator.youtube_followers <= BrandProfile.youtube_highest * _FOLLOWER_UPPER_MULTIPLIER,
         )
 
     # Keep brands eligible regardless of partner-creator embedding similarity.
