@@ -62,6 +62,7 @@ from pipeline.db import (
     InstagramCreatorCommenter,
     InstagramPost,
     InstagramUser,
+    CreatorInstagramPost,
     CreatorLlmCost,
     LlmUsage,
     MetaAd,
@@ -936,6 +937,28 @@ class CreatorLlmCostAdmin(ModelView, model=CreatorLlmCost):
     page_size  = 25
 
 
+class CreatorInstagramPostAdmin(ModelView, model=CreatorInstagramPost):
+    """Posts scraped for a MAVLIT user when they chose "Let MAVLIT generate it from my content"."""
+    name         = "Creator Instagram Post"
+    name_plural  = "Creator Instagram Posts"
+    category     = "Test"
+    icon         = "fa-brands fa-instagram"
+    column_list  = [
+        CreatorInstagramPost.creator_profile_id, CreatorInstagramPost.instagram_handle,
+        CreatorInstagramPost.post_url, CreatorInstagramPost.post_type, CreatorInstagramPost.timestamp,
+        CreatorInstagramPost.caption, CreatorInstagramPost.likes_count, CreatorInstagramPost.comments_count,
+        CreatorInstagramPost.fetched_at,
+    ]
+    column_labels = {CreatorInstagramPost.creator_profile_id: "MAVLIT user id"}
+    column_searchable_list = [CreatorInstagramPost.instagram_handle, CreatorInstagramPost.caption, CreatorInstagramPost.post_url]
+    column_sortable_list   = [c.name for c in CreatorInstagramPost.__table__.columns]
+    column_default_sort    = [(CreatorInstagramPost.fetched_at, True)]
+    column_filters = [OperationColumnFilter(CreatorInstagramPost.creator_profile_id)]
+    can_create = False
+    can_edit   = False
+    page_size  = 25
+
+
 class CreatorNicheAdmin(ModelView, model=CreatorNiche):
     name         = "Creator Niche"
     name_plural  = "Creator Niches"
@@ -1306,6 +1329,7 @@ admin.add_view(TestNicheAdmin)
 admin.add_view(TestCreatorBrandPartnershipPostAdmin)
 admin.add_view(FacebookBrandedContentCheckAdmin)
 admin.add_view(CreatorNicheAdmin)
+admin.add_view(CreatorInstagramPostAdmin)
 admin.add_view(LlmUsageAdmin)
 admin.add_view(CreatorLlmCostAdmin)
 admin.add_view(InstagramUserAdmin)
@@ -1894,7 +1918,7 @@ def _run_creator_description_job(
 
         with llm_usage_scope(creator_id, "description"):
             if platform == "instagram":
-                result = generate_instagram_description(db, username, niche)
+                result = generate_instagram_description(db, username, niche, creator_id=creator_id)
             else:
                 result = generate_youtube_description(db, username, niche)
 
@@ -1906,6 +1930,14 @@ def _run_creator_description_job(
         for key in ("audience_gender", "audience_age_min", "audience_age_max"):
             if result.get(key) is not None:
                 setattr(row, f"{platform}_{key}", result[key])
+        # The follower count Apify read from the profile replaces the typed one.
+        if platform == "instagram" and result.get("followers_count") is not None:
+            row.instagram_followers = result["followers_count"]
+            if (row.primary_platform or "").split(",")[0].strip().lower() == "instagram":
+                row.follower_count = result["followers_count"]
+        # 3-4 sub-niches picked by the LLM; the creator's own choice is kept if they already made one.
+        if result.get("sub_niches") and not getattr(row, f"{platform}_sub_niches"):
+            setattr(row, f"{platform}_sub_niches", result["sub_niches"])
         setattr(row, status_field, "completed")
         setattr(row, error_field, None)
         db.commit()

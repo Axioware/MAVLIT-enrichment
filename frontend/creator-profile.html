@@ -348,12 +348,8 @@
             </select>
           </div>
           <div class="field">
-            <label for="instagram_audience_age_min">Audience age — minimum</label>
-            <input id="instagram_audience_age_min" name="instagram_audience_age_min" type="number" min="13" max="100" step="1" placeholder="18" />
-          </div>
-          <div class="field">
-            <label for="instagram_audience_age_max">Audience age — maximum</label>
-            <input id="instagram_audience_age_max" name="instagram_audience_age_max" type="number" min="13" max="100" step="1" placeholder="34" />
+            <label for="instagram_audience_age_range">Audience age range</label>
+            <input id="instagram_audience_age_range" name="instagram_audience_age_range" type="text" inputmode="numeric" autocomplete="off" maxlength="9" pattern="\s*[0-9]{2,3}\s*[\-–—]\s*[0-9]{2,3}\s*" title="Enter the age range like 18-34" placeholder="18-34" />
           </div>
           <div class="field full">
             <p class="niche-hint">Audience demographics<br>Use your latest platform analytics. Choose the gender most of your audience is, or "Both" if it is mixed.</p>
@@ -409,12 +405,8 @@
             </select>
           </div>
           <div class="field">
-            <label for="youtube_audience_age_min">Audience age — minimum</label>
-            <input id="youtube_audience_age_min" name="youtube_audience_age_min" type="number" min="13" max="100" step="1" placeholder="18" />
-          </div>
-          <div class="field">
-            <label for="youtube_audience_age_max">Audience age — maximum</label>
-            <input id="youtube_audience_age_max" name="youtube_audience_age_max" type="number" min="13" max="100" step="1" placeholder="34" />
+            <label for="youtube_audience_age_range">Audience age range</label>
+            <input id="youtube_audience_age_range" name="youtube_audience_age_range" type="text" inputmode="numeric" autocomplete="off" maxlength="9" pattern="\s*[0-9]{2,3}\s*[\-–—]\s*[0-9]{2,3}\s*" title="Enter the age range like 18-34" placeholder="18-34" />
           </div>
           <div class="field full">
             <p class="niche-hint">Audience demographics<br>Use your latest platform analytics. Choose the gender most of your audience is, or "Both" if it is mixed.</p>
@@ -634,12 +626,12 @@
     setInput('instagram_primary_niche', profile.instagram_primary_niche); setListInput('instagram_sub_niches', profile.instagram_sub_niches);
     setListInput('instagram_excluded_categories', profile.instagram_excluded_categories); setInput('instagram_description', profile.instagram_description);
     setInput('instagram_audience_gender', profile.instagram_audience_gender);
-    setInput('instagram_audience_age_min', profile.instagram_audience_age_min); setInput('instagram_audience_age_max', profile.instagram_audience_age_max);
+    setInput('instagram_audience_age_range', formatAgeRange(profile.instagram_audience_age_min, profile.instagram_audience_age_max));
     setInput('youtube_channel_name', profile.youtube_channel_name); setInput('youtube_subscribers', profile.youtube_subscribers);
     setInput('youtube_primary_niche', profile.youtube_primary_niche); setListInput('youtube_sub_niches', profile.youtube_sub_niches);
     setListInput('youtube_excluded_categories', profile.youtube_excluded_categories); setInput('youtube_description', profile.youtube_description);
     setInput('youtube_audience_gender', profile.youtube_audience_gender);
-    setInput('youtube_audience_age_min', profile.youtube_audience_age_min); setInput('youtube_audience_age_max', profile.youtube_audience_age_max);
+    setInput('youtube_audience_age_range', formatAgeRange(profile.youtube_audience_age_min, profile.youtube_audience_age_max));
     (profile.primary_platform || '').split(',').forEach(function(platform) {
       var checkbox = document.querySelector('input[name="platform_choice"][value="' + platform.trim() + '"]');
       if (checkbox) checkbox.checked = true;
@@ -848,14 +840,48 @@
   // generated description. Fill those boxes from the finished job, but only the
   // ones the user left empty - anything they typed themselves wins.
   function applyGeneratedAudience(platform, profile, body) {
-    ['audience_gender', 'audience_age_min', 'audience_age_max'].forEach(function(key) {
-      var id = platform + '_' + key;
-      var input = document.getElementById(id);
-      var generated = profile[id];
-      if (!input || generated === null || generated === undefined || input.value) return;
-      input.value = generated;
-      if (body) body[id] = key === 'audience_gender' ? generated : Number(generated);
-    });
+    var genderId = platform + '_audience_gender';
+    var genderInput = document.getElementById(genderId);
+    var gender = profile[genderId];
+    if (genderInput && gender !== null && gender !== undefined && !genderInput.value) {
+      genderInput.value = gender;
+      if (body) body[genderId] = gender;
+    }
+    // The two generated ages share one "18-34" box.
+    var ageInput = document.getElementById(platform + '_audience_age_range');
+    var lo = profile[platform + '_audience_age_min'], hi = profile[platform + '_audience_age_max'];
+    if (ageInput && !ageInput.value && lo !== null && lo !== undefined && hi !== null && hi !== undefined) {
+      ageInput.value = formatAgeRange(lo, hi);
+      if (body) { body[platform + '_audience_age_min'] = Number(lo); body[platform + '_audience_age_max'] = Number(hi); }
+    }
+  }
+
+  // The profile fields the generation job fills besides the description: the follower
+  // count Apify read (replaces the typed one) and 3-4 sub-niches (only if none were chosen).
+  function applyGeneratedProfileFields(platform, profile, body) {
+    if (platform === 'instagram' && profile.instagram_followers !== null && profile.instagram_followers !== undefined) {
+      var followers = document.getElementById('instagram_followers');
+      if (followers) followers.value = profile.instagram_followers;
+      if (body) {
+        body.instagram_followers = Number(profile.instagram_followers);
+        if (selectedPlatforms()[0] === 'instagram') body.follower_count = Number(profile.instagram_followers);
+      }
+    }
+    var subs = profile[platform + '_sub_niches'];
+    var subInput = document.getElementById(platform + '_sub_niches');
+    if (subInput && Array.isArray(subs) && subs.length && !subInput.value.trim()) {
+      subInput.value = subs.join(', ');
+      if (body) body[platform + '_sub_niches'] = subs;
+    }
+  }
+
+  // "18-34" <-> min / max. Accepts a hyphen or an en/em dash and spaces.
+  function formatAgeRange(min, max) {
+    return (min === null || min === undefined || max === null || max === undefined) ? '' : min + '-' + max;
+  }
+  function parseAgeRange(text) {
+    var m = /^\s*(\d{1,3})\s*[-–—]\s*(\d{1,3})\s*$/.exec(text || '');
+    return m ? { min: Number(m[1]), max: Number(m[2]) } : null;
   }
 
   function pollDescriptionGeneration(platform, jobId, body) {
@@ -881,6 +907,7 @@
             body[platform + '_description'] = description;
           }
           applyGeneratedAudience(platform, profile, body);
+          applyGeneratedProfileFields(platform, profile, body);
           return profile;
         }
         if (status === 'failed') {
@@ -963,6 +990,10 @@
     var percent = function(name) { var result = number(name); return result === null ? null : result / 100; };
     var list = function(name) { return listOrNull(form.elements[name].value); };
     var primary = platforms[0];
+    // One "18-34" box per platform -> {min, max} (both null when empty or not a valid range).
+    var ageRange = function(platform) {
+      return parseAgeRange(value(platform + '_audience_age_range')) || { min: null, max: null };
+    };
     var mode = function(name) { var radio = document.querySelector('input[name="' + name + '"]:checked'); return radio ? radio.value : null; };
 
     return {
@@ -977,14 +1008,14 @@
       instagram_excluded_categories: list('instagram_excluded_categories'), instagram_description: value('instagram_description'),
       instagram_description_mode: mode('instagram_description_mode'),
       instagram_audience_gender: value('instagram_audience_gender'),
-      instagram_audience_age_min: number('instagram_audience_age_min'), instagram_audience_age_max: number('instagram_audience_age_max'),
+      instagram_audience_age_min: ageRange('instagram').min, instagram_audience_age_max: ageRange('instagram').max,
       youtube_channel_name: value('youtube_channel_name'),
       youtube_subscribers: number('youtube_subscribers'),
       youtube_primary_niche: value('youtube_primary_niche'), youtube_sub_niches: list('youtube_sub_niches'),
       youtube_excluded_categories: list('youtube_excluded_categories'), youtube_description: value('youtube_description'),
       youtube_description_mode: mode('youtube_description_mode'),
       youtube_audience_gender: value('youtube_audience_gender'),
-      youtube_audience_age_min: number('youtube_audience_age_min'), youtube_audience_age_max: number('youtube_audience_age_max'),
+      youtube_audience_age_min: ageRange('youtube').min, youtube_audience_age_max: ageRange('youtube').max,
     };
   }
 
@@ -996,7 +1027,10 @@
     if (!body.instagram_handle && selected.indexOf('instagram') !== -1) {
       throw new Error('Please add your Instagram username before saving.');
     }
-    if ((body.follower_count === null || body.follower_count === undefined || body.follower_count <= 0) && selected.length) {
+    // An Instagram account set to "Let MAVLIT generate it" gets its follower count from the scrape.
+    var igGenerates = selected.indexOf('instagram') !== -1 && body.instagram_description_mode === 'generate';
+    if ((body.follower_count === null || body.follower_count === undefined || body.follower_count <= 0) && selected.length &&
+        !(igGenerates && selected[0] === 'instagram')) {
       throw new Error('Please add your follower count before saving.');
     }
     if (!body.content_niche) {
@@ -1006,12 +1040,20 @@
       throw new Error('Please add a short creator description before saving.');
     }
     ['instagram', 'youtube'].forEach(function(p) {
+      if (selected.indexOf(p) === -1) return;
+      var text = (document.getElementById(p + '_audience_age_range').value || '').trim();
       var lo = body[p + '_audience_age_min'], hi = body[p + '_audience_age_max'];
-      if (selected.indexOf(p) !== -1 && lo !== null && hi !== null && lo > hi) {
+      if (text && lo === null) {
+        throw new Error('Enter the ' + p + ' audience age range like 18-34.');
+      }
+      if (lo !== null && (lo < 13 || hi > 100)) {
+        throw new Error('The ' + p + ' audience age range must be between 13 and 100.');
+      }
+      if (lo !== null && lo > hi) {
         throw new Error('The ' + p + ' audience minimum age cannot be above the maximum age.');
       }
     });
-    if (selected.indexOf('instagram') !== -1 && (!body.instagram_handle || !body.instagram_followers || body.instagram_followers <= 0)) {
+    if (selected.indexOf('instagram') !== -1 && (!body.instagram_handle || ((!body.instagram_followers || body.instagram_followers <= 0) && !igGenerates))) {
       throw new Error('Please complete the Instagram username and followers before saving.');
     }
     if (selected.indexOf('youtube') !== -1 && (!body.youtube_channel_name || !body.youtube_subscribers || body.youtube_subscribers <= 0)) {

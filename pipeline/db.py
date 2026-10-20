@@ -296,6 +296,52 @@ class InstagramPost(Base):
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
 
 
+class CreatorInstagramPost(Base):
+    """
+    The Instagram posts scraped (Apify) for a MAVLIT user when they pick "Let MAVLIT
+    generate it from my content" for their description
+    (pipeline/creator_content/instagram_description.py) - every post of the scrape, not
+    only the ones with a caption. One row per creator + post: a later generation
+    updates the rows it scraped again and adds new posts. Rows are deleted with the
+    creator profile.
+    """
+    __tablename__ = "creator_instagram_posts"
+    __table_args__ = (
+        UniqueConstraint("creator_profile_id", "post_id", name="uq_creator_instagram_post"),
+    )
+
+    id                 = Column(Integer, primary_key=True)
+    creator_profile_id = Column(Integer, ForeignKey("creator_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    instagram_handle   = Column(Text, nullable=False)   # username that was scraped
+
+    post_id            = Column(Text, nullable=False)
+    post_url           = Column(Text)
+    post_type          = Column(Text)   # Image, Video, Sidecar, ...
+    timestamp          = Column(Text)
+
+    caption            = Column(Text)
+    hashtags           = Column(JSONB)
+    mentions           = Column(JSONB)
+    tagged_users       = Column(JSONB)
+    paid_partnership   = Column(Boolean)
+
+    likes_count        = Column(Integer)
+    comments_count     = Column(Integer)
+    video_view_count   = Column(Integer)
+    video_play_count   = Column(Integer)
+
+    # Profile snapshot at scrape time (also on every post, as in instagram_posts)
+    followers_count    = Column(Integer)
+    biography          = Column(Text)
+
+    fetched_at         = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    creator = relationship("CreatorProfile", lazy="selectin", foreign_keys=[creator_profile_id])
+
+    def __str__(self) -> str:
+        return f"creator {self.creator_profile_id} @{self.instagram_handle} {self.post_id}"
+
+
 class InstagramUser(Base):
     """
     username is unique only for user_type="commenter" — coauthor_producer/

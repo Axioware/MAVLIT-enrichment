@@ -1078,6 +1078,16 @@ Besides the description and tags, estimate who this creator's AUDIENCE is, as a 
 Do not mention demographics in the description or tags. Example of the full JSON: {"description": "...", "tags": ["...", "..."], "audience_gender": "female", "audience_age_min": 18, "audience_age_max": 34}
 """
 
+# Same idea as CREATOR_AUDIENCE_NOTE, for a stored prompt copy with no "sub_niches" yet:
+# the generators append it so the same single call also returns the creator's sub-niches.
+CREATOR_SUB_NICHES_NOTE = """\
+
+ADDITIONAL REQUIRED OUTPUT - SUB-NICHES
+Also pick this creator's SUB-NICHES: 3 to 4 more specific topics inside their niche ({niche}), based on their bio and captions. Choose ONLY from the sub-niche options below and copy each one exactly as written. If the options are "none", return an empty list. Add them to the same JSON object as "sub_niches": ["option 1", "option 2", "option 3"].
+Sub-niche options:
+{sub_niche_options}
+"""
+
 CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT = """\
 You are analyzing a content creator (Instagram or YouTube).
 
@@ -1090,12 +1100,16 @@ Bio:
 Recent captions:
 {captions}
 
+Sub-niche options (the only allowed values for "sub_niches"):
+{sub_niche_options}
+
 Your task:
 
 1. Determine what this creator primarily creates content about (description and tags).
 2. Estimate who the creator's AUDIENCE is - a best estimate from the bio and content, since no analytics are available:
    - audience_gender: the gender most of the audience is - "male", "female" or "both" (mixed, or you cannot tell). Base it on who the content is made for and who it would attract (topics, tone, products, how the creator addresses the audience), not on the creator's own gender alone. Use "both" when the evidence is mixed or thin.
    - audience_age_min and audience_age_max: the age range most of the audience falls in, as whole numbers between 13 and 100 (for example 18 and 34). Keep it realistic and reasonably tight (usually 10 to 20 years wide); the minimum must not be above the maximum.
+3. Pick the creator's SUB-NICHES: 3 to 4 more specific topics inside their niche, based on the bio and captions. Choose ONLY from the sub-niche options above and copy each one exactly as written. If the options are "none", return an empty list.
 
 Return ONLY valid JSON.
 
@@ -1125,16 +1139,17 @@ Return:
 "tags": ["tag1", "tag2", "tag3"],
 "audience_gender": "male|female|both",
 "audience_age_min": 18,
-"audience_age_max": 34
+"audience_age_max": 34,
+"sub_niches": ["option 1", "option 2", "option 3"]
 }}
 
 Examples:
 
 Fitness creator:
-{{"description": "Fitness creator focused on strength training, gym workouts, muscle building, and performance-focused health content.", "tags": ["strength training", "gym workouts", "muscle building", "sports nutrition", "fitness motivation"], "audience_gender": "male", "audience_age_min": 18, "audience_age_max": 34}}
+{{"description": "Fitness creator focused on strength training, gym workouts, muscle building, and performance-focused health content.", "tags": ["strength training", "gym workouts", "muscle building", "sports nutrition", "fitness motivation"], "audience_gender": "male", "audience_age_min": 18, "audience_age_max": 34, "sub_niches": ["strength training", "muscle building", "sports nutrition"]}}
 
 Beauty creator:
-{{"description": "Beauty creator sharing skincare routines, makeup tutorials, cosmetic reviews, and self-care content.", "tags": ["skincare", "makeup", "beauty reviews", "cosmetics", "self care"], "audience_gender": "female", "audience_age_min": 18, "audience_age_max": 34}}
+{{"description": "Beauty creator sharing skincare routines, makeup tutorials, cosmetic reviews, and self-care content.", "tags": ["skincare", "makeup", "beauty reviews", "cosmetics", "self care"], "audience_gender": "female", "audience_age_min": 18, "audience_age_max": 34, "sub_niches": ["skincare", "makeup tutorials", "cosmetics"]}}
 """
 
 

@@ -103,6 +103,7 @@ def _generate_niche(
         niche=context["niche"] or "none provided",
         bio=context["bio"] or "none provided",
         captions="\n".join(f"- {caption}" for caption in context["captions"]) or "none provided",
+        sub_niche_options="none",   # shared prompt; this caller only uses description + tags
     )
     for attempt in range(1, retries + 1):
         result = _validate_result(
