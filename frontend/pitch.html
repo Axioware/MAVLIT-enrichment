@@ -132,13 +132,19 @@
         <textarea id="story" maxlength="3000" placeholder="Why this brand? How did you discover it, and what makes the fit real for you and your audience?"></textarea>
       </div>
       <div class="field">
+        <label class="lbl" for="productLaunch">Reference a recent product launch <span class="opt">(optional)</span></label>
+        <input type="text" id="productLaunch" maxlength="300" placeholder="e.g. the new Revitalift Hyaluronic Acid serum" autocomplete="off" oninput="state.launchTouched = true; $('launchAutoNote').textContent = ''" />
+        <p class="hint">If filled in, it'll be woven into your pitch as a natural reason for the timing, not added as a separate line.</p>
+        <p class="hint" id="launchAutoNote" style="color:#38bdf8"></p>
+      </div>
+      <div class="field">
         <label class="lbl" for="pastPartnerships">Past brand partnerships <span class="opt">(optional)</span></label>
         <textarea id="pastPartnerships" maxlength="2000" placeholder="Brands you have worked with and any results worth mentioning."></textarea>
       </div>
       <div class="field">
         <label class="lbl" for="contentLink">Link to your most relevant content</label>
         <input type="url" id="contentLink" maxlength="500" placeholder="https://www.instagram.com/p/…" autocomplete="off" />
-        <p class="hint">A post or reel that shows why you fit this brand.</p>
+        <p class="hint">Link to content that shows your connection to this brand.</p>
       </div>
       <div class="actions">
         <button type="button" class="btn" id="generateBtn" onclick="generatePitch()">Generate pitch email draft</button>
@@ -161,7 +167,7 @@
   </div>
 
 <script>
-  var state = { tab: 'matches', matches: [], selected: null, busy: false, pitchId: null, savedText: '' };
+  var state = { tab: 'matches', matches: [], selected: null, busy: false, pitchId: null, savedText: '', launchTouched: false };
 
   function $(id) { return document.getElementById(id); }
 
@@ -188,6 +194,16 @@
     var label = brand ? brand.name : 'the brand';
     document.querySelectorAll('.brand-ref').forEach(function(el) { el.textContent = label; });
     $('selectedNote').textContent = state.selected ? 'Selected: ' + state.selected.name : '';
+    prefillLaunch(brand);
+  }
+
+  // Selecting a matched brand fills in its latest product as the launch to reference. The user can
+  // edit or clear it; once they have typed in the box, switching brands no longer overwrites it.
+  function prefillLaunch(brand) {
+    if (state.launchTouched) return;
+    var latest = brand && !brand.custom && state.selected ? state.selected.latestProduct : '';
+    $('productLaunch').value = latest || '';
+    $('launchAutoNote').textContent = latest ? "Filled in from " + brand.name + "'s latest product. Edit or clear it if you want." : '';
   }
 
   function setStatus(message, kind) {
@@ -209,7 +225,7 @@
           .then(function(d) { return d.matches || []; });
       })
       .then(function(rows) {
-        state.matches = rows.map(function(m) { return { id: m.brand_raw_id, name: m.brand_name, niche: m.niche || '' }; });
+        state.matches = rows.map(function(m) { return { id: m.brand_raw_id, name: m.brand_name, niche: m.niche || '', latestProduct: m.latest_product || '' }; });
         renderMatches();
       })
       .catch(function(err) {
@@ -267,6 +283,7 @@
     var brand = currentBrand();
     var story = $('story').value.trim();
     var past = $('pastPartnerships').value.trim();
+    var launch = $('productLaunch').value.trim();
     var link = $('contentLink').value.trim();
 
     if (!brand) { setStatus(state.tab === 'own' ? 'Type the name of the brand you want to pitch.' : 'Select one of your matched brands.', 'error'); return; }
@@ -284,6 +301,7 @@
       brand_id: brand.custom ? null : brand.id,
       custom_brand_name: brand.custom ? brand.name : null,
       story: story,
+      product_reference: launch || null,
       past_brand_partnership: past || null,
       content_link: link,
     };

@@ -2168,6 +2168,7 @@ class MatchResult(BaseModel):
     brand_name:   str
     website:      str | None = None   # brands_raw.website
     niche:        str | None = None
+    latest_product: str | None = None   # brands_raw.latest_product (the pitch form pre-fills its product-launch field with it)
     total_score:  float
     dimensions:   dict[str, MatchDimension]
     reasons:      list[str]
@@ -2223,6 +2224,7 @@ class LlmMatchResult(BaseModel):
     brand_name:   str
     website:      str | None = None   # brands_raw.website
     niche:        str | None = None
+    latest_product: str | None = None   # brands_raw.latest_product (the pitch form pre-fills its product-launch field with it)
     rank:         int
     confidence:   int
     reason:       str | None = None         # the LLM's one-line fit explanation
@@ -2269,6 +2271,7 @@ def _ai_matches_response(db, user_id: int, version: str) -> LlmMatchesResponse:
             brand_name=brand.name or f"brand {brand.id}",
             website=brand.website,
             niche=brand.niche,
+            latest_product=brand.latest_product,
             rank=ranking.rank,
             confidence=ranking.confidence,
             reason=ranking.reason,

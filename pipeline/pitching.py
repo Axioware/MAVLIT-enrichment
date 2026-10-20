@@ -13,7 +13,13 @@ from pipeline.brand_detail import _top_contact
 from pipeline.db import BrandRaw, CreatorProfile, InstagramPost, Pitch, Prompt
 from pipeline.helpers.creator_gender import creator_match_gender
 from pipeline.helpers.gpt_llm import call_gpt_text, fill_template, llm_usage_scope
-from pipeline.helpers.prompts import PITCH_DEFAULT_PROMPT, PITCH_PROMPT_NAME, PITCH_STYLE_BLOCK
+from pipeline.helpers.prompts import (
+    PITCH_DEFAULT_PROMPT,
+    PITCH_PRODUCT_INPUT_LINE,
+    PITCH_PRODUCT_RULE,
+    PITCH_PROMPT_NAME,
+    PITCH_STYLE_BLOCK,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -202,9 +208,13 @@ def generate_pitch(
     if style and "{pitch_style_preferences}" not in template:
         # an edited stored copy without the placeholder: still honour the creator's preferences
         template = template.rstrip() + "\n\n" + PITCH_STYLE_BLOCK
+    if (product_reference or "").strip() and "{product_reference}" not in template:
+        # an edited stored copy without the placeholder: still use the product launch
+        template = template.rstrip() + "\n\n" + PITCH_PRODUCT_INPUT_LINE + PITCH_PRODUCT_RULE
     prompt = fill_template(
         template,
         pitch_style_preferences=style or "none",
+        product_reference=(product_reference or "").strip() or "none provided",
         creator_name=creator.full_name or "unknown",
         creator_handle=creator.instagram_handle or creator.creator_handle or "unknown",
         creator_niche=creator.content_niche or "unknown",

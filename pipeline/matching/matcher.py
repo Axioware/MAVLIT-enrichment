@@ -556,6 +556,7 @@ def get_matches(
             "brand_name":   brand.name,
             "website":      brand.website,
             "niche":        brand.niche,
+            "latest_product": brand.latest_product,
             "total_score":  round(scored["total_score"], 4),
             "niche_tier":   scored["niche_tier"],
             "dimensions":   scored["dimensions"],

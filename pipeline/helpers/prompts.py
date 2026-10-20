@@ -1556,6 +1556,16 @@ AlterativeNation.net Owner
 
 """
 
+# The optional "Reference a recent product launch" field of the pitch form (pitches.product_reference).
+# Separate constants so earlier stored copies of the prompt can be recognised (see
+# PITCH_PREVIOUS_DEFAULT_PROMPTS) and pitching.py can add them to an edited copy without them.
+PITCH_PRODUCT_INPUT_LINE = """\
+Recent product launch to reference (optional): {product_reference}
+"""
+PITCH_PRODUCT_RULE = """\
+- If a recent product launch is given above, weave it into the email as the natural reason for writing now (the timing), inside a sentence that also carries the creator's connection or interest. Do NOT add it as a separate line or paragraph, and do not add details about the launch beyond what the creator wrote. If it says "none provided", do not mention any launch.
+"""
+
 PITCH_DEFAULT_PROMPT = """\
 You are writing the first draft of an outreach email FROM a content creator TO a brand, pitching a paid sponsorship / partnership. Write it in the creator's own voice, as if they wrote it themselves: a real person emailing another real person.
 
@@ -1583,7 +1593,7 @@ Their audience: {creator_audience_description}
 
 WHAT THE CREATOR WANTS TO SAY
 Their authentic connection to {brand_name} (their story): {story}
-Past brand partnerships worth mentioning (optional): {past_brand_partnership}
+""" + PITCH_PRODUCT_INPUT_LINE + """Past brand partnerships worth mentioning (optional): {past_brand_partnership}
 Link to their most relevant content: {content_link}
 
 """ + PITCH_STYLE_BLOCK + """HOW TO WRITE IT
@@ -1601,7 +1611,7 @@ Rules:
 - Sound warm, specific and human (or in the tone the creator's style preferences ask for). Do NOT sound salesy, generic or like a template.
 - Do NOT use em dashes anywhere. Use commas, periods or separate sentences.
 - Do NOT use stock phrases such as "I hope this email finds you well", "I'm reaching out because", "I wanted to touch base", "in today's digital landscape", "collaboration opportunity", "synergy", "game-changer".
-- Use ONLY facts given above. Do not invent products, results, prices, rates, engagement numbers, locations or past work. If an item says "none provided" or "unknown", leave it out instead of guessing.
+""" + PITCH_PRODUCT_RULE + """- Use ONLY facts given above. Do not invent products, results, prices, rates, engagement numbers, locations or past work. If an item says "none provided" or "unknown", leave it out instead of guessing.
 - The brand information is background, not something the creator knows for sure: do not claim inside knowledge of the brand's plans, sales or audience data. Anything marked as not confirmed must not be stated as a fact.
 - Do not mention MAVLIT, matching scores or that the information came from a database.
 - Do not ask for a specific rate or payment in this first email.
@@ -1611,11 +1621,22 @@ Rules:
 
 # Earlier versions of PITCH_DEFAULT_PROMPT (before the style block and/or the example block
 # existed). A stored copy identical to one of them was never edited and is upgraded at startup.
-PITCH_PREVIOUS_DEFAULT_PROMPTS = (
-    PITCH_DEFAULT_PROMPT.replace(PITCH_STYLE_BLOCK, ""),
-    PITCH_DEFAULT_PROMPT.replace(PITCH_EXAMPLE_BLOCK, ""),
-    PITCH_DEFAULT_PROMPT.replace(PITCH_STYLE_BLOCK, "").replace(PITCH_EXAMPLE_BLOCK, ""),
-)
+def _previous_pitch_defaults() -> tuple[str, ...]:
+    """The default prompt with every combination of its later additions left out."""
+    from itertools import product
+    blocks = (PITCH_STYLE_BLOCK, PITCH_EXAMPLE_BLOCK, PITCH_PRODUCT_INPUT_LINE, PITCH_PRODUCT_RULE)
+    versions = []
+    for keep in product((True, False), repeat=len(blocks)):
+        text = PITCH_DEFAULT_PROMPT
+        for block, kept in zip(blocks, keep):
+            if not kept:
+                text = text.replace(block, "")
+        if text != PITCH_DEFAULT_PROMPT and text not in versions:
+            versions.append(text)
+    return tuple(versions)
+
+
+PITCH_PREVIOUS_DEFAULT_PROMPTS = _previous_pitch_defaults()
 
 
 #  rate_intelligence.py
