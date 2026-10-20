@@ -6,12 +6,14 @@ and persists it as a generated, unsent Pitch row.
 
 import logging
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from pipeline.brand_detail import _top_contact
-from pipeline.db import BrandRaw, CreatorProfile, Pitch, Prompt
+from pipeline.db import BrandRaw, CreatorProfile, InstagramPost, Pitch, Prompt
+from pipeline.helpers.creator_gender import creator_match_gender
 from pipeline.helpers.gpt_llm import call_gpt_text, fill_template, llm_usage_scope
-from pipeline.helpers.prompts import PITCH_DEFAULT_PROMPT, PITCH_PROMPT_NAME
+from pipeline.helpers.prompts import PITCH_DEFAULT_PROMPT, PITCH_PROMPT_NAME, PITCH_STYLE_BLOCK
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +21,140 @@ logger = logging.getLogger(__name__)
 def _get_pitch_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == PITCH_PROMPT_NAME).first()
     return row.content if row else PITCH_DEFAULT_PROMPT
+
+
+_PARTNER_CREATORS_MAX = 2
+_MIN_PARTNERSHIP_CONFIDENCE = 90
+
+# Creators with a confirmed (sponsorship_confidence >= 90) partnership post with the brand:
+# (a) usernames tagged / mentioned / co-authoring / sponsoring on the brand's own
+# instagram_posts, looked up in instagram_users, and (b) the creators behind the brand's
+# test_creator_brand_partnership_posts. Same sources as brand_signals / the niche matcher.
+# One row per creator (their best, latest post), strongest partnership first.
+_PARTNER_CREATORS_SQL = r"""
+WITH brand AS (
+  SELECT lower(regexp_replace(regexp_replace(btrim(coalesce(instagram_handle, '')),
+         '^(https?://)?(www\.)?instagram\.com/', '', 'i'), '[/?#].*$|^@', '', 'g')) AS handle
+  FROM brands_raw WHERE id = :bid
+),
+hi AS (
+  SELECT p.post_url, p.timestamp, p.caption, p.sponsorship_confidence,
+         p.tagged_users, p.mentions, p.coauthor_producers, p.sponsors
+  FROM instagram_posts p
+  WHERE p.brand_raw_id = :bid AND p.post_id IS NOT NULL AND p.sponsorship_confidence >= :min_conf
+),
+names AS (
+  SELECT hi.post_url, hi.timestamp, hi.caption, hi.sponsorship_confidence,
+         lower(CASE WHEN jsonb_typeof(e) = 'string' THEN e #>> '{}' ELSE e ->> 'username' END) AS username
+  FROM hi
+  CROSS JOIN LATERAL (
+    SELECT jsonb_array_elements(CASE WHEN jsonb_typeof(col) = 'array' THEN col ELSE '[]'::jsonb END) AS e
+    FROM (VALUES (hi.tagged_users), (hi.mentions), (hi.coauthor_producers), (hi.sponsors)) AS t(col)
+  ) x
+),
+from_posts AS (
+  SELECT n.username, n.post_url, n.timestamp AS posted_at, n.caption, n.sponsorship_confidence
+  FROM names n, brand b
+  WHERE n.username IS NOT NULL AND n.username <> '' AND n.username <> b.handle
+),
+from_re AS (
+  SELECT lower(btrim(t.creator_username)) AS username, t.post_url, t.post_timestamp AS posted_at,
+         t.caption, t.sponsorship_confidence
+  FROM test_creator_brand_partnership_posts t
+  WHERE t.brand_raw_id = :bid AND t.sponsorship_confidence >= :min_conf
+),
+partners AS (SELECT * FROM from_posts UNION ALL SELECT * FROM from_re),
+profile AS (
+  SELECT lower(u.username) AS username,
+         max(u.followers_count) AS followers,
+         max(lower(btrim(u.niche))) FILTER (WHERE u.niche IS NOT NULL AND btrim(u.niche) <> '') AS niche,
+         max(lower(btrim(u.gender))) FILTER (WHERE u.gender IS NOT NULL AND btrim(u.gender) <> '') AS gender
+  FROM instagram_users u
+  WHERE u.user_type <> 'commenter'
+  GROUP BY lower(u.username)
+),
+re_niche AS (
+  SELECT lower(btrim(c.username)) AS username, max(lower(btrim(c.niche))) AS niche
+  FROM content_creator_re c WHERE c.niche IS NOT NULL AND btrim(c.niche) <> '' GROUP BY 1
+)
+SELECT DISTINCT ON (pa.username)
+       pa.username, pr.followers, coalesce(pr.niche, rn.niche) AS niche, pr.gender,
+       pa.post_url, pa.posted_at, pa.caption, pa.sponsorship_confidence
+FROM partners pa
+LEFT JOIN profile pr ON pr.username = pa.username
+LEFT JOIN re_niche rn ON rn.username = pa.username
+WHERE coalesce(pr.niche, rn.niche) = ANY(:niches)
+ORDER BY pa.username, pa.sponsorship_confidence DESC NULLS LAST, pa.posted_at DESC NULLS LAST
+"""
+
+
+def _creator_niches(creator: CreatorProfile) -> list[str]:
+    """The writer's niche(s), lower-case: comma-separated niche fields of the profile."""
+    values = (creator.instagram_primary_niche, creator.content_niche)
+    return sorted({n.strip().lower() for v in values for n in (v or "").split(",") if n.strip()})
+
+
+def partner_creators(db: Session, brand_id: int, creator: CreatorProfile) -> list[dict]:
+    """
+    At most _PARTNER_CREATORS_MAX creators with a confirmed (>= 90) partnership with the
+    brand whose niche is the same as the writer's niche. [] when the writer has no niche or
+    no such creator exists.
+    """
+    niches = _creator_niches(creator)
+    if not niches:
+        return []
+    rows = db.execute(
+        text(_PARTNER_CREATORS_SQL),
+        {"bid": brand_id, "min_conf": _MIN_PARTNERSHIP_CONFIDENCE, "niches": niches},
+    ).mappings().all()
+    ranked = sorted((dict(r) for r in rows), key=lambda r: str(r["posted_at"] or ""), reverse=True)   # newest first
+    ranked.sort(key=lambda r: r["sponsorship_confidence"] or 0, reverse=True)                        # then strongest first
+    return ranked[:_PARTNER_CREATORS_MAX]
+
+
+def _partner_creators_text(creators: list[dict]) -> str:
+    if not creators:
+        return "none on file"
+    lines = []
+    for i, c in enumerate(creators, 1):
+        parts = [f"@{c['username']}", f"niche: {c['niche']}"]
+        if c.get("followers"):
+            parts.append(f"{c['followers']:,} followers")
+        if c.get("gender"):
+            parts.append(f"gender: {c['gender']}")
+        if c.get("posted_at"):
+            parts.append(f"sponsored post on {str(c['posted_at'])[:10]}")
+        caption = " ".join((c.get("caption") or "").split())[:220]
+        if caption:
+            parts.append(f'post caption: "{caption}"')
+        lines.append(f"{i}. " + "; ".join(parts))
+    return "\n".join(lines)
+
+
+def _brand_audience_text(brand: BrandRaw) -> tuple[str, str]:
+    """(target audience, target age) for the prompt; the age is an unconfirmed estimate."""
+    gender = (brand.target_audience_gender or "").strip().lower()
+    audience = {"male": "mostly men", "female": "mostly women", "both": "men and women"}.get(gender)
+    explanation = " ".join((brand.audience_analysis_explanation or "").split())[:300]
+    audience_text = "; ".join(x for x in (audience, explanation) if x) or "not known"
+    low, high = brand.target_audience_min_age, brand.target_audience_max_age
+    if low and high:
+        age = f"around {low} to {high}"
+    elif low or high:
+        age = f"around {low or high}"
+    else:
+        age = "not known"
+    return audience_text, age
+
+
+def _brand_instagram_followers(db: Session, brand_id: int) -> str:
+    row = (
+        db.query(InstagramPost.followers_count)
+        .filter(InstagramPost.brand_raw_id == brand_id, InstagramPost.followers_count.isnot(None))
+        .order_by(InstagramPost.fetched_at.desc())
+        .first()
+    )
+    return f"{row[0]:,}" if row else "unknown"
 
 
 def generate_pitch(
@@ -45,6 +181,8 @@ def generate_pitch(
         brand_niche = "unknown"
         brand_description = "none provided"
         contact_name, contact_title = "unknown", "unknown"
+        brand_target_audience, brand_target_age = "not known", "not known"
+        brand_followers, partners_text = "unknown", "none on file"
     else:
         brand = db.query(BrandRaw).filter(BrandRaw.id == brand_id).first()
         if not brand:
@@ -55,20 +193,36 @@ def generate_pitch(
         contact = _top_contact(db, brand_id)
         contact_name = contact["name"] if contact else "unknown"
         contact_title = contact["title"] if contact else "unknown"
+        brand_target_audience, brand_target_age = _brand_audience_text(brand)
+        brand_followers = _brand_instagram_followers(db, brand.id)
+        partners_text = _partner_creators_text(partner_creators(db, brand.id, creator))
 
+    template = _get_pitch_prompt(db)
+    style = (creator.pitch_style_preferences or "").strip()
+    if style and "{pitch_style_preferences}" not in template:
+        # an edited stored copy without the placeholder: still honour the creator's preferences
+        template = template.rstrip() + "\n\n" + PITCH_STYLE_BLOCK
     prompt = fill_template(
-        _get_pitch_prompt(db),
+        template,
+        pitch_style_preferences=style or "none",
         creator_name=creator.full_name or "unknown",
-        creator_handle=creator.creator_handle or "unknown",
+        creator_handle=creator.instagram_handle or creator.creator_handle or "unknown",
         creator_niche=creator.content_niche or "unknown",
-        creator_follower_count=str(creator.follower_count) if creator.follower_count else "unknown",
+        creator_sub_niches=", ".join(creator.instagram_sub_niches or []) or "none provided",
+        creator_follower_count=f"{creator.follower_count:,}" if creator.follower_count else "unknown",
+        creator_audience_gender=creator_match_gender(creator) or "not specified",
+        creator_content_description=(creator.instagram_description or "none provided").strip(),
+        creator_audience_description=(creator.instagram_audience_description or "none provided").strip(),
         brand_name=brand_name or "unknown",
         brand_niche=brand_niche,
-        brand_description=brand_description,
+        brand_description=" ".join((brand_description or "none provided").split())[:900],
+        brand_target_audience=brand_target_audience,
+        brand_target_age=brand_target_age,
+        brand_instagram_followers=brand_followers,
+        brand_partner_creators=partners_text,
         contact_name=contact_name,
         contact_title=contact_title,
         story=story,
-        product_reference=product_reference or "none provided",
         past_brand_partnership=past_brand_partnership or "none provided",
         content_link=content_link or "none provided",
     )

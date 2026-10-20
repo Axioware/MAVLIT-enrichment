@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/posthog-init.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pitch a Brand — MAVLIT</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.5rem;
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+    }
+    .nav-brand { font-weight: 700; color: #38bdf8; text-decoration: none; font-size: 1rem; letter-spacing: .03em; }
+    .nav-links { display: flex; gap: .25rem; }
+    .nav-link { color: #94a3b8; text-decoration: none; font-size: .875rem; padding: .4rem .75rem; border-radius: 6px; }
+    .nav-link:hover, .nav-link.active { background: #334155; color: #e2e8f0; }
+
+    .wrap { max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+    h1 { font-size: 1.4rem; font-weight: 700; color: #f1f5f9; margin-bottom: .3rem; }
+    .subtitle { font-size: .875rem; color: #64748b; margin-bottom: 1.5rem; }
+
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 1.25rem 1.25rem 1.4rem; margin-bottom: 1.25rem; }
+    .card h2 { font-size: 1rem; color: #f1f5f9; margin-bottom: 1rem; }
+    .step { color: #38bdf8; margin-right: .35rem; }
+
+    .tabs { display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .tab {
+      background: #0f172a; color: #94a3b8; border: 1px solid #334155; border-radius: 8px;
+      padding: .55rem .9rem; font-size: .875rem; cursor: pointer; font-family: inherit;
+    }
+    .tab:hover { color: #e2e8f0; }
+    .tab.active { background: #0c4a6e; border-color: #38bdf8; color: #f1f5f9; }
+
+    label.lbl { display: block; font-size: .8rem; font-weight: 600; color: #cbd5e1; margin-bottom: .35rem; }
+    .opt { font-weight: 400; color: #64748b; }
+    input[type="text"], input[type="url"], textarea {
+      width: 100%; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px;
+      padding: .6rem .75rem; font-size: .9rem; font-family: inherit;
+    }
+    input:focus, textarea:focus { outline: none; border-color: #38bdf8; }
+    textarea { resize: vertical; min-height: 96px; line-height: 1.5; }
+    .field { margin-bottom: 1rem; }
+    .field:last-child { margin-bottom: 0; }
+    .hint { font-size: .75rem; color: #64748b; margin-top: .3rem; }
+
+    .brand-list { max-height: 300px; overflow-y: auto; border: 1px solid #334155; border-radius: 8px; margin-top: .6rem; }
+    .brand-option {
+      display: flex; align-items: center; gap: .65rem; padding: .6rem .8rem; cursor: pointer;
+      border-bottom: 1px solid #1e293b; background: #0f172a;
+    }
+    .brand-option:last-child { border-bottom: none; }
+    .brand-option:hover { background: #172033; }
+    .brand-option.selected { background: #0c4a6e; }
+    .brand-option input { accent-color: #38bdf8; }
+    .brand-name { font-size: .9rem; color: #f1f5f9; }
+    .brand-meta { font-size: .75rem; color: #94a3b8; margin-left: auto; white-space: nowrap; }
+    .empty-note { padding: 1rem; font-size: .85rem; color: #94a3b8; }
+    .selected-note { font-size: .8rem; color: #38bdf8; margin-top: .6rem; min-height: 1.1em; }
+
+    .btn {
+      background: #0284c7; color: #fff; border: none; border-radius: 8px; padding: .75rem 1.2rem;
+      font-size: .9rem; font-weight: 600; cursor: pointer; font-family: inherit;
+    }
+    .btn:hover { background: #0369a1; }
+    .btn:disabled { opacity: .55; cursor: not-allowed; }
+    .btn.secondary { background: #334155; }
+    .btn.secondary:hover { background: #475569; }
+    .actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
+
+    .status { font-size: .85rem; margin-top: .9rem; min-height: 1.2em; }
+    .status.error { color: #f87171; }
+    .status.ok { color: #4ade80; }
+
+    #draftCard { display: none; }
+    #draftText { min-height: 280px; font-size: .9rem; }
+    .contact-note { font-size: .8rem; color: #94a3b8; margin-bottom: .8rem; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a class="nav-brand" href="/">&#9889; MAVLIT Pipeline</a>
+    <div class="nav-links">
+      <a class="nav-link" href="/creator-profile">Creator Profile</a>
+      <a class="nav-link" href="/matches">Your Matches</a>
+      <a class="nav-link active" href="/pitch">Pitch</a>
+    </div>
+  </nav>
+
+  <div class="wrap">
+    <h1>Pitch a brand</h1>
+    <p class="subtitle">Choose the brand you want to work with, tell us your story, and MAVLIT writes a rough draft of your pitch email.</p>
+
+    <div class="card">
+      <h2><span class="step">1</span> Choose the brand</h2>
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab active" id="tabMatches" role="tab" onclick="selectTab('matches')">A brand MAVLIT matches for me</button>
+        <button type="button" class="tab" id="tabOwn" role="tab" onclick="selectTab('own')">My own brand</button>
+      </div>
+
+      <div id="panelMatches">
+        <input type="text" id="matchSearch" placeholder="Search your matched brands…" oninput="renderMatches()" autocomplete="off" />
+        <div class="brand-list" id="matchList"><div class="empty-note">Loading your matches…</div></div>
+        <div class="selected-note" id="selectedNote"></div>
+      </div>
+
+      <div id="panelOwn" hidden>
+        <div class="field">
+          <label class="lbl" for="ownBrandName">Brand name</label>
+          <input type="text" id="ownBrandName" maxlength="120" placeholder="e.g. Sunrise Surf Co." oninput="onBrandChange()" autocomplete="off" />
+          <p class="hint">Type the brand you want to pitch, even if it is not one of your matches.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="step">2</span> Your story &amp; social proof</h2>
+      <div class="field">
+        <label class="lbl" for="story">Your authentic connection to <span class="brand-ref">the brand</span> — the story</label>
+        <textarea id="story" maxlength="3000" placeholder="Why this brand? How did you discover it, and what makes the fit real for you and your audience?"></textarea>
+      </div>
+      <div class="field">
+        <label class="lbl" for="pastPartnerships">Past brand partnerships <span class="opt">(optional)</span></label>
+        <textarea id="pastPartnerships" maxlength="2000" placeholder="Brands you have worked with and any results worth mentioning."></textarea>
+      </div>
+      <div class="field">
+        <label class="lbl" for="contentLink">Link to your most relevant content</label>
+        <input type="url" id="contentLink" maxlength="500" placeholder="https://www.instagram.com/p/…" autocomplete="off" />
+        <p class="hint">A post or reel that shows why you fit this brand.</p>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn" id="generateBtn" onclick="generatePitch()">Generate pitch email draft</button>
+      </div>
+      <div class="status" id="statusMsg"></div>
+    </div>
+
+    <div class="card" id="draftCard">
+      <h2>Your pitch email — rough draft</h2>
+      <div class="contact-note" id="contactNote"></div>
+      <textarea id="draftText"></textarea>
+      <p class="hint">This is a first draft. Edit it as you like before you send it. It is saved under your pitches.</p>
+      <div class="actions">
+        <button type="button" class="btn secondary" onclick="copyDraft()">Copy</button>
+        <button type="button" class="btn secondary" id="regenBtn" onclick="generatePitch()">Generate again</button>
+      </div>
+      <div class="status" id="draftStatus"></div>
+    </div>
+  </div>
+
+<script>
+  var state = { tab: 'matches', matches: [], selected: null, busy: false };
+
+  function $(id) { return document.getElementById(id); }
+
+  function selectTab(tab) {
+    state.tab = tab;
+    $('tabMatches').classList.toggle('active', tab === 'matches');
+    $('tabOwn').classList.toggle('active', tab === 'own');
+    $('panelMatches').hidden = tab !== 'matches';
+    $('panelOwn').hidden = tab !== 'own';
+    onBrandChange();
+  }
+
+  // The brand being pitched: a matched brand (one at a time) or the typed one.
+  function currentBrand() {
+    if (state.tab === 'own') {
+      var name = $('ownBrandName').value.trim();
+      return name ? { name: name, id: null, custom: true } : null;
+    }
+    return state.selected ? { name: state.selected.name, id: state.selected.id, custom: false } : null;
+  }
+
+  function onBrandChange() {
+    var brand = currentBrand();
+    var label = brand ? brand.name : 'the brand';
+    document.querySelectorAll('.brand-ref').forEach(function(el) { el.textContent = label; });
+    $('selectedNote').textContent = state.selected ? 'Selected: ' + state.selected.name : '';
+  }
+
+  function setStatus(message, kind) {
+    var el = $('statusMsg');
+    el.textContent = message || '';
+    el.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  // ---- matched brands ---------------------------------------------------------------
+  function loadMatches() {
+    // Matches v3 (AI ranking); falls back to the standard matches while v3 has nothing yet.
+    fetch('/matches/me/v3', { credentials: 'include' })
+      .then(function(r) { if (r.status === 401) { window.location.replace('/signin?return_to=/pitch'); throw new Error('auth'); } return r.ok ? r.json() : { matches: [] }; })
+      .then(function(data) {
+        var rows = (data.matches || []);
+        if (rows.length) return rows;
+        return fetch('/matches/me?limit=100', { credentials: 'include' })
+          .then(function(r) { return r.ok ? r.json() : { matches: [] }; })
+          .then(function(d) { return d.matches || []; });
+      })
+      .then(function(rows) {
+        state.matches = rows.map(function(m) { return { id: m.brand_raw_id, name: m.brand_name, niche: m.niche || '' }; });
+        renderMatches();
+      })
+      .catch(function(err) {
+        if (err && err.message === 'auth') return;
+        $('matchList').innerHTML = '';
+        var note = document.createElement('div');
+        note.className = 'empty-note';
+        note.textContent = 'Could not load your matches. You can still use "My own brand".';
+        $('matchList').appendChild(note);
+      });
+  }
+
+  function renderMatches() {
+    var list = $('matchList');
+    var query = $('matchSearch').value.trim().toLowerCase();
+    var rows = state.matches.filter(function(m) { return !query || m.name.toLowerCase().indexOf(query) !== -1; });
+    list.innerHTML = '';
+    if (!rows.length) {
+      var note = document.createElement('div');
+      note.className = 'empty-note';
+      note.textContent = state.matches.length
+        ? 'No matched brand has that name.'
+        : 'No matches yet. Finish your profile and check Your Matches, or use "My own brand".';
+      list.appendChild(note);
+      return;
+    }
+    rows.forEach(function(m) {
+      var row = document.createElement('label');
+      row.className = 'brand-option' + (state.selected && state.selected.id === m.id ? ' selected' : '');
+      var radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'matchedBrand';
+      radio.checked = !!(state.selected && state.selected.id === m.id);
+      radio.onchange = function() { state.selected = m; renderMatches(); onBrandChange(); };
+      var name = document.createElement('span');
+      name.className = 'brand-name';
+      name.textContent = m.name;
+      var meta = document.createElement('span');
+      meta.className = 'brand-meta';
+      meta.textContent = m.niche;
+      row.appendChild(radio); row.appendChild(name); row.appendChild(meta);
+      list.appendChild(row);
+    });
+  }
+
+  // ---- pitch ------------------------------------------------------------------------
+  function validUrl(value) {
+    try { var u = new URL(value); return u.protocol === 'http:' || u.protocol === 'https:'; } catch (e) { return false; }
+  }
+
+  function generatePitch() {
+    if (state.busy) return;
+    var brand = currentBrand();
+    var story = $('story').value.trim();
+    var past = $('pastPartnerships').value.trim();
+    var link = $('contentLink').value.trim();
+
+    if (!brand) { setStatus(state.tab === 'own' ? 'Type the name of the brand you want to pitch.' : 'Select one of your matched brands.', 'error'); return; }
+    if (!story) { setStatus('Tell us your connection to ' + brand.name + ' first.', 'error'); return; }
+    if (!link) { setStatus('Add a link to your most relevant content.', 'error'); return; }
+    if (!validUrl(link)) { setStatus('The content link must start with http:// or https://', 'error'); return; }
+
+    state.busy = true;
+    $('generateBtn').disabled = true; $('regenBtn').disabled = true;
+    $('generateBtn').textContent = 'Writing your draft…';
+    setStatus('', '');
+
+    var body = {
+      is_custom: brand.custom,
+      brand_id: brand.custom ? null : brand.id,
+      custom_brand_name: brand.custom ? brand.name : null,
+      story: story,
+      past_brand_partnership: past || null,
+      content_link: link,
+    };
+    fetch('/pitches', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+      .then(function(r) {
+        return r.json().catch(function() { return {}; }).then(function(data) {
+          if (r.status === 401) { window.location.replace('/signin?return_to=/pitch'); throw new Error('auth'); }
+          if (!r.ok) throw new Error(data.detail || 'Could not generate the pitch. Please try again.');
+          return data;
+        });
+      })
+      .then(function(pitch) {
+        $('draftText').value = pitch.pitch_text || '';
+        $('contactNote').textContent = pitch.contact_name
+          ? 'Suggested contact at ' + pitch.brand_name + ': ' + pitch.contact_name + (pitch.contact_email ? ' (' + pitch.contact_email + ')' : '')
+          : '';
+        $('draftStatus').textContent = '';
+        $('draftCard').style.display = 'block';
+        $('draftCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      })
+      .catch(function(err) { if (!err || err.message !== 'auth') setStatus(err.message || 'Something went wrong. Please try again.', 'error'); })
+      .finally(function() {
+        state.busy = false;
+        $('generateBtn').disabled = false; $('regenBtn').disabled = false;
+        $('generateBtn').textContent = 'Generate pitch email draft';
+      });
+  }
+
+  function copyDraft() {
+    var text = $('draftText').value;
+    var done = function() { $('draftStatus').textContent = 'Copied to your clipboard.'; $('draftStatus').className = 'status ok'; };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function() { $('draftText').select(); document.execCommand('copy'); done(); });
+    } else {
+      $('draftText').select(); document.execCommand('copy'); done();
+    }
+  }
+
+  onBrandChange();
+  loadMatches();
+</script>
+</body>
+</html>

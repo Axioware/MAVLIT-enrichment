@@ -1526,43 +1526,96 @@ Return ONLY valid JSON:
 #  pitching.py
 
 PITCH_PROMPT_NAME = "brand_pitch_generation"
+# The creator's own pitch style (creator_profiles.pitch_style_preferences). Kept as its own
+# constant so a stored copy of the previous pitch prompt can be recognised (see api/app.py)
+# and so pitching.py can append it to an edited copy that lacks the placeholder.
+PITCH_STYLE_BLOCK = """\
+THE CREATOR'S PITCH STYLE PREFERENCES (optional)
+{pitch_style_preferences}
+If preferences are given above, follow them closely for tone, length, structure and wording: they replace the default length and structure guidance below (for example if they ask for 3 short sentences, write exactly that). Only the FIXED rules below can never be broken: no subject line, no placeholders, no em dashes, no invented facts, no rate request, no mention of MAVLIT. If it says "none", use the default style described below.
+
+"""
+
+# A real pitch the LLM can use as a model of voice, flow and detail (never of facts).
+PITCH_EXAMPLE_BLOCK = """\
+EXAMPLE OF A GOOD PITCH
+This is a real example of the voice, flow and level of detail to aim for: personal and specific, a real connection to the brand, who the audience is and why they fit, a content link and an easy next step. It is from a different creator and brand, so NEVER copy its facts, names, numbers, links or its sign-off; write only from the information given above, and sign off only with the creator's first name.
+
+---
+I've been going to Guitar World since I was a teenager, I love working on my songs on the acoustic guitars and keyboards at the Orange location. I've run Alternative Nation for 17 years, and it'll be a thrill to do a brand partnership. Our predominately 35-54 year old male Gen X audience of rock fans still loves guitar and the authenticity that is all over the great instruments at Guitar World.
+
+Let me know what type of deal would interest you. We can offer multi-platform deals across Instagram, Facebook, and YouTube, we have a following of 300,000 on social media.
+
+Here's an example of one of our recent posts https://www.instagram.com/alternativenationofficial/p/DbwT8GejEmW/
+
+Thanks, and have a great day!
+
+Brett Buchanan
+AlterativeNation.net Owner
+---
+
+"""
+
 PITCH_DEFAULT_PROMPT = """\
-You are writing a short outreach email FROM a content creator TO a brand, pitching a sponsorship/partnership. Write it in the creator's own voice, as if they wrote it themselves.
+You are writing the first draft of an outreach email FROM a content creator TO a brand, pitching a paid sponsorship / partnership. Write it in the creator's own voice, as if they wrote it themselves: a real person emailing another real person.
 
-Creator:
-Name: {creator_name}
-Handle: {creator_handle}
-Niche: {creator_niche}
-Follower count: {creator_follower_count}
-
-Brand:
-Name: {brand_name}
+ABOUT THE BRAND (what MAVLIT knows - treat it as background, never quote it back like a data sheet)
+Brand name: {brand_name}
 Niche: {brand_niche}
 Description: {brand_description}
+Target audience: {brand_target_audience}
+Target age: {brand_target_age}   (NOT CONFIRMED - an estimate; never state the age as a fact, and never mention it unless it genuinely helps, then only softly such as "I think your community skews younger")
+Brand's own Instagram follower count: {brand_instagram_followers}   (only to judge how big the brand is; do not quote the number)
+Creators already partnering with this brand, in the same niche as the writer (confirmed sponsored posts, at most 2):
+{brand_partner_creators}
 
-Contact you're writing to: {contact_name} ({contact_title})
+Contact the email is going to: {contact_name} ({contact_title})
 
-What the creator wants to say:
-Their story / why this brand: {story}
-Product or line they're interested in: {product_reference}
-Past brand partnerships worth mentioning: {past_brand_partnership}
-Link to relevant content: {content_link}
+ABOUT THE CREATOR (the sender)
+Name: {creator_name}
+Instagram: @{creator_handle}
+Niche: {creator_niche}
+Sub-niches: {creator_sub_niches}
+Instagram followers: {creator_follower_count}
+Main audience gender: {creator_audience_gender}
+What their content is about: {creator_content_description}
+Their audience: {creator_audience_description}
 
-RULES
+WHAT THE CREATOR WANTS TO SAY
+Their authentic connection to {brand_name} (their story): {story}
+Past brand partnerships worth mentioning (optional): {past_brand_partnership}
+Link to their most relevant content: {content_link}
 
-1. Write ONLY the email body — no subject line, no "Subject:", no placeholders like [Name].
-2. Address the contact by first name if one was given; otherwise open naturally without a name.
-3. Sound like a real person emailing another real person — warm, specific, genuinely interested in the brand, not salesy or generic.
-4. Do NOT use em dashes anywhere. Use commas, periods, or separate sentences instead.
-5. Do NOT use AI-sounding phrases like "I hope this email finds you well", "I'm reaching out because", "in today's digital landscape", "I wanted to touch base", or similar stock filler.
-6. Weave in the creator's story and why THIS brand specifically — avoid generic praise that could apply to any brand.
-7. Mention the product/line and past partnerships only if they were actually given above — do not invent details.
-8. Include the content link naturally if one was given.
-9. End with a soft, low-pressure call to action (e.g. suggesting a quick chat), not a hard ask.
-10. Keep it tight — a few short paragraphs, not a wall of text.
+""" + PITCH_STYLE_BLOCK + """HOW TO WRITE IT
 
-Reply with the email body only, plain text, no markdown formatting.\
+Default structure (used unless the creator's style preferences ask for something else; flowing short paragraphs, not a list):
+1. Opening: address the contact by first name if one is given, otherwise open naturally without a name. Start with the creator's real connection to the brand, taken from their story - specific, in their own words, not generic praise.
+2. Who they are and why it fits: one or two sentences on their content and audience, drawn from the creator and audience descriptions above, and why that audience cares about {brand_name}. Use the follower count only as light context (for example "a community of about 40k"), never as the main selling point.
+3. Social proof: mention the past brand partnerships only if some were given. If creators in the same niche already partner with the brand, you may say naturally that the brand already works with creators in this space (for example by naming one of them), as a sign that a collaboration like this fits. Never suggest the sender worked with those creators or with the brand before, and never copy their numbers.
+4. Their content: include the content link naturally, as an example of the kind of content they would make for the brand.
+5. Close with a soft, low-pressure call to action, such as offering a quick chat or to send ideas.
+
+Rules:
+- Write ONLY the email body. No subject line, no "Subject:", no placeholders such as [Name] or [Brand]. Sign off with the creator's first name.
+- Length: about 120 to 190 words in short paragraphs, unless the creator's style preferences ask for a different length.
+- Sound warm, specific and human (or in the tone the creator's style preferences ask for). Do NOT sound salesy, generic or like a template.
+- Do NOT use em dashes anywhere. Use commas, periods or separate sentences.
+- Do NOT use stock phrases such as "I hope this email finds you well", "I'm reaching out because", "I wanted to touch base", "in today's digital landscape", "collaboration opportunity", "synergy", "game-changer".
+- Use ONLY facts given above. Do not invent products, results, prices, rates, engagement numbers, locations or past work. If an item says "none provided" or "unknown", leave it out instead of guessing.
+- The brand information is background, not something the creator knows for sure: do not claim inside knowledge of the brand's plans, sales or audience data. Anything marked as not confirmed must not be stated as a fact.
+- Do not mention MAVLIT, matching scores or that the information came from a database.
+- Do not ask for a specific rate or payment in this first email.
+
+""" + PITCH_EXAMPLE_BLOCK + """Reply with the email body only, plain text, no markdown formatting.\
 """
+
+# Earlier versions of PITCH_DEFAULT_PROMPT (before the style block and/or the example block
+# existed). A stored copy identical to one of them was never edited and is upgraded at startup.
+PITCH_PREVIOUS_DEFAULT_PROMPTS = (
+    PITCH_DEFAULT_PROMPT.replace(PITCH_STYLE_BLOCK, ""),
+    PITCH_DEFAULT_PROMPT.replace(PITCH_EXAMPLE_BLOCK, ""),
+    PITCH_DEFAULT_PROMPT.replace(PITCH_STYLE_BLOCK, "").replace(PITCH_EXAMPLE_BLOCK, ""),
+)
 
 
 #  rate_intelligence.py

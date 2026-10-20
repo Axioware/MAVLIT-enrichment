@@ -118,6 +118,7 @@ from pipeline.helpers.prompts import (
     LLM_BRAND_RANKING_V3_DEFAULT_PROMPT,
     LLM_BRAND_RANKING_V3_PROMPT_NAME,
     PITCH_DEFAULT_PROMPT,
+    PITCH_PREVIOUS_DEFAULT_PROMPTS,
     PITCH_PROMPT_NAME,
     RATE_INTEL_DEFAULT_PROMPT,
     RATE_INTEL_PROMPT_NAME,
@@ -682,6 +683,15 @@ def _run_migrations() -> None:
         ]:
             if not db.query(Prompt).filter(Prompt.name == name).first():
                 db.add(Prompt(name=name, content=content))
+        # The pitch prompt was rewritten (brand audience, partner creators, creator profile
+        # inputs): replace a stored copy that still has the old inputs. An edited copy that
+        # already uses the new inputs is left alone.
+        pitch_prompt = db.query(Prompt).filter(Prompt.name == PITCH_PROMPT_NAME).first()
+        if pitch_prompt and (
+            "{brand_target_audience}" not in (pitch_prompt.content or "")
+            or pitch_prompt.content.strip() in {old.strip() for old in PITCH_PREVIOUS_DEFAULT_PROMPTS}   # unedited earlier version
+        ):
+            pitch_prompt.content = PITCH_DEFAULT_PROMPT
         brand_check_prompt = db.query(Prompt).filter(Prompt.name == BRAND_CHECK_PROMPT_NAME).first()
         if brand_check_prompt and "has_referral_code" not in (brand_check_prompt.content or ""):
             brand_check_prompt.content = BRAND_CHECK_DEFAULT_PROMPT
@@ -1495,6 +1505,15 @@ def matches_page(current_user: CreatorProfile | None = Depends(get_current_user_
     if not is_profile_complete(current_user):
         return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
     return FileResponse("frontend/matches.html", headers=_PROTECTED_PAGE_HEADERS)
+
+
+@app.get("/pitch", include_in_schema=False)
+def pitch_page(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
+    if not current_user:
+        return RedirectResponse(url="/signin?return_to=/pitch", status_code=307)
+    if not is_profile_complete(current_user):
+        return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
+    return FileResponse("frontend/pitch.html", headers=_PROTECTED_PAGE_HEADERS)
 
 
 @app.get("/add-creators", include_in_schema=False)
