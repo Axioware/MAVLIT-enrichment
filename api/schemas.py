@@ -37,6 +37,7 @@ class CreatorProfileResponse(BaseModel):
     instagram_audience_gender: str | None = None   # "male" | "female" | "both"
     instagram_audience_age_min: int | None = None
     instagram_audience_age_max: int | None = None
+    instagram_audience_description: str | None = None
     youtube_channel_name: str | None = None
     youtube_subscribers: int | None = None
     youtube_primary_niche: str | None = None
@@ -50,6 +51,7 @@ class CreatorProfileResponse(BaseModel):
     youtube_audience_gender: str | None = None
     youtube_audience_age_min: int | None = None
     youtube_audience_age_max: int | None = None
+    youtube_audience_description: str | None = None
 
     creator_tier: str | None = None
     content_tags: list[str] | None = None
@@ -101,6 +103,7 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         instagram_audience_gender=row.instagram_audience_gender,
         instagram_audience_age_min=row.instagram_audience_age_min,
         instagram_audience_age_max=row.instagram_audience_age_max,
+        instagram_audience_description=row.instagram_audience_description,
         youtube_channel_name=row.youtube_channel_name,
         youtube_subscribers=row.youtube_subscribers,
         youtube_primary_niche=row.youtube_primary_niche,
@@ -114,6 +117,7 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         youtube_audience_gender=row.youtube_audience_gender,
         youtube_audience_age_min=row.youtube_audience_age_min,
         youtube_audience_age_max=row.youtube_audience_age_max,
+        youtube_audience_description=row.youtube_audience_description,
         creator_tier=row.creator_tier,
         content_tags=_as_list(row.content_tags),
         created_at=str(row.created_at) if row.created_at else "",

@@ -669,6 +669,7 @@ class CreatorProfile(Base):
     instagram_audience_gender = Column(Text)   # ONE dropdown value: "male" | "female" | "both"
     instagram_audience_age_min = Column(Integer)   # youngest / oldest age of the creator's Instagram audience
     instagram_audience_age_max = Column(Integer)
+    instagram_audience_description = Column(Text)   # short text on who the Instagram audience is (LLM-generated or typed)
     
     youtube_channel_name = Column(Text)
     youtube_subscribers = Column(Integer)
@@ -683,6 +684,7 @@ class CreatorProfile(Base):
     youtube_audience_gender = Column(Text)         # "male" | "female" | "both"
     youtube_audience_age_min = Column(Integer)     # youngest / oldest age of the creator's YouTube audience
     youtube_audience_age_max = Column(Integer)
+    youtube_audience_description = Column(Text)
 
     #  Derived / computed fields
     creator_tier  = Column(Text)

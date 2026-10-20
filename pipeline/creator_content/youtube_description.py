@@ -57,9 +57,12 @@ def generate_youtube_description(db: Session, username: str, niche: str) -> dict
     if not channel_id:
         raise RuntimeError("YouTube search did not return a channel")
 
-    channel_data = _yt_get(_CHANNELS_URL, {"part": "snippet", "id": channel_id}) or {}
+    channel_data = _yt_get(_CHANNELS_URL, {"part": "snippet,statistics", "id": channel_id}) or {}
     channel_item = (channel_data.get("items") or [channel])[0]
     bio = ((channel_item.get("snippet") or {}).get("description") or "").strip()
+    stats = channel_item.get("statistics") or {}
+    subscribers = None if stats.get("hiddenSubscriberCount") else stats.get("subscriberCount")
+    subscribers = int(subscribers) if str(subscribers or "").isdigit() else None
 
     video_search = _yt_get(_SEARCH_URL, {
         "part": "id",
@@ -90,6 +93,7 @@ def generate_youtube_description(db: Session, username: str, niche: str) -> dict
     prompt = fill_template(
         _get_description_prompt(db), niche=niche.strip(), bio=bio, captions=caption_text,
         sub_niche_options="; ".join(options) or "none",
+        followers=f"{subscribers:,} subscribers" if subscribers is not None else "unknown",
     )
     result = call_gpt_json(prompt, context=f"creator YouTube {username.strip()}")
     description = (result.get("description") or "").strip()

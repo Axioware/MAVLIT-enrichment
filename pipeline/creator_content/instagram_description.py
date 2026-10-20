@@ -20,6 +20,7 @@ from pipeline.db import CreatorInstagramPost, Prompt
 from pipeline.enrichment.instagram_posts import _scrape_handle, _usernames_only
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template, record_apify_scrape
 from pipeline.helpers.prompts import (
+    CREATOR_AUDIENCE_DESCRIPTION_NOTE,
     CREATOR_AUDIENCE_NOTE,
     CREATOR_SUB_NICHES_NOTE,
     CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT,
@@ -45,6 +46,9 @@ def _get_description_prompt(db: Session) -> str:
     if "audience_gender" not in prompt:
         logger.info("Prompt %s has no audience fields - appending the audience note", CREATOR_NICHE_DESCRIPTION_PROMPT_NAME)
         prompt = prompt.rstrip() + "\n" + CREATOR_AUDIENCE_NOTE
+    if "audience_description" not in prompt:
+        logger.info("Prompt %s has no audience_description - appending the audience description note", CREATOR_NICHE_DESCRIPTION_PROMPT_NAME)
+        prompt = prompt.rstrip() + "\n" + CREATOR_AUDIENCE_DESCRIPTION_NOTE
     if "sub_niches" not in prompt:
         logger.info("Prompt %s has no sub_niches - appending the sub-niche note", CREATOR_NICHE_DESCRIPTION_PROMPT_NAME)
         prompt = prompt.rstrip() + "\n" + CREATOR_SUB_NICHES_NOTE
@@ -116,7 +120,7 @@ def audience_from_result(result: dict) -> dict:
     """
     The audience part of the description LLM's JSON: {"audience_gender":
     "male"|"female"|"both"|None, "audience_age_min": int|None, "audience_age_max":
-    int|None}. Missing or unusable values become None (the description is still
+    int|None, "audience_description": str|None}. Missing or unusable values become None (the description is still
     used) - e.g. when the prompt copy in /admin predates the audience fields.
     """
     gender = str(result.get("audience_gender") or "").strip().lower()
@@ -126,7 +130,9 @@ def audience_from_result(result: dict) -> dict:
         low, high = high, low
     if gender is None and low is None and high is None:
         logger.info("Description LLM returned no audience estimate (prompt copy without the audience fields?)")
-    return {"audience_gender": gender, "audience_age_min": low, "audience_age_max": high}
+    text_ = result.get("audience_description")
+    audience_text = " ".join(text_.split())[:1000] if isinstance(text_, str) and text_.strip() else None
+    return {"audience_gender": gender, "audience_age_min": low, "audience_age_max": high, "audience_description": audience_text}
 
 
 def save_creator_posts(db: Session, creator_id: int, handle: str, items: list[dict]) -> int:
@@ -208,9 +214,11 @@ def generate_instagram_description(db: Session, username: str, niche: str, creat
 
     caption_text = "\n\n".join(f"Post {index}: {caption}" for index, caption in enumerate(captions, 1))
     options = sub_niche_options(db, niche)
+    followers = followers_from_items(items)
     prompt = fill_template(
         _get_description_prompt(db), niche=niche.strip(), bio=bio, captions=caption_text,
         sub_niche_options="; ".join(options) or "none",
+        followers=f"{followers:,}" if followers is not None else "unknown",
     )
     result = call_gpt_json(prompt, context=f"creator Instagram @{handle}")
     description = (result.get("description") or "").strip()
@@ -218,5 +226,5 @@ def generate_instagram_description(db: Session, username: str, niche: str, creat
         raise RuntimeError("The LLM did not return a creator description")
 
     return {"description": description, "posts_analyzed": len(captions), "bio_found": bool(bio),
-            "followers_count": followers_from_items(items), "sub_niches": sub_niches_from_result(result, options),
+            "followers_count": followers, "sub_niches": sub_niches_from_result(result, options),
             **audience_from_result(result)}

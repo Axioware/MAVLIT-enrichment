@@ -448,6 +448,8 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS instagram_audience_gender_female_pct",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_gender TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_gender TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_description TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_description TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_age_min INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_age_max INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_channel_name TEXT",
@@ -1720,6 +1722,7 @@ class CreatorProfileRequest(BaseModel):
     instagram_audience_gender: Literal["male", "female", "both"] | None = None
     instagram_audience_age_min: int | None = Field(default=None, ge=13, le=100)
     instagram_audience_age_max: int | None = Field(default=None, ge=13, le=100)
+    instagram_audience_description: str | None = Field(default=None, max_length=1500)
     youtube_channel_name: str | None = None
     youtube_subscribers: int | None = None
     youtube_primary_niche: str | None = None
@@ -1730,6 +1733,7 @@ class CreatorProfileRequest(BaseModel):
     youtube_audience_gender: Literal["male", "female", "both"] | None = None
     youtube_audience_age_min: int | None = Field(default=None, ge=13, le=100)
     youtube_audience_age_max: int | None = Field(default=None, ge=13, le=100)
+    youtube_audience_description: str | None = Field(default=None, max_length=1500)
 
     @model_validator(mode="after")
     def _age_range_is_ordered(self):
@@ -1927,7 +1931,7 @@ def _run_creator_description_job(
             return
         setattr(row, description_field, result["description"])
         # Audience gender / age range generated together with the description.
-        for key in ("audience_gender", "audience_age_min", "audience_age_max"):
+        for key in ("audience_gender", "audience_age_min", "audience_age_max", "audience_description"):
             if result.get(key) is not None:
                 setattr(row, f"{platform}_{key}", result[key])
         # The follower count Apify read from the profile replaces the typed one.
