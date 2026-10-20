@@ -361,6 +361,18 @@
         </div>
       </div>
 
+      <div class="card">
+        <h2>Pitch style preferences (optional), leave empty to use Mavlit's default.</h2>
+        <div class="grid">
+          <div class="field full">
+            <label for="pitch_style_preferences">How should your pitches to brands sound?</label>
+            <textarea id="pitch_style_preferences" name="pitch_style_preferences" maxlength="1000" rows="4"
+              placeholder="e.g. Casual and friendly, short paragraphs, no emojis."></textarea>
+            <p class="niche-hint">Optional. Leave empty to use MAVLIT's default pitch style. Up to 1000 characters.</p>
+          </div>
+        </div>
+      </div>
+
       <button class="btn-save" id="saveBtn" type="submit">Save profile</button>
       <p class="status-msg" id="statusMsg"></p>
     </form>
@@ -553,6 +565,7 @@
     setInput('full_name', profile.full_name);
     setInput('age', profile.age); setInput('gender', profile.gender);
     setInput('brand_preferences', profile.brand_preferences);
+    setInput('pitch_style_preferences', profile.pitch_style_preferences);
     setInput('instagram_handle', profile.instagram_handle); setInput('instagram_followers', profile.instagram_followers);
     setInput('instagram_primary_niche', profile.instagram_primary_niche); setListInput('instagram_sub_niches', profile.instagram_sub_niches);
     setListInput('instagram_excluded_categories', profile.instagram_excluded_categories); setInput('instagram_description', profile.instagram_description);
@@ -933,6 +946,7 @@
       content_niche: primary ? value(primary + '_primary_niche') : null,
       excluded_categories: primary ? list(primary + '_excluded_categories') : null,
       brand_preferences: value('brand_preferences'),
+      pitch_style_preferences: value('pitch_style_preferences'),
       instagram_handle: value('instagram_handle'), instagram_followers: number('instagram_followers'),
       instagram_primary_niche: value('instagram_primary_niche'), instagram_sub_niches: list('instagram_sub_niches'),
       instagram_excluded_categories: list('instagram_excluded_categories'), instagram_description: value('instagram_description'),

@@ -432,6 +432,7 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS content_description",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS excluded_categories JSONB",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS brand_preferences TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS pitch_style_preferences TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS follower_count INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS age INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS gender TEXT",
@@ -1707,6 +1708,7 @@ class CreatorProfileRequest(BaseModel):
     # Free-text brand preferences (wanted / unwanted brand types) for the
     # Matches v3 LLM ranking. Stored trimmed; empty becomes NULL.
     brand_preferences:    str | None = Field(default=None, max_length=1000)
+    pitch_style_preferences: str | None = Field(default=None, max_length=1000)
 
     instagram_handle: str | None = None
     instagram_followers: int | None = None
@@ -2106,6 +2108,7 @@ def upsert_my_creator_profile(
     try:
         payload = body.model_dump()
         payload["brand_preferences"] = (payload.get("brand_preferences") or "").strip() or None
+        payload["pitch_style_preferences"] = (payload.get("pitch_style_preferences") or "").strip() or None
         if not is_profile_complete(payload):
             raise HTTPException(
                 status_code=422,

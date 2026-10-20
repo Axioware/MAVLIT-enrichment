@@ -649,6 +649,7 @@ class CreatorProfile(Base):
     # lipstick brands"). Not a hard filter — passed to the Matches v3 LLM
     # ranking, which ranks wanted brands higher and unwanted ones last.
     brand_preferences     = Column(Text)
+    pitch_style_preferences = Column(Text)   # optional: how the creator wants their pitches written; empty = MAVLIT's default style
 
     #  Platform profile fields used by creator-profile.html
     instagram_handle = Column(Text)
