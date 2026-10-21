@@ -32,13 +32,14 @@ def posts_query(db: Session, creator_id: int):
     )
 
 
-def list_posts(db: Session, creator_id: int) -> list[CreatorInstagramPost]:
-    """The user's saved posts, newest first."""
-    return (
-        posts_query(db, creator_id)
-        .order_by(CreatorInstagramPost.timestamp.desc().nullslast(), CreatorInstagramPost.fetched_at.desc())
-        .all()
-    )
+def list_posts(db: Session, creator_id: int, search: str | None = None) -> list[CreatorInstagramPost]:
+    """The user's saved posts, newest first. With `search`, only the posts whose WHOLE caption contains that text (any case)."""
+    query = posts_query(db, creator_id)
+    text_ = (search or "").strip()
+    if text_:
+        escaped = text_.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")   # % and _ are searched as plain characters
+        query = query.filter(CreatorInstagramPost.caption.ilike(f"%{escaped}%", escape="\\"))
+    return query.order_by(CreatorInstagramPost.timestamp.desc().nullslast(), CreatorInstagramPost.fetched_at.desc()).all()
 
 
 def get_post(db: Session, creator_id: int, row_id: int) -> CreatorInstagramPost | None:

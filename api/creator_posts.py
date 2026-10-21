@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
-from pipeline.creator_posts import MIN_POSTS, add_post, delete_post, get_post, list_posts, set_partnership
+from pipeline.creator_posts import MIN_POSTS, add_post, delete_post, get_post, list_posts, posts_query, set_partnership
 from pipeline.db import CreatorInstagramPost, CreatorProfile, get_db
 
 router = APIRouter(prefix="/creator-profile/me/posts", tags=["creator-posts"])
@@ -24,7 +24,8 @@ class CreatorPostItem(BaseModel):
 
 
 class CreatorPostsResponse(BaseModel):
-    total: int
+    total: int                              # all the creator's posts, whatever the search
+    shown: int = 0                          # how many are in `posts` (fewer than total when searching)
     min_keep: int                           # posts that always stay: nothing is deleted at or below this number
     can_delete: bool
     posts: list[CreatorPostItem]
@@ -57,15 +58,24 @@ def _item(row: CreatorInstagramPost) -> CreatorPostItem:
     )
 
 
-def _response(db: Session, creator_id: int) -> CreatorPostsResponse:
-    rows = list_posts(db, creator_id)
-    return CreatorPostsResponse(total=len(rows), min_keep=MIN_POSTS, can_delete=len(rows) > MIN_POSTS, posts=[_item(r) for r in rows])
+def _response(db: Session, creator_id: int, search: str | None = None) -> CreatorPostsResponse:
+    total = posts_query(db, creator_id).count()   # the delete rule always looks at ALL posts, not at the search result
+    rows = list_posts(db, creator_id, search)
+    return CreatorPostsResponse(total=total, shown=len(rows), min_keep=MIN_POSTS, can_delete=total > MIN_POSTS, posts=[_item(r) for r in rows])
 
 
 @router.get("", response_model=CreatorPostsResponse)
-def get_my_posts(db: Session = Depends(get_db), current_user: CreatorProfile = Depends(get_current_user)):
-    """The Instagram posts saved for the logged-in creator ("Your recent Instagram posts"). total = 0 for a creator whose Instagram was never scraped."""
-    return _response(db, current_user.id)
+def get_my_posts(
+    q: str | None = Query(default=None, max_length=100, description="only posts whose caption contains this text"),
+    db: Session = Depends(get_db),
+    current_user: CreatorProfile = Depends(get_current_user),
+):
+    """
+    The Instagram posts saved for the logged-in creator ("Your recent Instagram posts"). total = 0 for a creator whose
+    Instagram was never scraped. `q` searches the whole caption of each post (any case); total and can_delete still
+    count all posts.
+    """
+    return _response(db, current_user.id, q)
 
 
 @router.post("", response_model=CreatorPostItem)

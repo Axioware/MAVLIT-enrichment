@@ -367,7 +367,8 @@ The following endpoints are authenticated and implemented for API consumers, but
 
 - **Purpose:** "Your recent Instagram posts" on the profile page: the posts saved for the creator (scraped when MAVLIT generated the description, or added by the creator).
 - **Auth:** Required.
-- **Response:** `200`, `{ "total": 20, "min_keep": 10, "can_delete": true, "posts": [{ "id", "post_url", "caption_preview" (start of the caption only), "post_type", "timestamp", "likes_count", "comments_count", "views_count", "is_partnership_post" }] }`, newest first. `total` is 0 for a creator whose Instagram was never scraped (the page hides the section).
+- **Query:** optional `q` (up to 100 characters) returns only the posts whose whole caption contains that text, in any case. `total` and `can_delete` still count all posts.
+- **Response:** `200`, `{ "total": 20, "shown": 20, "min_keep": 10, "can_delete": true, "posts": [{ "id", "post_url", "caption_preview" (start of the caption only), "post_type", "timestamp", "likes_count", "comments_count", "views_count", "is_partnership_post" }] }`, newest first. `total` is 0 for a creator whose Instagram was never scraped (the page hides the section).
 
 #### `PATCH /creator-profile/me/posts/{id}`
 

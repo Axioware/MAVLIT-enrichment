@@ -206,6 +206,12 @@
     .post-delete { margin-left: auto; background: none; border: 1px solid #334155; color: #94a3b8; border-radius: 6px; padding: .25rem .6rem; font-size: .78rem; cursor: pointer; font-family: inherit; }
     .post-delete:hover:not(:disabled) { color: #f87171; border-color: #f87171; }
     .post-delete:disabled { opacity: .45; cursor: not-allowed; }
+    .posts-search { display: flex; gap: .5rem; margin: .4rem 0 .2rem; }
+    .posts-search input { flex: 1; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: .5rem .7rem; font-size: .85rem; font-family: inherit; }
+    .posts-search input:focus { outline: none; border-color: #38bdf8; }
+    .posts-search button { padding: .5rem .85rem; background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; cursor: pointer; font-size: .85rem; font-family: inherit; }
+    .posts-search button:hover { border-color: #38bdf8; color: #38bdf8; }
+    .posts-search button[hidden] { display: none; }
     .modal-add { border-top: 1px solid #334155; padding-top: .8rem; }
     .modal-add .row { display: flex; gap: .5rem; }
     .modal-add input { flex: 1; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: .55rem .7rem; font-size: .85rem; font-family: inherit; }
@@ -441,6 +447,11 @@
         <button type="button" class="modal-close" onclick="closePosts()" aria-label="Close">&times;</button>
       </div>
       <p class="niche-hint" id="postsNote"></p>
+      <div class="posts-search">
+        <input type="search" id="postsSearch" placeholder="Search your posts by caption…" autocomplete="off" onkeydown="if (event.key === 'Enter') { event.preventDefault(); searchPosts(); }" />
+        <button type="button" onclick="searchPosts()">Search</button>
+        <button type="button" id="postsSearchClear" onclick="clearPostsSearch()" hidden>Clear</button>
+      </div>
       <div id="postsList"></div>
       <div class="modal-add">
         <label class="lbl" for="postsNewUrl" style="display:block;font-size:.8rem;margin-bottom:.35rem;color:#cbd5e1">Add a post</label>
@@ -1162,7 +1173,7 @@
   // ---- "Your recent Instagram posts" -------------------------------------------------
   // The posts saved for the user (scraped when MAVLIT generated their description, or added here). The card is
   // only shown to a user who has posts; the list opens in a blurred pop-up.
-  var postsState = { total: 0, minKeep: 10, canDelete: false, posts: [], busy: false };
+  var postsState = { total: 0, minKeep: 10, canDelete: false, posts: [], busy: false, query: '' };
 
   function postsFetch(url, options) {
     options = options || {};
@@ -1185,8 +1196,22 @@
     renderPosts();
   }
 
+  // The list, or only the posts whose caption contains postsState.query (the server searches the whole caption).
   function loadPosts() {
-    return postsFetch('/creator-profile/me/posts').then(setPostsList).catch(function() { /* not signed in yet: no card */ });
+    var url = '/creator-profile/me/posts' + (postsState.query ? '?q=' + encodeURIComponent(postsState.query) : '');
+    return postsFetch(url).then(setPostsList).catch(function() { /* not signed in yet: no card */ });
+  }
+
+  function searchPosts() {
+    postsState.query = document.getElementById('postsSearch').value.trim();
+    document.getElementById('postsSearchClear').hidden = !postsState.query;
+    postsMessage('', '');
+    return loadPosts();
+  }
+
+  function clearPostsSearch() {
+    document.getElementById('postsSearch').value = '';
+    return searchPosts();
   }
 
   function postsMessage(text, kind) {
@@ -1196,6 +1221,9 @@
   }
 
   function openPosts() {
+    postsState.query = '';
+    document.getElementById('postsSearch').value = '';
+    document.getElementById('postsSearchClear').hidden = true;
     document.getElementById('postsModal').hidden = false;
     document.body.style.overflow = 'hidden';
     postsMessage('', '');
@@ -1217,13 +1245,14 @@
   function renderPosts() {
     var list = document.getElementById('postsList');
     list.innerHTML = '';
-    document.getElementById('postsNote').textContent = postsState.canDelete
+    var found = postsState.query ? postsState.posts.length + ' of your posts match your search. ' : '';
+    document.getElementById('postsNote').textContent = found + (postsState.canDelete
       ? 'You have ' + postsState.total + ' posts. A post can be deleted while more than ' + postsState.minKeep + ' remain.'
-      : 'You have ' + postsState.total + ' posts. At least ' + postsState.minKeep + ' posts stay on your profile, so nothing can be deleted until you add more.';
+      : 'You have ' + postsState.total + ' posts. At least ' + postsState.minKeep + ' posts stay on your profile, so nothing can be deleted until you add more.');
     if (!postsState.posts.length) {
       var empty = document.createElement('p');
       empty.className = 'niche-hint';
-      empty.textContent = 'No posts yet. Add one below.';
+      empty.textContent = postsState.query ? 'No post caption contains "' + postsState.query + '".' : 'No posts yet. Add one below.';
       list.appendChild(empty);
       return;
     }
@@ -1291,7 +1320,8 @@
   function deletePost(post) {
     if (!confirm('Delete this post from your profile?')) return;
     postsFetch('/creator-profile/me/posts/' + post.id, { method: 'DELETE' })
-      .then(function(data) { setPostsList(data); postsMessage('Post deleted.', 'ok'); })
+      .then(function() { return loadPosts(); })
+      .then(function() { postsMessage('Post deleted.', 'ok'); })
       .catch(function(err) { postsMessage(err.message, 'error'); });
   }
 
