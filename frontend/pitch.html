@@ -100,12 +100,15 @@
     .modal-close { background: none; border: none; color: #94a3b8; font-size: 1.6rem; line-height: 1; cursor: pointer; }
     .modal-close:hover { color: #f1f5f9; }
     #pickList { overflow-y: auto; margin: .6rem 0; flex: 1; min-height: 70px; }
-    .pick-row { display: flex; align-items: flex-start; gap: .7rem; border: 1px solid #334155; border-radius: 10px; background: #0f172a; padding: .6rem .75rem; margin-bottom: .5rem; cursor: pointer; }
+    .pick-row { display: flex; align-items: center; gap: .9rem; border: 1px solid #334155; border-radius: 10px; background: #0f172a; padding: .6rem .75rem; margin-bottom: .5rem; cursor: pointer; }
     .pick-row.on { border-color: #38bdf8; background: #0c2a44; }
     .pick-row.off { opacity: .5; cursor: not-allowed; }
-    .pick-row input { margin-top: .2rem; accent-color: #38bdf8; }
-    .pick-body { min-width: 0; }
-    .pick-link { color: #38bdf8; font-size: .8rem; text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pick-row input[type=checkbox] { flex: none; width: 24px; height: 24px; cursor: pointer; accent-color: #38bdf8; }
+    .pick-row.off input[type=checkbox] { cursor: not-allowed; }
+    .pick-body { min-width: 0; flex: 1; }
+    .pick-view { margin-top: .4rem; background: none; border: 1px solid #334155; color: #38bdf8; border-radius: 6px; padding: .22rem .6rem; font-size: .76rem; cursor: pointer; font-family: inherit; }
+    .pick-view:hover { border-color: #38bdf8; background: #0c2a44; }
+    .pick-link { color: #64748b; font-size: .78rem; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pick-caption { font-size: .84rem; color: #cbd5e1; margin: .2rem 0; }
     .pick-stats { font-size: .76rem; color: #94a3b8; }
     .pick-date { font-size: .74rem; color: #64748b; margin-bottom: .15rem; }
@@ -652,22 +655,26 @@
     }
     state.picker.posts.forEach(function(post) {
       var on = isChosen(kind, post.post_url);
-      var row = document.createElement('label');
-      row.className = 'pick-row' + (on ? ' on' : '') + (!on && chosen >= MAX_PICKS ? ' off' : '');
+      var blocked = !on && chosen >= MAX_PICKS;
+      // The whole box is the click target: clicking anywhere on it ticks / unticks the post (the check box is on the right).
+      var row = document.createElement('div');
+      row.className = 'pick-row' + (on ? ' on' : '') + (blocked ? ' off' : '');
       var box = document.createElement('input');
       box.type = 'checkbox';
       box.checked = on;
-      box.disabled = !on && chosen >= MAX_PICKS;
+      box.disabled = blocked;
+      box.onclick = function(e) { e.stopPropagation(); };            // the box toggles itself, the row handler must not toggle twice
       box.onchange = function() { togglePick(kind, post, box.checked); };
+      row.onclick = function() {
+        if (blocked) { pickMessage('You can choose up to ' + MAX_PICKS + '. Remove one first.', 'error'); return; }
+        togglePick(kind, post, !on);
+      };
+
       var body = document.createElement('div');
       body.className = 'pick-body';
-      var link = document.createElement('a');
+      var link = document.createElement('span');   // shown as plain text: it does not open the post
       link.className = 'pick-link';
-      link.href = post.post_url || '#';
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
       link.textContent = post.post_url || '';
-      link.onclick = function(e) { e.stopPropagation(); };
       var caption = document.createElement('div');
       caption.className = 'pick-caption';
       caption.textContent = post.caption_preview || '(no caption)';
@@ -678,8 +685,15 @@
       stats.className = 'pick-stats';
       var n = function(v) { return v === null || v === undefined ? '–' : Number(v).toLocaleString(); };
       stats.textContent = 'Likes ' + n(post.likes_count) + '  ·  Comments ' + n(post.comments_count) + '  ·  Views ' + n(post.views_count);
-      body.appendChild(link); body.appendChild(caption); body.appendChild(posted); body.appendChild(stats);
-      row.appendChild(box); row.appendChild(body);
+      var view = document.createElement('button');   // "View post" opens the post on Instagram in a new tab, without choosing it
+      view.type = 'button';
+      view.className = 'pick-view';
+      view.textContent = 'View post';
+      view.disabled = !post.post_url;
+      view.onclick = function(e) { e.stopPropagation(); window.open(post.post_url, '_blank', 'noopener,noreferrer'); };
+      body.appendChild(link); body.appendChild(caption); body.appendChild(posted); body.appendChild(stats); body.appendChild(view);
+
+      row.appendChild(body); row.appendChild(box);   // check box on the right
       list.appendChild(row);
     });
   }
