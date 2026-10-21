@@ -108,6 +108,7 @@
     .pick-link { color: #38bdf8; font-size: .8rem; text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pick-caption { font-size: .84rem; color: #cbd5e1; margin: .2rem 0; }
     .pick-stats { font-size: .76rem; color: #94a3b8; }
+    .pick-date { font-size: .74rem; color: #64748b; margin-bottom: .15rem; }
     .pick-add { border-top: 1px solid #334155; padding-top: .8rem; }
     .pick-add .row { display: flex; gap: .5rem; margin-bottom: .5rem; }
     .pick-add input { flex: 1; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: .55rem .7rem; font-size: .85rem; font-family: inherit; }
@@ -505,6 +506,13 @@
   var MAX_PICKS = 3;
   var PICK_TITLES = { links: 'Choose the posts that show your connection to the brand', past: 'Choose your past brand partnership posts' };
 
+  // When the post was published, in the user's own time zone ("Oct 20, 2026, 3:04 PM"); "–" when there is no usable date.
+  function formatPostedAt(value) {
+    var date = value ? new Date(value) : null;
+    if (!date || isNaN(date.getTime())) return '–';
+    return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+
   function pickList(kind) { return kind === 'past' ? state.sel.past : state.sel.links; }
 
   function renderChips(kind) {
@@ -622,11 +630,14 @@
       var caption = document.createElement('div');
       caption.className = 'pick-caption';
       caption.textContent = post.caption_preview || '(no caption)';
+      var posted = document.createElement('div');
+      posted.className = 'pick-date';
+      posted.textContent = 'Posted ' + formatPostedAt(post.timestamp);
       var stats = document.createElement('div');
       stats.className = 'pick-stats';
       var n = function(v) { return v === null || v === undefined ? '–' : Number(v).toLocaleString(); };
       stats.textContent = 'Likes ' + n(post.likes_count) + '  ·  Comments ' + n(post.comments_count) + '  ·  Views ' + n(post.views_count);
-      body.appendChild(link); body.appendChild(caption); body.appendChild(stats);
+      body.appendChild(link); body.appendChild(caption); body.appendChild(posted); body.appendChild(stats);
       row.appendChild(box); row.appendChild(body);
       list.appendChild(row);
     });
