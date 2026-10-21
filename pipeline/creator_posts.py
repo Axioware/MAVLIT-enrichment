@@ -17,6 +17,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from pipeline.db import CreatorInstagramPost, CreatorProfile
+from pipeline.helpers.social import normalize_handle
 from pipeline.pitch_posts import _clean_url, _scrape_posts, post_code
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,38 @@ def posts_query(db: Session, creator_id: int):
         db.query(CreatorInstagramPost)
         .filter(CreatorInstagramPost.creator_profile_id == creator_id, CreatorInstagramPost.post_id.isnot(None))
     )
+
+
+def username_changed(old_handle: str | None, new_handle: str | None) -> bool:
+    """True when the creator's Instagram username was changed (both given and different, ignoring case, @ and URL form)."""
+    if not (old_handle or "").strip() or not (new_handle or "").strip():
+        return False
+    return normalize_handle(old_handle).lower() != normalize_handle(new_handle).lower()
+
+
+def clear_posts(db: Session, creator_id: int) -> int:
+    """Delete ALL the user's saved posts (their toggles included). Returns how many were deleted."""
+    deleted = db.query(CreatorInstagramPost).filter(CreatorInstagramPost.creator_profile_id == creator_id).delete(synchronize_session=False)
+    db.commit()
+    if deleted:
+        logger.info("Cleared %d saved post(s) of creator_id=%s (Instagram username changed)", deleted, creator_id)
+    return deleted
+
+
+def clear_posts_if_username_changed(db: Session, creator_id: int, old_handle: str | None, new_handle: str | None) -> int:
+    """
+    Profile save: when the username changed and none of the user's saved posts belong to the NEW username, the
+    old username's posts are emptied (the table is filled again when the description is generated). If the new
+    username's posts are already there, generating did that work, so nothing is touched.
+    """
+    if not username_changed(old_handle, new_handle):
+        return 0
+    already = (
+        posts_query(db, creator_id)
+        .filter(func.lower(CreatorInstagramPost.instagram_handle) == normalize_handle(new_handle).lower())
+        .count()
+    )
+    return 0 if already else clear_posts(db, creator_id)
 
 
 def list_posts(db: Session, creator_id: int, search: str | None = None, partnership_only: bool = False) -> list[CreatorInstagramPost]:

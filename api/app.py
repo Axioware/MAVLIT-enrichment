@@ -29,6 +29,7 @@ from api.brand_catalog import router as brand_catalog_router
 from api.brands import router as brands_router
 from api.dashboard import router as dashboard_api_router
 from api.creator_posts import router as creator_posts_router
+from pipeline.creator_posts import clear_posts_if_username_changed
 from api.own_brands import router as own_brands_router
 from api.pitches import router as pitches_router
 from api.saved_brands import router as saved_brands_router
@@ -433,7 +434,6 @@ def _run_migrations() -> None:
         # count to drive tier bucketing, an age-range pair (in addition to
         # the older single audience_age_bracket), and embedding_text to
         # mirror brand_match_profile's embedding/embedding_text pairing.
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS sub_niches JSONB",
         # content_description replaced by instagram_description / youtube_description
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS content_description",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS excluded_categories JSONB",
@@ -491,8 +491,9 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS audience_age_min",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS audience_age_max",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS audience_top_countries",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS audience_age_min INTEGER",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS audience_age_max INTEGER",
+        # Legacy columns that were dropped above (no longer in the model): never ADD them again here. Re-adding a column that
+        # is dropped on every startup uses up one of PostgreSQL's 1600 column slots per restart - a dropped column's slot is
+        # never given back - and the API would stop starting once creator_profiles reaches the limit.
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS embedding_text TEXT",
         # Matches v2 — LLM ranking status (pipeline/matching/llm_ranking_v2.py)
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_ranking_status TEXT NOT NULL DEFAULT 'idle'",
@@ -577,13 +578,9 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_followers INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_highest_views INTEGER",
         "ALTER TABLE IF EXISTS creator_instagram_posts ADD COLUMN IF NOT EXISTS partnership_post BOOLEAN NOT NULL DEFAULT false",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_following INTEGER",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS tiktok_handle",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS tiktok_followers",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS tiktok_following",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_followers INTEGER",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS facebook_followers INTEGER",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS facebook_following INTEGER",
         # login_credentials (a separate login table) retired in favor of a
         # password_hash column straight on creator_profiles — see the
         # backfill block below for migrating any existing rows across
@@ -1970,7 +1967,9 @@ def _run_creator_description_job(
 
         with llm_usage_scope(creator_id, "description"):
             if platform == "instagram":
-                result = generate_instagram_description(db, username, niche, creator_id=creator_id)
+                result = generate_instagram_description(
+                    db, username, niche, creator_id=creator_id, previous_handle=row.instagram_handle,   # old username: its posts are emptied
+                )
             else:
                 result = generate_youtube_description(db, username, niche)
 
@@ -2164,6 +2163,7 @@ def upsert_my_creator_profile(
                 detail="Complete the required onboarding fields before continuing: full name, age, gender, primary platforms, Instagram username, follower count, primary niche, and at least one creator description.",
             )
         row = db.query(CreatorProfile).filter(CreatorProfile.id == current_user.id).first()
+        previous_handle = row.instagram_handle
         for field, value in payload.items():
             setattr(row, field, value)
         row.creator_tier = bucket_creator_tier(row.follower_count)
@@ -2175,6 +2175,9 @@ def upsert_my_creator_profile(
 
         db.commit()
         db.refresh(row)
+        # A changed Instagram username: the old username's saved posts are emptied (unless generating the description already
+        # saved the new username's posts); they are filled again the next time the description is generated.
+        clear_posts_if_username_changed(db, row.id, previous_handle, row.instagram_handle)
         background_tasks.add_task(_run_creator_signals_job, row.id)
         return _profile_to_response(row)
     finally:

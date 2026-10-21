@@ -224,8 +224,14 @@ def _saved_items(db: Session, handle: str) -> list[dict]:
     return items
 
 
-def generate_instagram_description(db: Session, username: str, niche: str, creator_id: int | None = None) -> dict:
+def generate_instagram_description(
+    db: Session, username: str, niche: str, creator_id: int | None = None, previous_handle: str | None = None,
+) -> dict:
     """
+    previous_handle is the username saved on the creator's profile before this run: when it differs from `username`
+    the user's old saved posts are emptied (once the new username's posts were fetched) and the table is filled
+    again with the new ones, so posts of two usernames never pile up.
+
     The username's posts come from creator_instagram_posts when it was scraped before (no Apify run: the saved
     captions, bio, follower count and view counts are used); a username with no saved posts is new, so Apify
     scrapes its latest 20 posts, which are saved there for the user (creator_id). One LLM call then returns the
@@ -238,17 +244,20 @@ def generate_instagram_description(db: Session, username: str, niche: str, creat
         raise ValueError("Instagram niche is required")
 
     items = _saved_items(db, handle)
-    if items:
-        logger.info("Instagram @%s: using %d saved post(s), no Apify run", handle, len(items))
-        if creator_id is not None:   # keep the posts linked to this user too
-            save_creator_posts(db, creator_id, handle, items)
-    else:
+    scraped = not items
+    if scraped:
         items = _scrape_handle(handle, _POSTS_LIMIT)
         if items is None:
-            raise RuntimeError("Instagram content could not be fetched")
+            raise RuntimeError("Instagram content could not be fetched")   # the old posts stay as they were
         record_apify_scrape("instagram", handle, _POSTS_LIMIT, len(items[:_POSTS_LIMIT]))
-        if creator_id is not None:
-            save_creator_posts(db, creator_id, handle, items[:_POSTS_LIMIT])
+        items = items[:_POSTS_LIMIT]
+    else:
+        logger.info("Instagram @%s: using %d saved post(s), no Apify run", handle, len(items))
+    if creator_id is not None:
+        from pipeline.creator_posts import clear_posts, username_changed   # lazy: creator_posts imports pitch_posts, which imports this module
+        if username_changed(previous_handle, handle):
+            clear_posts(db, creator_id)   # new username: empty the user's posts, then fill the table again
+        save_creator_posts(db, creator_id, handle, items)
 
     bio = ""
     captions: list[str] = []
