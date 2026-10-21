@@ -194,10 +194,42 @@ def save_creator_posts(db: Session, creator_id: int, handle: str, items: list[di
         return 0
 
 
+def _saved_items(db: Session, handle: str) -> list[dict]:
+    """
+    The posts already saved in creator_instagram_posts for this Instagram username (by any MAVLIT user),
+    newest first, up to _POSTS_LIMIT, in the same shape as the Apify items so the rest of the generation
+    does not care where they came from. [] when the username has never been scraped.
+    """
+    rows = (
+        db.query(CreatorInstagramPost)
+        .filter(func.lower(CreatorInstagramPost.instagram_handle) == handle.lower(), CreatorInstagramPost.post_id.isnot(None))
+        .order_by(CreatorInstagramPost.timestamp.desc().nullslast(), CreatorInstagramPost.fetched_at.desc())
+        .all()
+    )
+    items, seen = [], set()
+    for r in rows:
+        if r.post_id in seen:   # the same post saved for several users
+            continue
+        seen.add(r.post_id)
+        items.append({
+            "id": r.post_id, "url": r.post_url, "type": r.post_type, "timestamp": r.timestamp,
+            "caption": r.caption, "hashtags": r.hashtags, "mentions": r.mentions,
+            "taggedUsers": [{"username": u} for u in (r.tagged_users or [])],
+            "paidPartnership": r.paid_partnership, "likesCount": r.likes_count, "commentsCount": r.comments_count,
+            "videoViewCount": r.video_view_count, "videoPlayCount": r.video_play_count,
+            "metaData": {"followersCount": r.followers_count, "biography": r.biography},
+        })
+        if len(items) >= _POSTS_LIMIT:
+            break
+    return items
+
+
 def generate_instagram_description(db: Session, username: str, niche: str, creator_id: int | None = None) -> dict:
     """
-    Scrape up to 20 posts (stored in creator_instagram_posts when creator_id is given);
-    one LLM call returns the description and the audience estimate.
+    The username's posts come from creator_instagram_posts when it was scraped before (no Apify run: the saved
+    captions, bio, follower count and view counts are used); a username with no saved posts is new, so Apify
+    scrapes its latest 20 posts, which are saved there for the user (creator_id). One LLM call then returns the
+    description, audience estimate, sub-niches and audience description.
     """
     handle = normalize_handle(username)
     if not handle:
@@ -205,12 +237,18 @@ def generate_instagram_description(db: Session, username: str, niche: str, creat
     if not niche or not niche.strip():
         raise ValueError("Instagram niche is required")
 
-    items = _scrape_handle(handle, _POSTS_LIMIT)
-    if items is None:
-        raise RuntimeError("Instagram content could not be fetched")
-    record_apify_scrape("instagram", handle, _POSTS_LIMIT, len(items[:_POSTS_LIMIT]))
-    if creator_id is not None:
-        save_creator_posts(db, creator_id, handle, items[:_POSTS_LIMIT])
+    items = _saved_items(db, handle)
+    if items:
+        logger.info("Instagram @%s: using %d saved post(s), no Apify run", handle, len(items))
+        if creator_id is not None:   # keep the posts linked to this user too
+            save_creator_posts(db, creator_id, handle, items)
+    else:
+        items = _scrape_handle(handle, _POSTS_LIMIT)
+        if items is None:
+            raise RuntimeError("Instagram content could not be fetched")
+        record_apify_scrape("instagram", handle, _POSTS_LIMIT, len(items[:_POSTS_LIMIT]))
+        if creator_id is not None:
+            save_creator_posts(db, creator_id, handle, items[:_POSTS_LIMIT])
 
     bio = ""
     captions: list[str] = []
