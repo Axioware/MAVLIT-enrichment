@@ -169,6 +169,52 @@
     }
     .status-msg.ok { color: #4ade80; }
     .status-msg.err { color: #f87171; }
+    .btn-open-posts {
+      padding: .65rem 1rem; background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px;
+      cursor: pointer; font-size: .9rem; font-family: inherit;
+    }
+    .btn-open-posts:hover { border-color: #38bdf8; color: #38bdf8; }
+    .modal-backdrop {
+      position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+      padding: 1rem; background: rgba(2, 6, 23, .55); backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+    }
+    .modal-backdrop[hidden] { display: none; }
+    .modal {
+      width: 100%; max-width: 760px; max-height: 88vh; display: flex; flex-direction: column;
+      background: #1e293b; border: 1px solid #334155; border-radius: 14px; padding: 1.1rem 1.2rem 1.2rem;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+    }
+    .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .4rem; }
+    .modal-head h2 { font-size: 1.05rem; color: #f1f5f9; }
+    .modal-close { background: none; border: none; color: #94a3b8; font-size: 1.6rem; line-height: 1; cursor: pointer; }
+    .modal-close:hover { color: #f1f5f9; }
+    #postsList { overflow-y: auto; margin: .6rem 0; flex: 1; min-height: 80px; }
+    .post-row { border: 1px solid #334155; border-radius: 10px; background: #0f172a; padding: .7rem .8rem; margin-bottom: .6rem; }
+    .post-top { display: flex; align-items: center; gap: .6rem; }
+    .post-link { flex: 1; min-width: 0; color: #38bdf8; font-size: .82rem; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .post-link:hover { text-decoration: underline; }
+    .post-caption { font-size: .85rem; color: #cbd5e1; margin: .35rem 0; }
+    .post-stats { font-size: .78rem; color: #94a3b8; }
+    .post-actions { display: flex; align-items: center; gap: .9rem; margin-top: .5rem; }
+    .toggle { display: inline-flex; align-items: center; gap: .45rem; font-size: .78rem; color: #cbd5e1; cursor: pointer; }
+    .toggle input { position: absolute; opacity: 0; pointer-events: none; }
+    .toggle .track { width: 34px; height: 18px; border-radius: 9px; background: #334155; position: relative; transition: background .15s; }
+    .toggle .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #e2e8f0; transition: transform .15s; }
+    .toggle input:checked + .track { background: #0284c7; }
+    .toggle input:checked + .track::after { transform: translateX(16px); }
+    .toggle input:focus-visible + .track { outline: 2px solid #38bdf8; outline-offset: 2px; }
+    .post-delete { margin-left: auto; background: none; border: 1px solid #334155; color: #94a3b8; border-radius: 6px; padding: .25rem .6rem; font-size: .78rem; cursor: pointer; font-family: inherit; }
+    .post-delete:hover:not(:disabled) { color: #f87171; border-color: #f87171; }
+    .post-delete:disabled { opacity: .45; cursor: not-allowed; }
+    .modal-add { border-top: 1px solid #334155; padding-top: .8rem; }
+    .modal-add .row { display: flex; gap: .5rem; }
+    .modal-add input { flex: 1; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: .55rem .7rem; font-size: .85rem; font-family: inherit; }
+    .modal-add input:focus { outline: none; border-color: #38bdf8; }
+    .modal-add button { padding: .55rem .9rem; background: #0284c7; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: .85rem; font-family: inherit; }
+    .modal-add button:disabled { opacity: .55; cursor: not-allowed; }
+    .posts-msg { font-size: .8rem; margin-top: .45rem; min-height: 1.1em; color: #94a3b8; }
+    .posts-msg.error { color: #f87171; }
+    .posts-msg.ok { color: #4ade80; }
     .generation-toast {
       position: fixed;
       right: 1.25rem;
@@ -378,9 +424,33 @@
         </div>
       </div>
 
+      <div class="card" id="postsCard" hidden>
+        <h2>Your recent Instagram posts</h2>
+        <p class="niche-hint" style="margin-bottom:.8rem">The posts MAVLIT has read from your Instagram. Mark the ones that were paid partnerships, remove posts you don't want to use, or add a post by its link.</p>
+        <button type="button" class="btn-open-posts" onclick="openPosts()">View your recent Instagram posts</button>
+      </div>
+
       <button class="btn-save" id="saveBtn" type="submit">Save profile</button>
       <p class="status-msg" id="statusMsg"></p>
     </form>
+  </div>
+  <div class="modal-backdrop" id="postsModal" hidden onclick="if (event.target === this) closePosts()">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="postsTitle">
+      <div class="modal-head">
+        <h2 id="postsTitle">Your recent Instagram posts</h2>
+        <button type="button" class="modal-close" onclick="closePosts()" aria-label="Close">&times;</button>
+      </div>
+      <p class="niche-hint" id="postsNote"></p>
+      <div id="postsList"></div>
+      <div class="modal-add">
+        <label class="lbl" for="postsNewUrl" style="display:block;font-size:.8rem;margin-bottom:.35rem;color:#cbd5e1">Add a post</label>
+        <div class="row">
+          <input type="url" id="postsNewUrl" placeholder="https://www.instagram.com/p/…" autocomplete="off" onkeydown="if (event.key === 'Enter') { event.preventDefault(); addPost(); }" />
+          <button type="button" id="postsAddBtn" onclick="addPost()">Add post</button>
+        </div>
+        <div class="posts-msg" id="postsMsg"></div>
+      </div>
+    </div>
   </div>
   <a class="generation-toast" id="generationToast" href="/creator-profile" hidden>
     Your description has generated. Click to view your creator profile.
@@ -862,6 +932,7 @@
           }
           applyGeneratedAudience(platform, profile, body);
           applyGeneratedProfileFields(platform, profile, body);
+          loadPosts();   // the posts that were just scraped
           return profile;
         }
         if (status === 'failed') {
@@ -1088,6 +1159,161 @@
     return null;
   }
 
+  // ---- "Your recent Instagram posts" -------------------------------------------------
+  // The posts saved for the user (scraped when MAVLIT generated their description, or added here). The card is
+  // only shown to a user who has posts; the list opens in a blurred pop-up.
+  var postsState = { total: 0, minKeep: 10, canDelete: false, posts: [], busy: false };
+
+  function postsFetch(url, options) {
+    options = options || {};
+    options.credentials = 'include';
+    if (options.body) options.headers = { 'Content-Type': 'application/json' };
+    return fetch(url, options).then(function(r) {
+      return r.json().catch(function() { return {}; }).then(function(data) {
+        if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Something went wrong. Please try again.');
+        return data;
+      });
+    });
+  }
+
+  function setPostsList(data) {
+    postsState.total = data.total;
+    postsState.minKeep = data.min_keep;
+    postsState.canDelete = data.can_delete;
+    postsState.posts = data.posts;
+    document.getElementById('postsCard').hidden = data.total === 0 && document.getElementById('postsModal').hidden;
+    renderPosts();
+  }
+
+  function loadPosts() {
+    return postsFetch('/creator-profile/me/posts').then(setPostsList).catch(function() { /* not signed in yet: no card */ });
+  }
+
+  function postsMessage(text, kind) {
+    var el = document.getElementById('postsMsg');
+    el.textContent = text || '';
+    el.className = 'posts-msg' + (kind ? ' ' + kind : '');
+  }
+
+  function openPosts() {
+    document.getElementById('postsModal').hidden = false;
+    document.body.style.overflow = 'hidden';
+    postsMessage('', '');
+    renderPosts();
+    loadPosts();
+  }
+
+  function closePosts() {
+    document.getElementById('postsModal').hidden = true;
+    document.body.style.overflow = '';
+  }
+
+  document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape' && !document.getElementById('postsModal').hidden) closePosts();
+  });
+
+  function formatCount(value) { return value === null || value === undefined ? '–' : Number(value).toLocaleString(); }
+
+  function renderPosts() {
+    var list = document.getElementById('postsList');
+    list.innerHTML = '';
+    document.getElementById('postsNote').textContent = postsState.canDelete
+      ? 'You have ' + postsState.total + ' posts. A post can be deleted while more than ' + postsState.minKeep + ' remain.'
+      : 'You have ' + postsState.total + ' posts. At least ' + postsState.minKeep + ' posts stay on your profile, so nothing can be deleted until you add more.';
+    if (!postsState.posts.length) {
+      var empty = document.createElement('p');
+      empty.className = 'niche-hint';
+      empty.textContent = 'No posts yet. Add one below.';
+      list.appendChild(empty);
+      return;
+    }
+    postsState.posts.forEach(function(post) {
+      var row = document.createElement('div');
+      row.className = 'post-row';
+
+      var top = document.createElement('div');
+      top.className = 'post-top';
+      var link = document.createElement('a');
+      link.className = 'post-link';
+      link.href = post.post_url || '#';
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = post.post_url || '(no link)';
+      top.appendChild(link);
+      row.appendChild(top);
+
+      var caption = document.createElement('div');
+      caption.className = 'post-caption';
+      caption.textContent = post.caption_preview || '(no caption)';
+      row.appendChild(caption);
+
+      var stats = document.createElement('div');
+      stats.className = 'post-stats';
+      stats.textContent = 'Likes ' + formatCount(post.likes_count) + '  ·  Comments ' + formatCount(post.comments_count) + '  ·  Views ' + formatCount(post.views_count);
+      row.appendChild(stats);
+
+      var actions = document.createElement('div');
+      actions.className = 'post-actions';
+      var toggle = document.createElement('label');
+      toggle.className = 'toggle';
+      var box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = !!post.is_partnership_post;
+      box.onchange = function() { togglePartnership(post, box); };
+      var track = document.createElement('span');
+      track.className = 'track';
+      var label = document.createElement('span');
+      label.textContent = 'Paid partnership';
+      toggle.appendChild(box); toggle.appendChild(track); toggle.appendChild(label);
+      actions.appendChild(toggle);
+
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'post-delete';
+      del.textContent = 'Delete';
+      del.disabled = !postsState.canDelete;
+      del.title = postsState.canDelete ? 'Delete this post' : 'At least ' + postsState.minKeep + ' posts have to stay';
+      del.onclick = function() { deletePost(post); };
+      actions.appendChild(del);
+      row.appendChild(actions);
+
+      list.appendChild(row);
+    });
+  }
+
+  function togglePartnership(post, box) {
+    var wanted = box.checked;
+    postsFetch('/creator-profile/me/posts/' + post.id, { method: 'PATCH', body: JSON.stringify({ is_partnership_post: wanted }) })
+      .then(function(updated) { post.is_partnership_post = updated.is_partnership_post; postsMessage('', ''); })
+      .catch(function(err) { box.checked = !wanted; postsMessage(err.message, 'error'); });
+  }
+
+  function deletePost(post) {
+    if (!confirm('Delete this post from your profile?')) return;
+    postsFetch('/creator-profile/me/posts/' + post.id, { method: 'DELETE' })
+      .then(function(data) { setPostsList(data); postsMessage('Post deleted.', 'ok'); })
+      .catch(function(err) { postsMessage(err.message, 'error'); });
+  }
+
+  function addPost() {
+    var input = document.getElementById('postsNewUrl');
+    var url = input.value.trim();
+    if (!url) { postsMessage('Paste the link of an Instagram post.', 'error'); return; }
+    if (postsState.busy) return;
+    postsState.busy = true;
+    var button = document.getElementById('postsAddBtn');
+    button.disabled = true;
+    button.textContent = 'Reading the post…';
+    postsMessage('MAVLIT is reading this post. This can take up to a minute.', '');
+    postsFetch('/creator-profile/me/posts', { method: 'POST', body: JSON.stringify({ post_url: url }) })
+      .then(function() { input.value = ''; return loadPosts(); })
+      .then(function() { postsMessage('Post added.', 'ok'); })
+      .catch(function(err) { postsMessage(err.message, 'error'); })
+      .finally(function() { postsState.busy = false; button.disabled = false; button.textContent = 'Add post'; });
+  }
+
+  // "Your recent Instagram posts" appears once the user has posts: at page load and after a description was generated.
+
   function checkAuth() {
     fetch('/auth/me', { credentials: 'include' })
       .then(function(r) { return r.ok ? r.json() : null; })
@@ -1109,6 +1335,7 @@
 
         if (isLoggedIn) {
           loadProfile();
+          loadPosts();
           return;
         }
 

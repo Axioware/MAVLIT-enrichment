@@ -334,6 +334,10 @@ class CreatorInstagramPost(Base):
     followers_count    = Column(Integer)
     biography          = Column(Text)
 
+    # Switched on by the creator in "Your recent Instagram posts" (creator-profile page) for the posts that
+    # were paid partnerships. false for every post by default. (paid_partnership above is Instagram's own flag.)
+    partnership_post   = Column(Boolean, nullable=False, server_default="false", default=False)
+
     fetched_at         = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
 
     creator = relationship("CreatorProfile", lazy="selectin", foreign_keys=[creator_profile_id])

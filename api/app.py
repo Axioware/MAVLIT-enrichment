@@ -28,6 +28,7 @@ from api.auth import router as auth_router
 from api.brand_catalog import router as brand_catalog_router
 from api.brands import router as brands_router
 from api.dashboard import router as dashboard_api_router
+from api.creator_posts import router as creator_posts_router
 from api.own_brands import router as own_brands_router
 from api.pitches import router as pitches_router
 from api.saved_brands import router as saved_brands_router
@@ -575,6 +576,7 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS facebook_stats",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_followers INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_highest_views INTEGER",
+        "ALTER TABLE IF EXISTS creator_instagram_posts ADD COLUMN IF NOT EXISTS partnership_post BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_following INTEGER",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS tiktok_handle",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS tiktok_followers",
@@ -722,6 +724,7 @@ app.include_router(brands_router)
 app.include_router(saved_brands_router)
 app.include_router(pitches_router)
 app.include_router(own_brands_router)
+app.include_router(creator_posts_router)
 app.include_router(dashboard_api_router)
 app.include_router(advisory_router)
 app.include_router(brand_catalog_router)

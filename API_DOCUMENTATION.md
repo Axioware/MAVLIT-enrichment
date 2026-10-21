@@ -363,6 +363,26 @@ The following endpoints are authenticated and implemented for API consumers, but
 - **Errors before the stream starts:** `400` invalid custom/non-custom combination; `401` unauthenticated; `404` brand not found.
 - **Note:** the first piece arrives after the model has finished "thinking" (a few seconds); the text itself then streams in about a second or two. A reverse proxy must not buffer the response (`X-Accel-Buffering: no` is sent).
 
+#### `GET /creator-profile/me/posts`
+
+- **Purpose:** "Your recent Instagram posts" on the profile page: the posts saved for the creator (scraped when MAVLIT generated the description, or added by the creator).
+- **Auth:** Required.
+- **Response:** `200`, `{ "total": 20, "min_keep": 10, "can_delete": true, "posts": [{ "id", "post_url", "caption_preview" (start of the caption only), "post_type", "timestamp", "likes_count", "comments_count", "views_count", "is_partnership_post" }] }`, newest first. `total` is 0 for a creator whose Instagram was never scraped (the page hides the section).
+
+#### `PATCH /creator-profile/me/posts/{id}`
+
+- **Body:** `{ "is_partnership_post": true }`: the creator's "paid partnership" toggle (false for every post by default). **Errors:** `404` not the creator's post.
+
+#### `DELETE /creator-profile/me/posts/{id}`
+
+- **Purpose:** Remove a post. **Response:** `200`, the updated list (same shape as `GET`). **Errors:** `400` when fewer than 10 posts would remain (at 10 posts or fewer nothing can be deleted); `404` not the creator's post.
+
+#### `POST /creator-profile/me/posts`
+
+- **Body:** `{ "post_url": "https://www.instagram.com/p/XXXX/" }` (post or reel link).
+- **Purpose:** Add a post. One already on the profile is returned unchanged; one saved for another MAVLIT user is copied; only a post MAVLIT has not read before is scraped with Apify (a few seconds to a minute) and saved.
+- **Response:** `200`, the post (same shape as an item above). **Errors:** `400` not an Instagram post link, or the 50-post limit is reached; `422` the post could not be read (private, deleted, Instagram unreachable).
+
 #### `POST /own-brands`
 
 - **Purpose:** "My own brand" on the pitch page. The handle is looked up in `brands_raw` (an existing brand is reused, otherwise it is added). If the brand already has everything the pitch needs (name, niche, description, target audience gender; the target age and latest product may be empty) the job is `ready` at once and nothing is scraped. Otherwise, in the background and only for what is missing: Apify reads the latest 40 posts if none are saved, then the LLM fills the empty fields (name, description, niche, sub-niche tags, target audience gender and an estimated age, latest product) from the saved bio and captions. Fields that already have a value are never changed.
