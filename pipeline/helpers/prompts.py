@@ -1579,81 +1579,312 @@ Return ONLY valid JSON:
 #  pitching.py
 
 PITCH_PROMPT_NAME = "brand_pitch_generation"
-# The creator's own pitch style (creator_profiles.pitch_style_preferences). Kept as its own
-# constant so a stored copy of the previous pitch prompt can be recognised (see api/app.py)
-# and so pitching.py can append it to an edited copy that lacks the placeholder.
+
+# The creator's own pitch style preferences.
+# These preferences can override the default length, tone, and structure,
+# but cannot override the fixed factual and formatting rules below.
 PITCH_STYLE_BLOCK = """\
 THE CREATOR'S PITCH STYLE PREFERENCES (optional)
 {pitch_style_preferences}
-If preferences are given above, follow them closely for tone, length, structure and wording: they replace the default length and structure guidance below (for example if they ask for 3 short sentences, write exactly that). Only the FIXED rules below can never be broken: no subject line, no placeholders, no em dashes, no invented facts, no rate request, no mention of MAVLIT. If it says "none", use the default style described below.
+
+If preferences are provided, follow them closely for tone, length, structure,
+and wording. These preferences override the default length and structure
+guidance below. For example, if the creator requests three short sentences,
+write exactly three short sentences.
+
+The following fixed rules can never be overridden:
+- No subject line.
+- No unresolved placeholders.
+- No em dashes.
+- No invented facts or unsupported claims.
+- No request for a specific rate or payment amount.
+- No mention of MAVLIT.
+- No fabricated personal experience, product usage, or brand relationship.
+- No false claims about previous partnerships or campaign performance.
+
+If the preferences say "none", use the default style described below.
 
 """
 
-# A real pitch the LLM can use as a model of voice, flow and detail (never of facts).
+# A real pitch used only as a reference for voice, flow, and level of detail.
+# Its facts, names, numbers, links, and sign-off must never be copied.
 PITCH_EXAMPLE_BLOCK = """\
 EXAMPLE OF A GOOD PITCH
-This is a real example of the voice, flow and level of detail to aim for: personal and specific, a real connection to the brand, who the audience is and why they fit, a content link and an easy next step. It is from a different creator and brand, so NEVER copy its facts, names, numbers, links or its sign-off; write only from the information given above, and sign off only with the creator's first name.
+
+Use this example only to understand the qualities of a natural pitch:
+specific details, a clear connection between the creator and the brand,
+relevant audience context, a content example, and an easy next step.
+
+This example comes from a different creator and brand. Do not copy its
+facts, names, numbers, links, wording, or sign-off. Do not assume that
+the current creator has the same experience, audience, platforms, or
+relationship with the brand.
+
+Use only the information supplied for the current creator and brand.
+Sign off only with the current creator's first name.
 
 ---
-I've been going to Guitar World since I was a teenager, I love working on my songs on the acoustic guitars and keyboards at the Orange location. I've run Alternative Nation for 17 years, and it'll be a thrill to do a brand partnership. Our predominately 35-54 year old male Gen X audience of rock fans still loves guitar and the authenticity that is all over the great instruments at Guitar World.
+I've been going to Guitar World since I was a teenager, and I love working
+on my songs on acoustic guitars and keyboards at the Orange location.
+I've run Alternative Nation for 17 years, and it'd be a thrill to do a
+brand partnership. Our predominantly 35-54 year old male Gen X audience
+of rock fans still loves guitar and the authenticity behind great instruments.
 
-Let me know what type of deal would interest you. We can offer multi-platform deals across Instagram, Facebook, and YouTube, we have a following of 300,000 on social media.
+Let me know what type of deal would interest you. We can offer
+multi-platform deals across Instagram, Facebook, and YouTube, with a
+following of 300,000 on social media.
 
-Here's an example of one of our recent posts https://www.instagram.com/alternativenationofficial/p/DbwT8GejEmW/
+Here's an example of one of our recent posts:
+https://www.instagram.com/alternativenationofficial/p/DbwT8GejEmW/
 
 Thanks, and have a great day!
 
-Brett Buchanan
-AlterativeNation.net Owner
+Brett
 ---
 
 """
 
-# The optional "Reference a recent product launch" field of the pitch form (pitches.product_reference).
-# Separate constants so earlier stored copies of the prompt can be recognised (see
-# PITCH_PREVIOUS_DEFAULT_PROMPTS) and pitching.py can add them to an edited copy without them.
+# Optional recent product launch supplied through the pitch form.
+# Keep this constant separate for compatibility with prompt migration.
 PITCH_PRODUCT_INPUT_LINE = """\
 Recent product launch to reference (optional): {product_reference}
 """
 PITCH_PRODUCT_RULE = """\
-- If a recent product launch is given above, weave it into the email as the natural reason for writing now (the timing), inside a sentence that also carries the creator's connection or interest. Do NOT add it as a separate line or paragraph, and do not add details about the launch beyond what the creator wrote. If it says "none provided", do not mention any launch.
+- If a recent product launch is provided, use it only when it creates a
+  natural and relevant reason for contacting the brand now. Connect the
+  launch to the creator's genuine interests or content, using only the
+  information supplied. Do not invent product features, launch dates,
+  personal experiences, opinions, or details about the launch.
+- Do not make the launch the subject of a separate announcement or
+  standalone paragraph. Integrate it naturally into the email.
+- If the launch says "none provided" or "unknown", do not mention it.
 """
 
-# The creator's highest view count on a reel / video among their latest 20 posts
-# (creator_profiles.instagram_highest_views). Own constants so earlier stored copies can be recognised.
+# Highest views on a reel or video among the creator's latest 20 posts.
+# Keep this constant separate for compatibility with prompt migration.
 PITCH_VIEWS_LINE = """\
 Highest views on one of their recent reels or videos (among their latest 20 posts): {creator_highest_views}
 """
 PITCH_VIEWS_RULE = """\
-- If the creator's highest views are given above, you may mention it once, briefly, as proof of reach (for example "one of my recent reels reached about 120k views"), rounded naturally and tied to a recent reel or video. It is the best of their latest 20 posts, so never present it as their typical or average views or as a promised result. If it says "unknown", leave it out.
+- If the creator's highest recent video views are provided, you may mention
+  the figure once when it strengthens the pitch. Round it naturally and
+  identify it as the performance of one recent reel or video.
+- Never describe this figure as average, typical, guaranteed, or expected
+  performance. It represents the best-performing post among the latest
+  20 posts, not the creator's usual results.
+- Do not invent engagement rates, average views, conversion rates,
+  audience growth, sales, or campaign results.
+- If the value says "unknown", omit it.
 """
 
-# A past partnership / content link that is an Instagram post comes with the post's caption and views
-# (pipeline/pitch_posts.py). Own constant so earlier stored copies can be recognised.
+# Additional information supplied for a past partnership or content link.
+# The post may include a caption and its recorded view count.
 PITCH_POSTS_RULE = """\
-- A past partnership or content link may come with the Instagram post's caption and views, as  <url> (post caption: "..."; views: N). Use them: describe what the post was about only from its caption, and you may mention that post's view count once, rounded naturally, as the views of that specific post and never as typical or average performance. Keep the post URL in the email for the content link(s). Do not add details that are not in the caption.
+- A past partnership or content link may include an Instagram URL, post
+  caption, and view count. Describe the content only using the supplied
+  caption. You may mention the recorded views once, rounded naturally,
+  when relevant to the pitch.
+- Make clear that the figure belongs to that particular post. Never
+  present it as typical or average performance.
+- Keep relevant supplied post URLs in the email so the brand can inspect
+  the creator's work.
+- Do not invent campaign results, brand relationships, product usage,
+  endorsements, or content details that are not supplied.
+- Do not imply that a normal content example was a paid partnership
+  unless the supplied information confirms that it was.
 """
 
-# The story is optional on the pitch form. Without it the LLM must not make up a personal history with the brand.
-# Own constant so earlier stored copies of the prompt can be recognised.
+# The creator's story is optional.
+# Never fabricate a personal history with the brand.
 PITCH_STORY_RULE = """\
-- If the creator's story says "none provided", do not invent a personal connection, history or experience with the brand. Open with what the creator makes and why this brand fits their audience, using only the facts above.
+- If the creator's story says "none provided" or "unknown", do not invent
+  a personal connection, purchasing history, product usage, or experience
+  with the brand.
+- Instead, open with a specific connection between the creator's actual
+  content or audience interests and the brand's products, services, or
+  category.
+- If the story contains a personal claim, use it only as supplied.
+  Do not embellish it with additional events, experiences, or emotions.
 """
+
+# Additional writing rules to make the pitch more relevant, natural,
+# credible, and persuasive.
+PITCH_QUALITY_RULES = """\
+BRAND-SPECIFIC PERSONALIZATION
+
+- Make the email specific to this creator and this brand. It should not
+  read as though the same email could be sent unchanged to any company.
+- Identify the strongest genuine connection between the creator's
+  content and the brand's products, services, or category.
+- Use the brand description as background to understand relevance.
+  Do not simply repeat the brand description or present internal
+  information as something the creator personally knows.
+- Mention a particular product only when its name or details are supplied.
+  Do not invent product names, product features, benefits, or availability.
+- If the supplied information does not identify a specific product,
+  explain the fit using the brand's known category and the creator's
+  actual content.
+- Do not force personalization by inventing a reason for liking the brand.
+- If the available information is limited, write a concise, honest pitch
+  rather than filling gaps with assumptions.
+
+CREATOR VALUE AND AUDIENCE RELEVANCE
+
+- Explain why the creator's actual content and audience interests make
+  a potential partnership relevant to the brand.
+- Do more than repeat the creator's niche, follower count, or audience
+  description. Connect relevant details into a clear reason for the fit.
+- Prefer specific evidence, such as relevant existing content, genuine
+  brand experience, relevant past partnerships, or a documented recent
+  video's performance.
+- Use only the strongest available evidence. Do not force every supplied
+  detail into the email.
+- Mention follower count only when it adds useful context. Never make
+  the email primarily about follower count.
+- Never claim that followers have purchased products, intend to purchase
+  products, or will convert into customers unless reliable supporting
+  information explicitly establishes the claim.
+- Never promise reach, sales, engagement, conversions, or campaign results.
+- Do not describe audience demographics as verified facts when the supplied
+  information is estimated or unconfirmed.
+
+PAST BRAND PARTNERSHIPS
+
+- Mention the creator's previous partnerships only when they are supplied
+  and relevant to the current brand.
+- Do not invent brand names, campaign details, deliverables, results,
+  or professional relationships.
+- If confirmed sponsored creators are supplied for the current brand,
+  consider mentioning one only when it provides meaningful context.
+- Never imply that the sender knows another creator, has worked with
+  them, or has inside knowledge of the brand's partnership strategy.
+- Never assume that the brand is actively looking for more creators
+  because it has previously sponsored creators.
+- Do not mention other creators merely to fill space. The sender's own
+  relevant content and experience should take priority.
+
+NATURAL, HUMAN WRITING
+
+- Write as a real creator emailing a real person, not as a marketing
+  agency producing a generic outreach template.
+- Use natural, conversational language appropriate to the creator's
+  stated writing preferences.
+- Avoid vague promotional claims such as:
+  "Our audiences align perfectly."
+  "We could create something amazing together."
+  "I believe this would be a great fit."
+  "I am passionate about creating authentic content."
+  "We could drive meaningful engagement."
+- These ideas may be expressed when they are supported by specific,
+  supplied information and communicated in concrete language.
+- Avoid excessive flattery, exaggerated enthusiasm, corporate jargon,
+  and unnecessary adjectives.
+- Do not repeat the same fact or selling point in multiple paragraphs.
+- Vary wording and sentence structure naturally. Do not mechanically
+  reuse the example's sentences or force every email into an identical
+  template.
+- Avoid stock phrases, including:
+  "I hope this email finds you well."
+  "I'm reaching out because."
+  "I wanted to touch base."
+  "In today's digital landscape."
+  "Synergy."
+  "Game-changer."
+- Do not use em dashes. Use commas, periods, or separate sentences.
+
+CONTENT LINK AND SOCIAL PROOF
+
+- Include the most relevant supplied content link naturally when it
+  helps demonstrate the creator's content style or relevance.
+- Introduce the link briefly and accurately. Do not claim that the
+  linked content features the current brand unless the supplied
+  information confirms this.
+- If the link is a confirmed past sponsored post, describe it accurately.
+- Do not invent a link, modify a URL, or use the example's URL.
+- If the content link says "none provided" or "unknown", do not include
+  a fabricated link.
+- Avoid listing several statistics or links when one strong example
+  would be more persuasive.
+
+CALL TO ACTION
+
+- End with one natural, low-pressure next step that makes replying easy.
+- Depending on the context, the creator may ask whether the contact is
+  open to discussing a potential partnership, offer to share a couple
+  of tailored content ideas, or ask whether the brand is considering
+  creator partnerships.
+- Choose one appropriate approach rather than combining several requests.
+- Avoid demanding a response, creating artificial urgency, or asking
+  multiple questions in the closing.
+- Do not request a specific rate or payment amount in the first email.
+
+FINAL QUALITY CHECK
+
+Before returning the email, silently check that:
+
+1. The opening explains why this creator is contacting this brand.
+2. The creator-brand connection is specific and supported by the supplied
+   information.
+3. The email explains the creator's relevance without exaggerated claims.
+4. All personal experiences, products, partnerships, metrics, and results
+   are supported by the supplied information.
+5. Any view count is attributed to the correct post or video.
+6. The content link is accurate and relevant.
+7. The email is concise, conversational, and easy to read.
+8. The closing contains one natural, low-pressure next step.
+9. No subject line, unresolved placeholder, em dash, invented fact,
+   rate request, or mention of MAVLIT appears.
+10. The creator's writing preferences are followed without violating
+    the fixed rules.
+
+If any check fails, revise the email before returning it.
+Do not output the checklist or your reasoning.
+
+"""
+
 
 PITCH_DEFAULT_PROMPT = """\
-You are writing the first draft of an outreach email FROM a content creator TO a brand, pitching a paid sponsorship / partnership. Write it in the creator's own voice, as if they wrote it themselves: a real person emailing another real person.
+You are writing the first draft of an outreach email FROM a content creator
+TO a brand, proposing a potential paid sponsorship or brand partnership.
 
-ABOUT THE BRAND (what MAVLIT knows - treat it as background, never quote it back like a data sheet)
+Write in the creator's own voice, as if they personally wrote the email
+to a real person at the brand. Your goal is to produce a specific,
+credible, natural, and persuasive first-contact email that gives the
+recipient a genuine reason to consider working with this creator.
+
+The email must remain truthful. A convincing pitch is not one that
+makes the biggest claims. It is one that explains the strongest genuine
+connection between the creator and the brand using the available facts.
+
+ABOUT THE BRAND (background information, not necessarily known personally
+by the creator)
+
 Brand name: {brand_name}
 Niche: {brand_niche}
 Description: {brand_description}
 Target audience: {brand_target_audience}
-Target age: {brand_target_age}   (NOT CONFIRMED - an estimate; never state the age as a fact, and never mention it unless it genuinely helps, then only softly such as "I think your community skews younger")
-Brand's own Instagram follower count: {brand_instagram_followers}   (only to judge how big the brand is; do not quote the number)
-Creators already partnering with this brand, in the same niche as the writer (confirmed sponsored posts, at most 2):
+Target age: {brand_target_age}
+This age information is NOT CONFIRMED. Do not state it as fact. Usually
+omit it entirely. If genuinely relevant, describe it only as a tentative
+impression, never as verified audience data.
+
+Brand's own Instagram follower count: {brand_instagram_followers}
+Use this only to understand the relative size of the brand. Do not quote
+the brand's follower count in the email.
+
+Creators already partnering with this brand, in the same niche as the
+writer, based on confirmed sponsored posts, at most 2:
 {brand_partner_creators}
 
-Contact the email is going to: {contact_name} ({contact_title})
+CONTACT
+
+Name: {contact_name}
+Title: {contact_title}
+
+Use the contact's first name in the greeting when a genuine name is
+provided. Do not use the contact's title as a substitute for their name.
+If the name is unavailable, begin naturally without a named greeting.
+Never leave an unresolved greeting placeholder.
 
 ABOUT THE CREATOR (the sender)
 Name: {creator_name}
@@ -1661,44 +1892,165 @@ Instagram: @{creator_handle}
 Niche: {creator_niche}
 Sub-niches: {creator_sub_niches}
 Instagram followers: {creator_follower_count}
-""" + PITCH_VIEWS_LINE + """Main audience gender: {creator_audience_gender}
+""" + PITCH_VIEWS_LINE + """\
+Main audience gender: {creator_audience_gender}
 What their content is about: {creator_content_description}
 Their audience: {creator_audience_description}
 
 WHAT THE CREATOR WANTS TO SAY
-Their authentic connection to {brand_name} (their story): {story}
-""" + PITCH_PRODUCT_INPUT_LINE + """Past brand partnerships worth mentioning (optional): {past_brand_partnership}
-Link to their most relevant content: {content_link}
 
-""" + PITCH_STYLE_BLOCK + """HOW TO WRITE IT
+Their authentic connection to {brand_name} (their story):
+{story}
 
-Default structure (used unless the creator's style preferences ask for something else; flowing short paragraphs, not a list):
-1. Opening: address the contact by first name if one is given, otherwise open naturally without a name. Start with the creator's real connection to the brand, taken from their story - specific, in their own words, not generic praise.
-2. Who they are and why it fits: one or two sentences on their content and audience, drawn from the creator and audience descriptions above, and why that audience cares about {brand_name}. Use the follower count only as light context (for example "a community of about 40k"), never as the main selling point.
-3. Social proof: mention the past brand partnerships only if some were given. If creators in the same niche already partner with the brand, you may say naturally that the brand already works with creators in this space (for example by naming one of them), as a sign that a collaboration like this fits. Never suggest the sender worked with those creators or with the brand before, and never copy their numbers.
-4. Their content: include the content link naturally, as an example of the kind of content they would make for the brand.
-5. Close with a soft, low-pressure call to action, such as offering a quick chat or to send ideas.
+""" + PITCH_PRODUCT_INPUT_LINE + """\
+Past brand partnerships worth mentioning (optional):
+{past_brand_partnership}
 
-Rules:
-- Write ONLY the email body. No subject line, no "Subject:", no placeholders such as [Name] or [Brand]. Sign off with the creator's first name.
-- Length: about 120 to 190 words in short paragraphs, unless the creator's style preferences ask for a different length.
-- Sound warm, specific and human (or in the tone the creator's style preferences ask for). Do NOT sound salesy, generic or like a template.
-- Do NOT use em dashes anywhere. Use commas, periods or separate sentences.
-- Do NOT use stock phrases such as "I hope this email finds you well", "I'm reaching out because", "I wanted to touch base", "in today's digital landscape", "collaboration opportunity", "synergy", "game-changer".
-""" + PITCH_PRODUCT_RULE + PITCH_VIEWS_RULE + PITCH_POSTS_RULE + PITCH_STORY_RULE + """- Use ONLY facts given above. Do not invent products, results, prices, rates, engagement numbers, locations or past work. If an item says "none provided" or "unknown", leave it out instead of guessing.
-- The brand information is background, not something the creator knows for sure: do not claim inside knowledge of the brand's plans, sales or audience data. Anything marked as not confirmed must not be stated as a fact.
-- Do not mention MAVLIT, matching scores or that the information came from a database.
-- Do not ask for a specific rate or payment in this first email.
+Link to their most relevant content:
+{content_link}
 
-""" + PITCH_EXAMPLE_BLOCK + """Reply with the email body only, plain text, no markdown formatting.\
+""" + PITCH_STYLE_BLOCK + """\
+HOW TO WRITE THE EMAIL
+
+Follow this default structure unless the creator's style preferences
+specify a different structure. Use flowing, short paragraphs, not a list.
+
+1. OPENING AND RELEVANCE
+
+Address the contact by first name if one is provided.
+
+Start with the strongest genuine reason for contacting this particular
+brand. If the creator's story describes a real experience or meaningful
+connection, use the most relevant detail in natural language.
+
+If no genuine personal connection is supplied, open with a specific
+connection between the creator's actual content or audience interests
+and the brand's known category or offerings.
+
+Do not invent brand familiarity, product usage, purchasing history,
+personal experiences, or enthusiasm.
+
+Avoid generic opening lines that could be sent to any company.
+
+2. CREATOR AND BRAND FIT
+
+In one or two sentences, explain what the creator actually makes and
+why it is relevant to this brand.
+
+Connect the creator's content and audience interests to the brand's
+products, services, or category. Explain the relevance naturally rather
+than simply listing the creator's niche, audience, and follower count.
+
+Use only the supplied information. Do not claim that the creator's
+audience buys particular products, guarantees sales, or will produce
+specific results.
+
+Use the follower count as light context only when helpful. The email
+should communicate relevance, not just audience size.
+
+3. SUPPORTING EVIDENCE
+
+Mention relevant past partnerships only when provided and useful.
+
+If the creator has a relevant confirmed partnership or a strong example
+of existing content, use it to support the pitch without exaggerating
+its significance.
+
+If confirmed creators already partner with the brand, mentioning one is
+optional. Do so only if it adds meaningful context. Never imply that the
+sender has worked with the brand or those creators unless the supplied
+information explicitly confirms it.
+
+Include the highest recent video views only when they strengthen the
+pitch. Describe them as the views of one specific recent reel or video,
+not as typical or average performance.
+
+Do not force social proof into the email when it adds little value.
+
+4. RELEVANT CONTENT
+
+Include the supplied content link naturally when available and relevant.
+
+Use it as an example of the creator's actual content style or subject
+matter. Do not claim that the content features the current brand,
+shows a sponsored partnership, or demonstrates a particular result
+unless the supplied information confirms that claim.
+
+Keep the original URL unchanged.
+
+5. CLOSING
+
+End with one simple, low-pressure next step.
+
+Depending on the context, the creator can ask whether the contact would
+be open to discussing a potential partnership or offer to share a couple
+of content ideas tailored to the brand.
+
+Choose the most natural option for this email. Do not combine several
+requests or pressure the recipient to respond.
+
+""" + PITCH_PRODUCT_RULE + PITCH_VIEWS_RULE + PITCH_POSTS_RULE + PITCH_STORY_RULE + PITCH_QUALITY_RULES + """\
+FIXED RULES
+
+- Return ONLY the email body. Never include a subject line, "Subject:",
+  commentary, explanations, analysis, or a checklist.
+- Do not use Markdown formatting, headings, bullet points, or numbered
+  sections in the generated email.
+- Sign off with the creator's first name only. Do not invent a surname,
+  business title, company name, or additional signature details.
+- Write approximately 120 to 190 words in short paragraphs by default,
+  unless the creator's style preferences request a different length.
+- Address the contact by first name when available. If no name is
+  available, use a natural opening without a placeholder.
+- Do not use em dashes anywhere. Use commas, periods, or separate
+  sentences instead.
+- Use ONLY the facts supplied in the prompt. Do not invent products,
+  product features, results, prices, rates, engagement numbers,
+  locations, personal experiences, brand relationships, or past work.
+- If information says "none provided", "unknown", is empty, or is
+  otherwise unavailable, omit it rather than guessing.
+- Do not expose internal brand data as if the creator knows it personally.
+- Do not state estimated or unconfirmed demographic information as fact.
+- Do not mention MAVLIT, matching scores, internal systems, databases,
+  or how the creator was matched with the brand.
+- Do not ask for a specific rate, budget, or payment amount in this
+  first email.
+- Do not guarantee sales, conversions, reach, engagement, or campaign
+  results.
+- Do not include multiple calls to action or repeat the same selling point.
+- Do not sacrifice factual accuracy to make the pitch sound persuasive.
+
+""" + PITCH_EXAMPLE_BLOCK + """\
+Return the finished email body only, as plain text, with no Markdown.
 """
 
-# Earlier versions of PITCH_DEFAULT_PROMPT (before the style block and/or the example block
-# existed). A stored copy identical to one of them was never edited and is upgraded at startup.
+
+# Earlier versions of PITCH_DEFAULT_PROMPT.
+#
+# A stored copy identical to one of the previous defaults can be upgraded
+# at startup. This list is retained for compatibility with the existing
+# migration logic in api/app.py.
+#
+# IMPORTANT:
+# Adding a new block here increases the number of generated combinations.
+# Keep these blocks identical to their corresponding occurrences in
+# PITCH_DEFAULT_PROMPT so that the historical matching logic continues
+# to work as intended.
 def _previous_pitch_defaults() -> tuple[str, ...]:
-    """The default prompt with every combination of its later additions left out."""
+    """Return prior default-prompt combinations with optional blocks removed."""
     from itertools import product
-    blocks = (PITCH_STYLE_BLOCK, PITCH_EXAMPLE_BLOCK, PITCH_PRODUCT_INPUT_LINE, PITCH_PRODUCT_RULE, PITCH_VIEWS_LINE, PITCH_VIEWS_RULE, PITCH_POSTS_RULE, PITCH_STORY_RULE)
+
+    blocks = (
+        PITCH_STYLE_BLOCK,
+        PITCH_EXAMPLE_BLOCK,
+        PITCH_PRODUCT_INPUT_LINE,
+        PITCH_PRODUCT_RULE,
+        PITCH_VIEWS_LINE,
+        PITCH_VIEWS_RULE,
+        PITCH_POSTS_RULE,
+        PITCH_STORY_RULE,
+    )
+
     versions = []
     for keep in product((True, False), repeat=len(blocks)):
         text = PITCH_DEFAULT_PROMPT
