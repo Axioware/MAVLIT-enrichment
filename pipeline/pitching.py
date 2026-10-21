@@ -14,10 +14,12 @@ from pipeline.brand_detail import _top_contact
 from pipeline.db import BrandRaw, CreatorProfile, InstagramPost, Pitch, Prompt
 from pipeline.helpers.creator_gender import creator_match_gender
 from pipeline.helpers.social import normalize_handle
+from pipeline.pitch_posts import describe_entries, has_post_urls, resolve_post_details
 from pipeline.helpers.gpt_llm import call_gpt_text, fill_template, llm_usage_scope, stream_gpt_text
 from pipeline.helpers.prompts import (
     PITCH_DEFAULT_PROMPT,
     PITCH_PRODUCT_INPUT_LINE,
+    PITCH_POSTS_RULE,
     PITCH_PRODUCT_RULE,
     PITCH_PROMPT_NAME,
     PITCH_STYLE_BLOCK,
@@ -178,6 +180,7 @@ def _build_pitch_prompt(
     product_reference: str | None,
     past_brand_partnership: str | None,
     content_link: str | None,
+    post_details: dict | None = None,
 ) -> dict:
     """
     The filled-in pitch prompt plus the brand/contact it was built for:
@@ -223,6 +226,14 @@ def _build_pitch_prompt(
     if creator.instagram_highest_views and "{creator_highest_views}" not in template:
         # an edited stored copy without the placeholder: still give the LLM the creator's highest views
         template = template.rstrip() + "\n\n" + PITCH_VIEWS_LINE + PITCH_VIEWS_RULE
+    # Instagram post URLs in the past partnerships / content links become url + caption + views (saved posts are
+    # reused, only unknown ones are scraped). The stream endpoint resolves them first to show progress.
+    if post_details is None:
+        post_details = resolve_post_details(db, creator, past_brand_partnership, content_link)
+    past_text = describe_entries(db, creator, past_brand_partnership, post_details)
+    link_text = describe_entries(db, creator, content_link, post_details)
+    if post_details and PITCH_POSTS_RULE not in template:
+        template = template.rstrip() + "\n\n" + PITCH_POSTS_RULE
     prompt = fill_template(
         template,
         creator_highest_views=f"{creator.instagram_highest_views:,}" if creator.instagram_highest_views else "unknown",
@@ -246,8 +257,8 @@ def _build_pitch_prompt(
         contact_name=contact_name,
         contact_title=contact_title,
         story=story,
-        past_brand_partnership=past_brand_partnership or "none provided",
-        content_link=content_link or "none provided",
+        past_brand_partnership=past_text or "none provided",
+        content_link=link_text or "none provided",
     )
     return {"prompt": prompt, "brand": brand, "brand_name": brand_name, "contact": contact}
 
@@ -320,14 +331,20 @@ def stream_pitch(
 ):
     """
     Same as generate_pitch, but yields the email piece by piece while the LLM writes it (so the
-    page can show it live), then saves it. Yields ("delta", text) for every piece and, last,
-    ("done", Pitch). The Pitch is saved only after the full text arrived; if the stream fails
-    nothing is saved and the exception (ValueError / LLMUnavailableError / RuntimeError) is raised.
+    page can show it live), then saves it. Yields ("status", text) first when Instagram posts have to be
+    read, ("delta", text) for every piece and, last, ("done", Pitch). The Pitch is saved only after the
+    full text arrived; if the stream fails nothing is saved and the exception (ValueError /
+    LLMUnavailableError / RuntimeError) is raised.
     """
     fields = dict(story=story, product_reference=product_reference,
                   past_brand_partnership=past_brand_partnership, content_link=content_link)
+    post_details = None
+    if has_post_urls(past_brand_partnership, content_link):
+        yield "status", "Reading the Instagram posts you linked…"   # may need an Apify run
+        post_details = resolve_post_details(db, creator, past_brand_partnership, content_link)
+    yield "status", "Writing your pitch…"
     built = _build_pitch_prompt(db, creator, is_custom=is_custom, brand_id=brand_id,
-                                custom_brand_name=custom_brand_name, **fields)
+                                custom_brand_name=custom_brand_name, post_details=post_details, **fields)
     parts: list[str] = []
     for piece in stream_gpt_text(
         built["prompt"], context=f"pitch for creator_id={creator.id} brand={built['brand_name']}",

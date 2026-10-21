@@ -1628,6 +1628,12 @@ PITCH_VIEWS_RULE = """\
 - If the creator's highest views are given above, you may mention it once, briefly, as proof of reach (for example "one of my recent reels reached about 120k views"), rounded naturally and tied to a recent reel or video. It is the best of their latest 20 posts, so never present it as their typical or average views or as a promised result. If it says "unknown", leave it out.
 """
 
+# A past partnership / content link that is an Instagram post comes with the post's caption and views
+# (pipeline/pitch_posts.py). Own constant so earlier stored copies can be recognised.
+PITCH_POSTS_RULE = """\
+- A past partnership or content link may come with the Instagram post's caption and views, as  <url> (post caption: "..."; views: N). Use them: describe what the post was about only from its caption, and you may mention that post's view count once, rounded naturally, as the views of that specific post and never as typical or average performance. Keep the post URL in the email for the content link(s). Do not add details that are not in the caption.
+"""
+
 PITCH_DEFAULT_PROMPT = """\
 You are writing the first draft of an outreach email FROM a content creator TO a brand, pitching a paid sponsorship / partnership. Write it in the creator's own voice, as if they wrote it themselves: a real person emailing another real person.
 
@@ -1673,7 +1679,7 @@ Rules:
 - Sound warm, specific and human (or in the tone the creator's style preferences ask for). Do NOT sound salesy, generic or like a template.
 - Do NOT use em dashes anywhere. Use commas, periods or separate sentences.
 - Do NOT use stock phrases such as "I hope this email finds you well", "I'm reaching out because", "I wanted to touch base", "in today's digital landscape", "collaboration opportunity", "synergy", "game-changer".
-""" + PITCH_PRODUCT_RULE + PITCH_VIEWS_RULE + """- Use ONLY facts given above. Do not invent products, results, prices, rates, engagement numbers, locations or past work. If an item says "none provided" or "unknown", leave it out instead of guessing.
+""" + PITCH_PRODUCT_RULE + PITCH_VIEWS_RULE + PITCH_POSTS_RULE + """- Use ONLY facts given above. Do not invent products, results, prices, rates, engagement numbers, locations or past work. If an item says "none provided" or "unknown", leave it out instead of guessing.
 - The brand information is background, not something the creator knows for sure: do not claim inside knowledge of the brand's plans, sales or audience data. Anything marked as not confirmed must not be stated as a fact.
 - Do not mention MAVLIT, matching scores or that the information came from a database.
 - Do not ask for a specific rate or payment in this first email.
@@ -1686,7 +1692,7 @@ Rules:
 def _previous_pitch_defaults() -> tuple[str, ...]:
     """The default prompt with every combination of its later additions left out."""
     from itertools import product
-    blocks = (PITCH_STYLE_BLOCK, PITCH_EXAMPLE_BLOCK, PITCH_PRODUCT_INPUT_LINE, PITCH_PRODUCT_RULE, PITCH_VIEWS_LINE, PITCH_VIEWS_RULE)
+    blocks = (PITCH_STYLE_BLOCK, PITCH_EXAMPLE_BLOCK, PITCH_PRODUCT_INPUT_LINE, PITCH_PRODUCT_RULE, PITCH_VIEWS_LINE, PITCH_VIEWS_RULE, PITCH_POSTS_RULE)
     versions = []
     for keep in product((True, False), repeat=len(blocks)):
         text = PITCH_DEFAULT_PROMPT

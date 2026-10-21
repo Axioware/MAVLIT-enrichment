@@ -482,7 +482,9 @@
     $('draftCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     function handleEvent(ev) {
-      if (ev.type === 'delta') {
+      if (ev.type === 'status') {
+        setDraftStatus(ev.text, '');
+      } else if (ev.type === 'delta') {
         box.value += ev.text;
         box.scrollTop = box.scrollHeight;
       } else if (ev.type === 'done') {

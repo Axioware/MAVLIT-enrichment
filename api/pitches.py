@@ -80,6 +80,7 @@ def stream_pitch_endpoint(
     """
     Same as POST /pitches (same body, same prompt, saved as a generated, unsent pitch), but the
     email is sent while the LLM writes it, as server-sent events (text/event-stream), one per line:
+      {"type": "status", "text": "..."}    what is happening before the text starts (e.g. reading the linked posts)
       {"type": "delta", "text": "..."}     a piece of the email, in order
       {"type": "done", "pitch": {...}}     the saved pitch (PitchResponse), last event on success
       {"type": "error", "detail": "..."}   generation failed; nothing was saved
@@ -114,7 +115,9 @@ def stream_pitch_endpoint(
                     past_brand_partnership=body.past_brand_partnership,
                     content_link=body.content_link,
                 ):
-                    if kind == "delta":
+                    if kind == "status":
+                        yield _sse({"type": "status", "text": value})
+                    elif kind == "delta":
                         yield _sse({"type": "delta", "text": value})
                     else:
                         job_id = claim_followup(stream_db, creator_id, value.brand_raw_id)

@@ -338,6 +338,7 @@ The following endpoints are authenticated and implemented for API consumers, but
 - **Purpose:** Generate and persist a personalized pitch as `generated` (unsent). It does not imply that the creator sent the text.
 - **Auth:** Required.
 - **Body:** `PitchRequest`: `is_custom`, `story`, optional `product_reference`, `past_brand_partnership`, `content_link`; non-custom requests require `brand_id`, while custom requests require `custom_brand_name` and omit `brand_id`.
+- **Instagram post links:** `past_brand_partnership` and `content_link` take up to 3 comma-separated entries. An entry that is an Instagram post or reel URL is looked up in `creator_instagram_posts`; only posts not saved there are scraped (one Apify run) and saved. The pitch is then written from the URL plus the post's caption and view count. Other entries (brand names, descriptions) are used as typed and never trigger a scrape.
 - **Example request:**
 
   ```json
@@ -358,7 +359,7 @@ The following endpoints are authenticated and implemented for API consumers, but
 
 - **Purpose:** Same as `POST /pitches` (same body, same prompt, saved as a `generated`, unsent pitch), but the email is streamed while the LLM writes it so the page can show it live.
 - **Auth:** Required.
-- **Response:** `200`, `text/event-stream`. Each event is one `data: {json}` line followed by a blank line: `{"type":"delta","text":"..."}` for every piece of the email, in order; then `{"type":"done","pitch":{...PitchResponse}}` when the pitch has been saved; or `{"type":"error","detail":"..."}` if generation failed (nothing is saved).
+- **Response:** `200`, `text/event-stream`. Each event is one `data: {json}` line followed by a blank line: `{"type":"status","text":"..."}` first, while the Instagram posts the user linked are being read ("Reading the Instagram posts you linked…", then "Writing your pitch…"); `{"type":"delta","text":"..."}` for every piece of the email, in order; then `{"type":"done","pitch":{...PitchResponse}}` when the pitch has been saved; or `{"type":"error","detail":"..."}` if generation failed (nothing is saved).
 - **Errors before the stream starts:** `400` invalid custom/non-custom combination; `401` unauthenticated; `404` brand not found.
 - **Note:** the first piece arrives after the model has finished "thinking" (a few seconds); the text itself then streams in about a second or two. A reverse proxy must not buffer the response (`X-Accel-Buffering: no` is sent).
 
