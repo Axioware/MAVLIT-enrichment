@@ -368,7 +368,7 @@ The following endpoints are authenticated and implemented for API consumers, but
 - **Purpose:** "Your recent Instagram posts" on the profile page: the posts saved for the creator (scraped when MAVLIT generated the description, or added by the creator).
 - **Auth:** Required.
 - **Query:** optional `q` (up to 100 characters) returns only the posts whose whole caption contains that text, in any case; optional `partnership_only=true` returns only the posts marked as paid partnerships. `total` and `can_delete` still count all posts.
-- **Response:** `200`, `{ "total": 20, "shown": 20, "min_keep": 10, "can_delete": true, "posts": [{ "id", "post_url", "caption_preview" (start of the caption only), "post_type", "timestamp", "likes_count", "comments_count", "views_count", "is_partnership_post" }] }`, newest first. `total` is 0 for a creator whose Instagram was never scraped (the page hides the section).
+- **Response:** `200`, `{ "total": 20, "shown": 20, "min_keep": 10, "can_delete": true, "posts": [{ "id", "post_url", "caption_preview" (start of the caption only), "post_type", "timestamp", "likes_count", "comments_count", "views_count", "is_partnership_post", "thumbnail_url" }] }`, newest first. `thumbnail_url` (`/creator-profile/me/posts/{id}/thumbnail`, null for a link that is not an Instagram post) returns the post's picture as an image; MAVLIT's server fetches it from Instagram each time (nothing is stored, answers are cached in memory for 6 hours) and replies `404` when the post has no picture (private, deleted, Instagram not answering). `total` is 0 for a creator whose Instagram was never scraped (the page hides the section).
 
 #### `PATCH /creator-profile/me/posts/{id}`
 

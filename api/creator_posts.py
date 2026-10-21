@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+import time
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
 from pipeline.creator_posts import MIN_POSTS, add_post, delete_post, get_post, list_posts, posts_query, set_partnership
 from pipeline.db import CreatorInstagramPost, CreatorProfile, get_db
+from pipeline.pitch_posts import post_code
 
 router = APIRouter(prefix="/creator-profile/me/posts", tags=["creator-posts"])
 
@@ -21,6 +25,7 @@ class CreatorPostItem(BaseModel):
     comments_count: int | None = None
     views_count: int | None = None          # Instagram's view count (reels / videos), null when there is none
     is_partnership_post: bool = False       # the creator's "paid partnership" toggle
+    thumbnail_url: str | None = None        # GET this (signed in) for the post's picture; nothing is stored, see get_thumbnail
 
 
 class CreatorPostsResponse(BaseModel):
@@ -56,6 +61,7 @@ def _item(row: CreatorInstagramPost) -> CreatorPostItem:
         comments_count=_count(row.comments_count),
         views_count=_count(row.video_view_count),
         is_partnership_post=bool(row.partnership_post),
+        thumbnail_url=f"/creator-profile/me/posts/{row.id}/thumbnail" if post_code(row.post_url or "") else None,
     )
 
 
@@ -102,6 +108,45 @@ def _own_post(db: Session, creator: CreatorProfile, post_id: int) -> CreatorInst
     if row is None:
         raise HTTPException(status_code=404, detail="Post not found")
     return row
+
+
+# The post pictures are fetched from Instagram by the server and passed on: the browser cannot load them straight from
+# Instagram (its picture server answers "Cross-Origin-Resource-Policy: same-origin", so another site's <img> is blocked).
+# Nothing is stored in the database; a small in-memory cache spares Instagram repeated requests.
+_THUMB_TTL = 6 * 3600
+_THUMB_MAX = 300
+_thumb_cache: dict[str, tuple[float, bytes, str]] = {}
+_THUMB_HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"}
+
+
+def _fetch_thumbnail(code: str) -> tuple[bytes, str] | None:
+    cached = _thumb_cache.get(code)
+    if cached and time.time() - cached[0] < _THUMB_TTL:
+        return cached[1], cached[2]
+    try:
+        # instagram.com/p/<code>/media/ redirects to the post's current picture (public posts only)
+        resp = httpx.get(f"https://www.instagram.com/p/{code}/media/?size=m", headers=_THUMB_HEADERS, timeout=10, follow_redirects=True)
+    except httpx.HTTPError:
+        return None
+    kind = resp.headers.get("content-type", "")
+    if resp.status_code != 200 or not kind.startswith("image/") or not resp.content:
+        return None
+    if len(_thumb_cache) >= _THUMB_MAX:
+        _thumb_cache.pop(min(_thumb_cache, key=lambda k: _thumb_cache[k][0]))   # drop the oldest
+    _thumb_cache[code] = (time.time(), resp.content, kind)
+    return resp.content, kind
+
+
+@router.get("/{post_id}/thumbnail")
+def get_thumbnail(post_id: int, db: Session = Depends(get_db), current_user: CreatorProfile = Depends(get_current_user)):
+    """The picture of one of the creator's posts (404 when the post has none: private, deleted or Instagram not answering)."""
+    row = _own_post(db, current_user, post_id)
+    code = post_code(row.post_url or "")
+    found = _fetch_thumbnail(code) if code else None
+    if found is None:
+        raise HTTPException(status_code=404, detail="No picture for this post")
+    content, kind = found
+    return Response(content=content, media_type=kind, headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.patch("/{post_id}", response_model=CreatorPostItem)

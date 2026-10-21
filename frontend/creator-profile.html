@@ -190,6 +190,10 @@
     .modal-close:hover { color: #f1f5f9; }
     #postsList { overflow-y: auto; margin: .6rem 0; flex: 1; min-height: 80px; }
     .post-row { border: 1px solid #334155; border-radius: 10px; background: #0f172a; padding: .7rem .8rem; margin-bottom: .6rem; }
+    .post-row { display: flex; gap: .8rem; align-items: flex-start; }
+    .post-main { flex: 1; min-width: 0; }
+    .post-thumb { flex: none; width: 84px; height: 84px; border-radius: 8px; object-fit: cover; background: #1e293b; border: 1px solid #334155; }
+    .post-thumb.none { display: flex; align-items: center; justify-content: center; color: #475569; font-size: .7rem; text-align: center; }
     .post-top { display: flex; align-items: center; gap: .6rem; }
     .post-link { flex: 1; min-width: 0; color: #38bdf8; font-size: .82rem; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .post-link:hover { text-decoration: underline; }
@@ -1286,21 +1290,23 @@
     postsState.posts.forEach(function(post) {
       var row = document.createElement('div');
       row.className = 'post-row';
+      var main = document.createElement('div');   // everything except the picture
+      main.className = 'post-main';
 
       var caption = document.createElement('div');
       caption.className = 'post-caption';
       caption.textContent = post.caption_preview || '(no caption)';
-      row.appendChild(caption);
+      main.appendChild(caption);
 
       var posted = document.createElement('div');
       posted.className = 'post-date';
       posted.textContent = 'Posted ' + formatPostedAt(post.timestamp);
-      row.appendChild(posted);
+      main.appendChild(posted);
 
       var stats = document.createElement('div');
       stats.className = 'post-stats';
       stats.textContent = 'Likes ' + formatCount(post.likes_count) + '  ·  Comments ' + formatCount(post.comments_count) + '  ·  Views ' + formatCount(post.views_count);
-      row.appendChild(stats);
+      main.appendChild(stats);
 
       var actions = document.createElement('div');
       actions.className = 'post-actions';
@@ -1336,10 +1342,32 @@
       del.onclick = function() { deletePost(post); };
       buttons.appendChild(del);
       actions.appendChild(buttons);
-      row.appendChild(actions);
+      main.appendChild(actions);
 
+      row.appendChild(postThumbnail(post.thumbnail_url));
+      row.appendChild(main);
       list.appendChild(row);
     });
+  }
+
+  // The picture comes from MAVLIT's server (post.thumbnail_url), which asks Instagram for it each time: nothing is saved, so it
+  // never expires. (The browser cannot load it from Instagram directly: Instagram's picture server blocks other sites.)
+  // A private / deleted post, or no answer, shows a grey box.
+  function postThumbnail(thumbnailUrl) {
+    function placeholder() {
+      var box = document.createElement('div');
+      box.className = 'post-thumb none';
+      box.textContent = 'No picture';
+      return box;
+    }
+    if (!thumbnailUrl) return placeholder();
+    var img = document.createElement('img');
+    img.className = 'post-thumb';
+    img.alt = '';
+    img.loading = 'lazy';
+    img.src = thumbnailUrl;
+    img.onerror = function() { img.replaceWith(placeholder()); };
+    return img;
   }
 
   function togglePartnership(post, box) {

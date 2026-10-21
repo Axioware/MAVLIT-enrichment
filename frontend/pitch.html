@@ -105,6 +105,8 @@
     .pick-row.off { opacity: .5; cursor: not-allowed; }
     .pick-row input[type=checkbox] { flex: none; width: 24px; height: 24px; cursor: pointer; accent-color: #38bdf8; }
     .pick-row.off input[type=checkbox] { cursor: not-allowed; }
+    .pick-thumb { flex: none; width: 72px; height: 72px; border-radius: 8px; object-fit: cover; background: #1e293b; border: 1px solid #334155; }
+    .pick-thumb.none { display: flex; align-items: center; justify-content: center; color: #475569; font-size: .68rem; text-align: center; }
     .pick-body { min-width: 0; flex: 1; }
     .pick-view { margin-top: .4rem; background: none; border: 1px solid #334155; color: #38bdf8; border-radius: 6px; padding: .22rem .6rem; font-size: .76rem; cursor: pointer; font-family: inherit; }
     .pick-view:hover { border-color: #38bdf8; background: #0c2a44; }
@@ -693,9 +695,27 @@
       view.onclick = function(e) { e.stopPropagation(); window.open(post.post_url, '_blank', 'noopener,noreferrer'); };
       body.appendChild(link); body.appendChild(caption); body.appendChild(posted); body.appendChild(stats); body.appendChild(view);
 
-      row.appendChild(body); row.appendChild(box);   // check box on the right
+      row.appendChild(pickThumbnail(post.thumbnail_url)); row.appendChild(body); row.appendChild(box);   // picture on the left, check box on the right
       list.appendChild(row);
     });
+  }
+
+  // The picture comes from MAVLIT's server (post.thumbnail_url, nothing is saved); a post without one shows a grey box.
+  function pickThumbnail(thumbnailUrl) {
+    function placeholder() {
+      var box = document.createElement('div');
+      box.className = 'pick-thumb none';
+      box.textContent = 'No picture';
+      return box;
+    }
+    if (!thumbnailUrl) return placeholder();
+    var img = document.createElement('img');
+    img.className = 'pick-thumb';
+    img.alt = '';
+    img.loading = 'lazy';
+    img.src = thumbnailUrl;
+    img.onerror = function() { img.replaceWith(placeholder()); };
+    return img;
   }
 
   function togglePick(kind, post, checked) {
