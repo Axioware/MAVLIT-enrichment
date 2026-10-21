@@ -84,6 +84,17 @@
     .status.error { color: #f87171; }
     .status.ok { color: #4ade80; }
 
+    .own-row { display: flex; gap: .6rem; }
+    .own-row input { flex: 1; }
+    .own-status { display: flex; align-items: center; gap: .6rem; font-size: .85rem; color: #38bdf8; margin-top: .8rem; min-height: 1.3em; }
+    .own-status.error { color: #f87171; }
+    .spinner { width: 16px; height: 16px; border: 2px solid #334155; border-top-color: #38bdf8; border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .brand-info { margin-top: 1rem; border: 1px solid #334155; border-radius: 10px; background: #0f172a; padding: .9rem 1rem; }
+    .brand-info h3 { font-size: .95rem; color: #f1f5f9; margin-bottom: .5rem; }
+    .brand-info dl { display: grid; grid-template-columns: 9rem 1fr; gap: .35rem .8rem; font-size: .83rem; }
+    .brand-info dt { color: #94a3b8; }
+    .brand-info dd { color: #e2e8f0; }
     #draftCard { display: none; }
     #draftText { min-height: 280px; font-size: .9rem; }
     .contact-note { font-size: .8rem; color: #94a3b8; margin-bottom: .8rem; }
@@ -118,9 +129,23 @@
 
       <div id="panelOwn" hidden>
         <div class="field">
-          <label class="lbl" for="ownBrandName">Brand name</label>
-          <input type="text" id="ownBrandName" maxlength="120" placeholder="e.g. Sunrise Surf Co." oninput="onBrandChange()" autocomplete="off" />
-          <p class="hint">Type the brand you want to pitch, even if it is not one of your matches.</p>
+          <label class="lbl" for="ownBrandInput">The brand's Instagram URL or handle</label>
+          <div class="own-row">
+            <input type="text" id="ownBrandInput" maxlength="200" placeholder="https://www.instagram.com/brandname or @brandname" oninput="onOwnInput()" onkeydown="if (event.key === 'Enter') { event.preventDefault(); findOwnBrand(); }" autocomplete="off" />
+            <button type="button" class="btn secondary" id="findBrandBtn" onclick="findOwnBrand()">Find this brand</button>
+          </div>
+          <p class="hint">Any brand, even one that is not in your matches. MAVLIT reads its Instagram to learn what it sells and who it is for, then writes your pitch from that.</p>
+        </div>
+        <div class="own-status" id="ownStatus"></div>
+        <div class="brand-info" id="ownBrandInfo" hidden>
+          <h3 id="ownBrandTitle"></h3>
+          <dl>
+            <dt>Niche</dt><dd id="ownNiche"></dd>
+            <dt>About</dt><dd id="ownAbout"></dd>
+            <dt>Target audience</dt><dd id="ownAudience"></dd>
+            <dt>Latest product</dt><dd id="ownProduct"></dd>
+          </dl>
+          <p class="hint">Gathered from the brand's Instagram. The audience age is an estimate, not confirmed.</p>
         </div>
       </div>
     </div>
@@ -167,7 +192,7 @@
   </div>
 
 <script>
-  var state = { tab: 'matches', matches: [], selected: null, busy: false, pitchId: null, savedText: '', launchTouched: false };
+  var state = { tab: 'matches', matches: [], selected: null, busy: false, pitchId: null, savedText: '', launchTouched: false, own: { jobId: null, brand: null, timer: null, busy: false } };
 
   function $(id) { return document.getElementById(id); }
 
@@ -180,13 +205,13 @@
     onBrandChange();
   }
 
-  // The brand being pitched: a matched brand (one at a time) or the typed one.
+  // The brand being pitched: a matched brand (one at a time) or the user's own brand once MAVLIT has gathered its info.
   function currentBrand() {
     if (state.tab === 'own') {
-      var name = $('ownBrandName').value.trim();
-      return name ? { name: name, id: null, custom: true } : null;
+      var own = state.own.brand;
+      return own ? { name: own.name || own.instagram_handle, id: own.brand_id, custom: false, latestProduct: own.latest_product || '' } : null;
     }
-    return state.selected ? { name: state.selected.name, id: state.selected.id, custom: false } : null;
+    return state.selected ? { name: state.selected.name, id: state.selected.id, custom: false, latestProduct: state.selected.latestProduct } : null;
   }
 
   function onBrandChange() {
@@ -194,6 +219,7 @@
     var label = brand ? brand.name : 'the brand';
     document.querySelectorAll('.brand-ref').forEach(function(el) { el.textContent = label; });
     $('selectedNote').textContent = state.selected ? 'Selected: ' + state.selected.name : '';
+    $('generateBtn').disabled = state.busy || (state.tab === 'own' && !state.own.brand);
     prefillLaunch(brand);
   }
 
@@ -201,7 +227,7 @@
   // edit or clear it; once they have typed in the box, switching brands no longer overwrites it.
   function prefillLaunch(brand) {
     if (state.launchTouched) return;
-    var latest = brand && !brand.custom && state.selected ? state.selected.latestProduct : '';
+    var latest = brand ? brand.latestProduct : '';
     $('productLaunch').value = latest || '';
     $('launchAutoNote').textContent = latest ? "Filled in from " + brand.name + "'s latest product. Edit or clear it if you want." : '';
   }
@@ -210,6 +236,87 @@
     var el = $('statusMsg');
     el.textContent = message || '';
     el.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  // ---- my own brand -----------------------------------------------------------------
+  // The user gives the brand's Instagram. MAVLIT adds it, reads its latest posts and writes the brand's profile
+  // in the background; the page follows the job until the info is ready. The pitch is then written from it.
+  function onOwnInput() {   // a different handle: forget the brand found for the previous one
+    clearTimeout(state.own.timer);
+    state.own.jobId = null; state.own.brand = null;
+    $('ownBrandInfo').hidden = true;
+    setOwnStatus('', '');
+    onBrandChange();
+  }
+
+  function setOwnStatus(message, kind) {
+    var el = $('ownStatus');
+    el.className = 'own-status' + (kind === 'error' ? ' error' : '');
+    el.innerHTML = '';
+    if (!message) return;
+    if (kind === 'busy') { var sp = document.createElement('span'); sp.className = 'spinner'; el.appendChild(sp); }
+    var text = document.createElement('span'); text.textContent = message; el.appendChild(text);
+  }
+
+  function findOwnBrand() {
+    var value = $('ownBrandInput').value.trim();
+    if (!value) { setOwnStatus("Enter the brand's Instagram URL or handle.", 'error'); return; }
+    if (state.own.busy) return;
+    onOwnInput();
+    state.own.busy = true;
+    $('findBrandBtn').disabled = true;
+    setOwnStatus('MAVLIT is gathering info for this brand…', 'busy');
+    fetch('/own-brands', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instagram: value }),
+    })
+      .then(function(r) {
+        return r.json().catch(function() { return {}; }).then(function(data) {
+          if (r.status === 401) { window.location.replace('/signin?return_to=/pitch'); throw new Error('auth'); }
+          if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not add this brand. Please try again.');
+          return data;
+        });
+      })
+      .then(function(job) { state.own.jobId = job.job_id; followOwnJob(job); })
+      .catch(function(err) { finishOwn(err && err.message === 'auth' ? '' : (err.message || 'Something went wrong. Please try again.')); });
+  }
+
+  function followOwnJob(job) {
+    if (job.status === 'ready') { showOwnBrand(job.brand); finishOwn(''); return; }
+    if (job.status === 'failed') { finishOwn(job.error || 'We could not gather info for this brand. Please try again.'); return; }
+    setOwnStatus('MAVLIT is gathering info for this brand… ' + (job.stage ? job.stage + '.' : ''), 'busy');
+    var jobId = state.own.jobId;
+    state.own.timer = setTimeout(function() {
+      fetch('/own-brands/jobs/' + encodeURIComponent(jobId), { credentials: 'include' })
+        .then(function(r) {
+          if (r.status === 401) { window.location.replace('/signin?return_to=/pitch'); throw new Error('auth'); }
+          if (!r.ok) throw new Error('Could not check the progress. Please try again.');
+          return r.json();
+        })
+        .then(function(next) { if (state.own.jobId === jobId) followOwnJob(next); })   // ignore an answer for a handle the user has since changed
+        .catch(function(err) { if (state.own.jobId === jobId) finishOwn(err && err.message === 'auth' ? '' : (err.message || 'Something went wrong.')); });
+    }, 2000);
+  }
+
+  function finishOwn(errorMessage) {
+    state.own.busy = false;
+    $('findBrandBtn').disabled = false;
+    setOwnStatus(errorMessage, errorMessage ? 'error' : '');
+    onBrandChange();
+  }
+
+  function showOwnBrand(brand) {
+    state.own.brand = brand;
+    $('ownBrandTitle').textContent = brand.name || ('@' + brand.instagram_handle);
+    $('ownNiche').textContent = brand.niche || 'Not clear yet';
+    $('ownAbout').textContent = brand.description || 'Not available';
+    var gender = { male: 'mostly men', female: 'mostly women', both: 'men and women' }[brand.target_audience_gender] || 'Not clear yet';
+    var ages = (brand.target_audience_min_age && brand.target_audience_max_age) ? ', about ' + brand.target_audience_min_age + ' to ' + brand.target_audience_max_age + ' (estimate)' : '';
+    $('ownAudience').textContent = gender + ages;
+    $('ownProduct').textContent = brand.latest_product || 'None found';
+    $('ownBrandInfo').hidden = false;
+    setOwnStatus('Brand info is ready. Now tell us your story below.', '');
   }
 
   // ---- matched brands ---------------------------------------------------------------
@@ -286,7 +393,7 @@
     var launch = $('productLaunch').value.trim();
     var link = $('contentLink').value.trim();
 
-    if (!brand) { setStatus(state.tab === 'own' ? 'Type the name of the brand you want to pitch.' : 'Select one of your matched brands.', 'error'); return; }
+    if (!brand) { setStatus(state.tab === 'own' ? "Enter the brand's Instagram URL or handle and click Find this brand." : 'Select one of your matched brands.', 'error'); return; }
     if (!story) { setStatus('Tell us your connection to ' + brand.name + ' first.', 'error'); return; }
     if (!link) { setStatus('Add a link to your most relevant content.', 'error'); return; }
     if (!validUrl(link)) { setStatus('The content link must start with http:// or https://', 'error'); return; }
@@ -297,9 +404,9 @@
     setStatus('', '');
 
     var body = {
-      is_custom: brand.custom,
-      brand_id: brand.custom ? null : brand.id,
-      custom_brand_name: brand.custom ? brand.name : null,
+      is_custom: false,
+      brand_id: brand.id,
+      custom_brand_name: null,
       story: story,
       product_reference: launch || null,
       past_brand_partnership: past || null,
@@ -390,8 +497,9 @@
         box.placeholder = '';
         $('saveEditBtn').disabled = true;
         state.busy = false;
-        $('generateBtn').disabled = false; $('regenBtn').disabled = false;
+        $('regenBtn').disabled = false;
         $('generateBtn').textContent = 'Generate pitch email draft';
+        onBrandChange();   // re-enables the button when a brand is chosen
       });
   }
 

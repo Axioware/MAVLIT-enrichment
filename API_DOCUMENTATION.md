@@ -362,6 +362,21 @@ The following endpoints are authenticated and implemented for API consumers, but
 - **Errors before the stream starts:** `400` invalid custom/non-custom combination; `401` unauthenticated; `404` brand not found.
 - **Note:** the first piece arrives after the model has finished "thinking" (a few seconds); the text itself then streams in about a second or two. A reverse proxy must not buffer the response (`X-Accel-Buffering: no` is sent).
 
+#### `POST /own-brands`
+
+- **Purpose:** "My own brand" on the pitch page. The handle is looked up in `brands_raw` (an existing brand is reused, otherwise it is added). If the brand already has everything the pitch needs (name, niche, description, target audience gender; the target age and latest product may be empty) the job is `ready` at once and nothing is scraped. Otherwise, in the background and only for what is missing: Apify reads the latest 40 posts if none are saved, then the LLM fills the empty fields (name, description, niche, sub-niche tags, target audience gender and an estimated age, latest product) from the saved bio and captions. Fields that already have a value are never changed.
+- **Auth:** Required.
+- **Body:** `{ "instagram": "https://www.instagram.com/brandname" }`; `@brandname` and `brandname` are accepted too.
+- **Response:** `200`, `{ "job_id": "...", "status": "queued", "stage": "Adding the brand", "error": null, "brand": null }`. `status` is already `ready` (with `brand`) when MAVLIT already knows the brand.
+- **Errors:** `400` the text is not an Instagram profile handle or URL; `401` unauthenticated.
+
+#### `GET /own-brands/jobs/{job_id}`
+
+- **Purpose:** Progress of the request above. Poll every 2 seconds while `status` is `queued` or `running` and show `stage` to the user.
+- **Response:** `200`, `{ "job_id", "status": "queued|running|ready|failed", "stage", "error", "brand": { "brand_id", "name", "instagram_handle", "niche", "description", "target_audience_gender", "target_audience_min_age", "target_audience_max_age", "latest_product" } }`. `brand` is set when `status` is `ready`; the audience age is an estimate. A job that stops updating for 10 minutes is reported as `failed`.
+- **Errors:** `401` unauthenticated; `403` the job belongs to another user; `404` unknown job.
+- **Then:** pitch the brand with `POST /pitches` (or `/pitches/stream`) using `is_custom: false` and the returned `brand_id`. After that first pitch MAVLIT continues in the background with the rest of the brand pipeline: Instagram posts (if none yet), brand tier, sponsorship scores of its posts, Instagram users of the partnership posts, the brand's website (from its Instagram profile), its geo reach and, only when the geo reach score is 0 to 40, the initial score, brand signals and Apollo contacts. A step that is already done for the brand is skipped.
+
 #### `POST /pitches/manual`
 
 - **Purpose:** Record outreach performed outside MAVLIT without generating an AI email.

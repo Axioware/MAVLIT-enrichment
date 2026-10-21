@@ -28,6 +28,7 @@ from api.auth import router as auth_router
 from api.brand_catalog import router as brand_catalog_router
 from api.brands import router as brands_router
 from api.dashboard import router as dashboard_api_router
+from api.own_brands import router as own_brands_router
 from api.pitches import router as pitches_router
 from api.saved_brands import router as saved_brands_router
 from api.schemas import CreatorProfileResponse
@@ -66,6 +67,7 @@ from pipeline.db import (
     CreatorLlmCost,
     LlmUsage,
     MetaAd,
+    OwnBrandJob,
     Pitch,
     Prompt,
     RateEstimate,
@@ -93,6 +95,8 @@ from pipeline.helpers.prompts import (
     BRAND_CHECK_PROMPT_NAME,
     BRAND_BEACH_RELATED_DEFAULT_PROMPT,
     BRAND_BEACH_RELATED_PROMPT_NAME,
+    BRAND_FROM_INSTAGRAM_DEFAULT_PROMPT,
+    BRAND_FROM_INSTAGRAM_PROMPT_NAME,
     BRAND_NICHE_TAGS_DEFAULT_PROMPT,
     BRAND_NICHE_TAGS_PROMPT_NAME,
     COAUTHOR_DEFAULT_PROMPT,
@@ -672,6 +676,7 @@ def _run_migrations() -> None:
             (APOLLO_RANK_PROMPT_NAME,   APOLLO_RANK_DEFAULT_PROMPT),
             (BRAND_NICHE_TAGS_PROMPT_NAME, BRAND_NICHE_TAGS_DEFAULT_PROMPT),
             (BRAND_BEACH_RELATED_PROMPT_NAME, BRAND_BEACH_RELATED_DEFAULT_PROMPT),
+            (BRAND_FROM_INSTAGRAM_PROMPT_NAME, BRAND_FROM_INSTAGRAM_DEFAULT_PROMPT),
             (BRAND_CHECK_PROMPT_NAME,   BRAND_CHECK_DEFAULT_PROMPT),
             (PITCH_PROMPT_NAME,         PITCH_DEFAULT_PROMPT),
             (RATE_INTEL_PROMPT_NAME,    RATE_INTEL_DEFAULT_PROMPT),
@@ -715,6 +720,7 @@ app.include_router(auth_router)
 app.include_router(brands_router)
 app.include_router(saved_brands_router)
 app.include_router(pitches_router)
+app.include_router(own_brands_router)
 app.include_router(dashboard_api_router)
 app.include_router(advisory_router)
 app.include_router(brand_catalog_router)
@@ -956,13 +962,8 @@ class CreatorInstagramPostAdmin(ModelView, model=CreatorInstagramPost):
     name_plural  = "Creator Instagram Posts"
     category     = "Test"
     icon         = "fa-brands fa-instagram"
-    column_list  = [
-        CreatorInstagramPost.creator_profile_id, CreatorInstagramPost.instagram_handle,
-        CreatorInstagramPost.post_url, CreatorInstagramPost.post_type, CreatorInstagramPost.timestamp,
-        CreatorInstagramPost.caption, CreatorInstagramPost.likes_count, CreatorInstagramPost.comments_count,
-        CreatorInstagramPost.fetched_at,
-    ]
-    column_labels = {CreatorInstagramPost.creator_profile_id: "MAVLIT user id"}
+    column_list  = "__all__"
+    column_labels = {CreatorInstagramPost.creator_profile_id: "MAVLIT user id", CreatorInstagramPost.creator: "Creator"}
     column_searchable_list = [CreatorInstagramPost.instagram_handle, CreatorInstagramPost.caption, CreatorInstagramPost.post_url]
     column_sortable_list   = [c.name for c in CreatorInstagramPost.__table__.columns]
     column_default_sort    = [(CreatorInstagramPost.fetched_at, True)]
@@ -1150,6 +1151,26 @@ class SavedBrandAdmin(ModelView, model=SavedBrand):
     column_sortable_list = [c.name for c in SavedBrand.__table__.columns]
     column_default_sort  = [(SavedBrand.created_at, True)]
     page_size = 15
+
+
+class OwnBrandJobAdmin(ModelView, model=OwnBrandJob):
+    """Brands MAVLIT users added through "my own brand" on the pitch page, and how the follow-up pipeline went."""
+    name         = "Own Brand Job"
+    name_plural  = "Own Brand Jobs"
+    category     = "Test"
+    icon         = "fa-solid fa-store"
+    column_list  = [
+        OwnBrandJob.created_at, OwnBrandJob.creator_profile_id, OwnBrandJob.instagram_handle, OwnBrandJob.brand_raw_id,
+        OwnBrandJob.created_brand, OwnBrandJob.status, OwnBrandJob.stage, OwnBrandJob.error,
+        OwnBrandJob.followup_status, OwnBrandJob.followup_log,
+    ]
+    column_labels = {OwnBrandJob.creator_profile_id: "MAVLIT user id", OwnBrandJob.brand_raw_id: "Brand id"}
+    column_searchable_list = [OwnBrandJob.instagram_handle, OwnBrandJob.status, OwnBrandJob.followup_status]
+    column_sortable_list   = [c.name for c in OwnBrandJob.__table__.columns]
+    column_default_sort    = [(OwnBrandJob.created_at, True)]
+    can_create = False
+    can_edit   = False
+    page_size  = 25
 
 
 class PitchAdmin(ModelView, model=Pitch):
@@ -1352,6 +1373,7 @@ admin.add_view(InstagramCreatorCommenterAdmin)
 admin.add_view(PromptAdmin)
 admin.add_view(SavedBrandAdmin)
 admin.add_view(PitchAdmin)
+admin.add_view(OwnBrandJobAdmin)
 admin.add_view(RateEstimateAdmin)
 admin.add_view(ContractReviewAdmin)
 

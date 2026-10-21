@@ -1205,6 +1205,59 @@ Reply ONLY with this JSON object, no extra text:
 Use an empty list for tags if the description and Instagram posts don't give enough information — do not invent tags not supported by the input. If you truly cannot determine a niche from the description or the Instagram posts, use "unknown" for niche. If you truly cannot determine a real brand name from the description or the Instagram bio/posts, use "unknown" for name.\
 """
 
+#  own_brand.py (a MAVLIT user pitches their own brand: the brand profile is built from its Instagram)
+
+BRAND_FROM_INSTAGRAM_PROMPT_NAME = "brand_from_instagram"
+BRAND_FROM_INSTAGRAM_DEFAULT_PROMPT = """\
+You are building the profile of a brand from its own Instagram account, for a brand-creator sponsorship platform. A creator wants to pitch this brand, and your profile is the background the pitch is written from. Use ONLY the information below; do not invent facts.
+
+Instagram account: @{handle}
+Instagram bio:
+{bio}
+
+Business category (from Instagram):
+{business_category}
+
+Followers: {followers}
+
+Recent posts (caption, hashtags, mentioned accounts), newest first:
+{posts}
+
+Return the profile as JSON with these keys:
+
+1. "name": the brand's real, clean name (what the business calls itself, e.g. "Lucky Brand Jeans"), not the @handle and not a slogan. Use "unknown" if you truly cannot tell.
+
+2. "description": 1 to 3 plain sentences (maximum 60 words) saying what the brand is, what it makes or sells and who it is for. Factual, no marketing language, no hashtags, no emojis.
+
+3. "niche": the single best-fit niche.
+- FIRST decide whether this account is really a brand/business at all:
+  - A music band or group (songs, albums, tours, members, gigs) rather than a company: return exactly "Band".
+  - An individual person rather than a business (content creator, influencer, solo artist, athlete, coach, blogger, personal account): return exactly "Creator".
+  - A company that makes or sells music products (instruments, audio gear, music software, labels, streaming, festivals) is a brand, NOT a band.
+- For a real brand, if it belongs to one of these four core niches return exactly that word:
+  - "Fitness": workout, training, gym, sports performance, activewear/athletic gear, fitness equipment or apps, sports nutrition for training
+  - "Health": nutrition, wellness, supplements, vitamins, healthy food/drinks, medical, mental health, sleep, personal health products
+  - "Music": music products and services, instruments, audio gear, music production software, labels, streaming, concerts/festivals
+  - "Beauty": makeup, cosmetics, skincare, haircare, nails, fragrance, beauty tools/services
+- Only if it clearly fits none of those four, return the best-fit broad niche written in plain words with spaces, for example "Fashion", "Food beverage", "Tech", "Home goods", "Pets", "Toys", "Automotive", "Travel", "Entertainment", "Finance", "Education". The four core niches always win over a broader category when the products mainly serve that area.
+- Use "unknown" only if you truly cannot tell.
+
+4. "tags": 3 to 8 specific sub-niche tags describing what the brand actually makes or sells (for example "women's denim", "cowboy boots", "sustainable clothing"). Only tags supported by the information; use an empty list if there is not enough information.
+
+5. "target_audience_gender": who the brand's MARKETING is aimed at: exactly "male", "female" or "both". Use "both" when it is mixed, unclear or the evidence is weak.
+   "target_audience_gender_confidence": 0 to 100.
+
+6. "target_audience_min_age" and "target_audience_max_age": the age range the marketing is aimed at, as whole numbers between 13 and 80 (for example 18 and 34), or null for both when you cannot tell.
+   "target_audience_age_confidence": 0 to 100. This is only an estimate from public posts, never a confirmed fact, so keep the confidence low (usually 30 to 60) unless the posts state the audience directly.
+
+7. "latest_product": the brand's most recent specific product, collection or launch that the posts clearly promote (for example "Lil' Maggie ultra low flare women's jeans (relaunch)"), written as a short product name. null if no specific product is clearly shown. Never guess or invent a product.
+   "latest_product_confidence": 0 to 100 (0 when latest_product is null).
+
+Reply ONLY with this JSON object, no extra text:
+{"name": "...", "description": "...", "niche": "...", "tags": ["..."], "target_audience_gender": "male|female|both", "target_audience_gender_confidence": 0, "target_audience_min_age": null, "target_audience_max_age": null, "target_audience_age_confidence": 0, "latest_product": null, "latest_product_confidence": 0}\
+"""
+
+
 # Added to the brand_niche_tags prompt (shopify_detect.py) only for brands with
 # brands_raw.beach_brands = true: their tags should reflect the beach/ocean side
 # of what they sell. Inserted before the "Reply ONLY with this JSON object" line,

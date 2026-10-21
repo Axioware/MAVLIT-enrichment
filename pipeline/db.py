@@ -874,6 +874,35 @@ class Pitch(Base):
         return f"Pitch#{self.id} {self.brand_name} ({self.status})"
 
 
+class OwnBrandJob(Base):
+    """
+    A MAVLIT user's "my own brand" request on the pitch page (pipeline/own_brand.py): the
+    brand's Instagram handle is added to brands_raw (or an existing row is reused), its
+    posts are scraped and an LLM writes the brand profile. status/stage let the page show
+    progress while this runs. After the user's first pitch for the brand, the rest of the
+    pipeline (tier, website, geo, partnership posts, scoring, signals, Apollo) runs in the
+    background and followup_status / followup_log record how that went.
+    """
+    __tablename__ = "own_brand_jobs"
+
+    id                  = Column(Text, primary_key=True)   # uuid4 string
+    creator_profile_id  = Column(Integer, ForeignKey("creator_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    brand_raw_id        = Column(Integer, ForeignKey("brands_raw.id"), index=True)
+    instagram_handle    = Column(Text, nullable=False)
+    created_brand       = Column(Boolean, nullable=False, server_default="false", default=False)   # this request added the brands_raw row
+
+    status              = Column(Text, nullable=False, server_default="queued", default="queued")   # queued | running | ready | failed
+    stage               = Column(Text)    # what the page shows while running
+    error               = Column(Text)
+
+    followup_status     = Column(Text)    # NULL (not started) | running | done | failed
+    followup_started_at = Column(TIMESTAMP(timezone=True))
+    followup_log        = Column(JSONB)   # [{"step": "geo_reach", "result": 1}, ...]
+
+    created_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at          = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class RateEstimate(Base):
     """A saved LLM rate-intelligence estimate for a creator/brand/deliverable combo."""
     __tablename__ = "rate_estimates"

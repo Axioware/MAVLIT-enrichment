@@ -1,7 +1,8 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
@@ -15,6 +16,7 @@ from api.schemas import (
 )
 from pipeline.db import BrandRaw, CreatorProfile, Pitch, SessionLocal, get_db
 from pipeline.helpers.gpt_llm import LLMUnavailableError
+from pipeline.own_brand import claim_followup, run_followup
 from pipeline.pitching import generate_pitch, stream_pitch
 
 router = APIRouter(prefix="/pitches", tags=["pitches"])
@@ -33,6 +35,7 @@ _STATUS_TRANSITIONS = {
 @router.post("", response_model=PitchResponse)
 def create_pitch(
     body: PitchRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: CreatorProfile = Depends(get_current_user),
 ):
@@ -57,6 +60,10 @@ def create_pitch(
         raise HTTPException(status_code=404, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+    # A brand the user added through "my own brand": now that the pitch exists, run the rest of its pipeline.
+    followup_job = claim_followup(db, current_user.id, pitch.brand_raw_id)
+    if followup_job:
+        background_tasks.add_task(run_followup, followup_job)
     return pitch_to_response(pitch)
 
 
@@ -86,6 +93,11 @@ def stream_pitch_endpoint(
     elif not db.query(BrandRaw.id).filter(BrandRaw.id == body.brand_id).first():
         raise HTTPException(status_code=404, detail=f"brand_id={body.brand_id} not found")
     creator_id = current_user.id
+    followups: list[str] = []   # filled once the pitch is saved; run after the response has been sent
+
+    def start_followups():
+        for job_id in followups:
+            run_followup(job_id)
 
     def events():
         # its own session: the request's session may be closed before the stream ends
@@ -105,6 +117,9 @@ def stream_pitch_endpoint(
                     if kind == "delta":
                         yield _sse({"type": "delta", "text": value})
                     else:
+                        job_id = claim_followup(stream_db, creator_id, value.brand_raw_id)
+                        if job_id:
+                            followups.append(job_id)
                         yield _sse({"type": "done", "pitch": json.loads(pitch_to_response(value).model_dump_json())})
             except (LLMUnavailableError, RuntimeError, ValueError) as exc:
                 yield _sse({"type": "error", "detail": str(exc)})
@@ -113,6 +128,7 @@ def stream_pitch_endpoint(
         events(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},   # no proxy buffering
+        background=BackgroundTask(start_followups),
     )
 
 

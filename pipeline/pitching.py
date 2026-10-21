@@ -5,6 +5,7 @@ and persists it as a generated, unsent Pitch row.
 """
 
 import logging
+import re
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from pipeline.brand_detail import _top_contact
 from pipeline.db import BrandRaw, CreatorProfile, InstagramPost, Pitch, Prompt
 from pipeline.helpers.creator_gender import creator_match_gender
+from pipeline.helpers.social import normalize_handle
 from pipeline.helpers.gpt_llm import call_gpt_text, fill_template, llm_usage_scope, stream_gpt_text
 from pipeline.helpers.prompts import (
     PITCH_DEFAULT_PROMPT,
@@ -193,7 +195,12 @@ def _build_pitch_prompt(
         brand = db.query(BrandRaw).filter(BrandRaw.id == brand_id).first()
         if not brand:
             raise ValueError(f"brand_id={brand_id} not found")
-        brand_name = brand.name or brand.instagram_handle or "this brand"
+        # own_brand.py keeps names unique by adding " (@handle)"; the email uses the plain name
+        brand_name = (
+            re.sub(r"\s*\(@[A-Za-z0-9._]+\)$", "", brand.name or "")
+            or normalize_handle(brand.instagram_handle or "")
+            or "this brand"
+        )
         brand_niche = brand.niche or "unknown"
         brand_description = brand.description or "none provided"
         contact = _top_contact(db, brand_id)
