@@ -195,6 +195,7 @@
     .post-link:hover { text-decoration: underline; }
     .post-caption { font-size: .85rem; color: #cbd5e1; margin: .35rem 0; }
     .post-stats { font-size: .78rem; color: #94a3b8; }
+    .post-date { font-size: .76rem; color: #64748b; margin-bottom: .15rem; }
     .post-actions { display: flex; align-items: center; gap: .9rem; margin-top: .5rem; }
     .toggle { display: inline-flex; align-items: center; gap: .45rem; font-size: .78rem; color: #cbd5e1; cursor: pointer; }
     .toggle input { position: absolute; opacity: 0; pointer-events: none; }
@@ -1240,6 +1241,13 @@
     if (event.key === 'Escape' && !document.getElementById('postsModal').hidden) closePosts();
   });
 
+  // When the post was published, in the user's own time zone ("Oct 20, 2026, 3:04 PM"); "–" when Instagram gave no date.
+  function formatPostedAt(value) {
+    var date = value ? new Date(value) : null;
+    if (!date || isNaN(date.getTime())) return '–';
+    return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+
   function formatCount(value) { return value === null || value === undefined ? '–' : Number(value).toLocaleString(); }
 
   function renderPosts() {
@@ -1275,6 +1283,11 @@
       caption.className = 'post-caption';
       caption.textContent = post.caption_preview || '(no caption)';
       row.appendChild(caption);
+
+      var posted = document.createElement('div');
+      posted.className = 'post-date';
+      posted.textContent = 'Posted ' + formatPostedAt(post.timestamp);
+      row.appendChild(posted);
 
       var stats = document.createElement('div');
       stats.className = 'post-stats';
