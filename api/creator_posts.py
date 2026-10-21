@@ -33,6 +33,7 @@ class CreatorPostsResponse(BaseModel):
 
 class AddPostRequest(BaseModel):
     post_url: str
+    is_partnership_post: bool = False   # also mark the post as a paid partnership (the pitch's "Past brand partnerships" picker does)
 
 
 class PartnershipRequest(BaseModel):
@@ -58,15 +59,16 @@ def _item(row: CreatorInstagramPost) -> CreatorPostItem:
     )
 
 
-def _response(db: Session, creator_id: int, search: str | None = None) -> CreatorPostsResponse:
+def _response(db: Session, creator_id: int, search: str | None = None, partnership_only: bool = False) -> CreatorPostsResponse:
     total = posts_query(db, creator_id).count()   # the delete rule always looks at ALL posts, not at the search result
-    rows = list_posts(db, creator_id, search)
+    rows = list_posts(db, creator_id, search, partnership_only)
     return CreatorPostsResponse(total=total, shown=len(rows), min_keep=MIN_POSTS, can_delete=total > MIN_POSTS, posts=[_item(r) for r in rows])
 
 
 @router.get("", response_model=CreatorPostsResponse)
 def get_my_posts(
     q: str | None = Query(default=None, max_length=100, description="only posts whose caption contains this text"),
+    partnership_only: bool = Query(default=False, description="only the posts marked as paid partnerships"),
     db: Session = Depends(get_db),
     current_user: CreatorProfile = Depends(get_current_user),
 ):
@@ -75,7 +77,7 @@ def get_my_posts(
     Instagram was never scraped. `q` searches the whole caption of each post (any case); total and can_delete still
     count all posts.
     """
-    return _response(db, current_user.id, q)
+    return _response(db, current_user.id, q, partnership_only)
 
 
 @router.post("", response_model=CreatorPostItem)
@@ -86,6 +88,8 @@ def add_my_post(body: AddPostRequest, db: Session = Depends(get_db), current_use
     """
     try:
         row, _how = add_post(db, current_user, body.post_url)
+        if body.is_partnership_post and not row.partnership_post:
+            row = set_partnership(db, row, True)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except LookupError as exc:

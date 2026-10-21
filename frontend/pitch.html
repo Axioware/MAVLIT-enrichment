@@ -84,6 +84,40 @@
     .status.error { color: #f87171; }
     .status.ok { color: #4ade80; }
 
+    .chips { display: flex; flex-direction: column; gap: .4rem; margin-bottom: .5rem; }
+    .chip { display: flex; align-items: center; gap: .6rem; background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: .45rem .7rem; font-size: .83rem; color: #e2e8f0; }
+    .chip .chip-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chip .chip-kind { color: #94a3b8; font-size: .72rem; flex: none; }
+    .chip button { background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 1.1rem; line-height: 1; }
+    .chip button:hover { color: #f87171; }
+    .pick-btn { background: #0f172a; color: #38bdf8; border: 1px dashed #38bdf8; border-radius: 8px; padding: .5rem .8rem; font-size: .83rem; cursor: pointer; font-family: inherit; }
+    .pick-btn:hover { background: #0c4a6e; }
+    .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 1rem; background: rgba(2, 6, 23, .55); backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px); }
+    .modal-backdrop[hidden] { display: none; }
+    .modal { width: 100%; max-width: 720px; max-height: 88vh; display: flex; flex-direction: column; background: #1e293b; border: 1px solid #334155; border-radius: 14px; padding: 1.1rem 1.2rem 1.2rem; box-shadow: 0 20px 60px rgba(0, 0, 0, .5); }
+    .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .3rem; }
+    .modal-head h2 { font-size: 1.05rem; color: #f1f5f9; margin: 0; }
+    .modal-close { background: none; border: none; color: #94a3b8; font-size: 1.6rem; line-height: 1; cursor: pointer; }
+    .modal-close:hover { color: #f1f5f9; }
+    #pickList { overflow-y: auto; margin: .6rem 0; flex: 1; min-height: 70px; }
+    .pick-row { display: flex; align-items: flex-start; gap: .7rem; border: 1px solid #334155; border-radius: 10px; background: #0f172a; padding: .6rem .75rem; margin-bottom: .5rem; cursor: pointer; }
+    .pick-row.on { border-color: #38bdf8; background: #0c2a44; }
+    .pick-row.off { opacity: .5; cursor: not-allowed; }
+    .pick-row input { margin-top: .2rem; accent-color: #38bdf8; }
+    .pick-body { min-width: 0; }
+    .pick-link { color: #38bdf8; font-size: .8rem; text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pick-caption { font-size: .84rem; color: #cbd5e1; margin: .2rem 0; }
+    .pick-stats { font-size: .76rem; color: #94a3b8; }
+    .pick-add { border-top: 1px solid #334155; padding-top: .8rem; }
+    .pick-add .row { display: flex; gap: .5rem; margin-bottom: .5rem; }
+    .pick-add input { flex: 1; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: .55rem .7rem; font-size: .85rem; font-family: inherit; }
+    .pick-add input:focus { outline: none; border-color: #38bdf8; }
+    .pick-add .small { padding: .55rem .9rem; background: #0284c7; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: .85rem; font-family: inherit; }
+    .pick-add .small:disabled { opacity: .55; cursor: not-allowed; }
+    .pick-foot { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin-top: .4rem; }
+    .pick-msg { font-size: .8rem; min-height: 1.1em; color: #94a3b8; }
+    .pick-msg.error { color: #f87171; }
+    .pick-msg.ok { color: #4ade80; }
     .multi-row { display: flex; gap: .5rem; margin-bottom: .5rem; }
     .multi-row input { flex: 1; }
     .remove-entry { background: #0f172a; color: #94a3b8; border: 1px solid #334155; border-radius: 8px; width: 2.4rem; cursor: pointer; font-size: 1.1rem; line-height: 1; font-family: inherit; }
@@ -172,15 +206,15 @@
       </div>
       <div class="field">
         <label class="lbl">Past brand partnerships <span class="opt">(optional)</span></label>
-        <div id="pastList" data-maxlength="500" data-placeholder="A brand you have worked with and any result worth mentioning"></div>
-        <button type="button" class="add-more" id="pastListAdd" onclick="addEntry('pastList')">+ Add another partnership</button>
-        <p class="hint">Up to 3.</p>
+        <div class="chips" id="pastChips"></div>
+        <button type="button" class="pick-btn" id="pastPickBtn" onclick="openPicker('past')">+ Choose from your partnership posts</button>
+        <p class="hint">Up to 3. Pick the posts you marked as paid partnerships, add a post link, or describe a partnership in a few words.</p>
       </div>
       <div class="field">
         <label class="lbl">Link to your most relevant content</label>
-        <div id="linkList" data-type="url" data-maxlength="500" data-placeholder="https://www.instagram.com/p/…"></div>
-        <button type="button" class="add-more" id="linkListAdd" onclick="addEntry('linkList')">+ Add another link</button>
-        <p class="hint">Link to content that shows your connection to this brand. Up to 3.</p>
+        <div class="chips" id="linkChips"></div>
+        <button type="button" class="pick-btn" id="linkPickBtn" onclick="openPicker('links')">+ Choose your posts</button>
+        <p class="hint">Up to 3 posts that show your connection to this brand. Pick from your posts or add a new post link.</p>
       </div>
       <div class="actions">
         <button type="button" class="btn" id="generateBtn" onclick="generatePitch()">Generate pitch email draft</button>
@@ -202,8 +236,37 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="pickModal" hidden onclick="if (event.target === this) closePicker()">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pickTitle">
+      <div class="modal-head">
+        <h2 id="pickTitle"></h2>
+        <button type="button" class="modal-close" onclick="closePicker()" aria-label="Close">&times;</button>
+      </div>
+      <p class="hint" id="pickNote"></p>
+      <div id="pickList"></div>
+      <div class="pick-add">
+        <label class="lbl" for="pickNewUrl">Add a post</label>
+        <div class="row">
+          <input type="url" id="pickNewUrl" placeholder="https://www.instagram.com/p/…" autocomplete="off" onkeydown="if (event.key === 'Enter') { event.preventDefault(); pickAddPost(); }" />
+          <button type="button" class="small" id="pickAddBtn" onclick="pickAddPost()">Add post</button>
+        </div>
+        <div id="pickTextRow" hidden>
+          <label class="lbl" for="pickNewText">Or describe a partnership</label>
+          <div class="row">
+            <input type="text" id="pickNewText" maxlength="200" placeholder="e.g. Falscara lashes, 2025 campaign" autocomplete="off" onkeydown="if (event.key === 'Enter') { event.preventDefault(); pickAddText(); }" />
+            <button type="button" class="small" onclick="pickAddText()">Add</button>
+          </div>
+        </div>
+        <div class="pick-foot">
+          <div class="pick-msg" id="pickMsg"></div>
+          <button type="button" class="btn" onclick="closePicker()">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
 <script>
-  var state = { tab: 'matches', matches: [], selected: null, busy: false, pitchId: null, savedText: '', launchTouched: false, own: { jobId: null, brand: null, timer: null, busy: false } };
+  var state = { tab: 'matches', matches: [], selected: null, busy: false, pitchId: null, savedText: '', launchTouched: false, sel: { links: [], past: [] }, picker: { kind: null, posts: [], busy: false }, own: { jobId: null, brand: null, timer: null, busy: false } };
 
   function $(id) { return document.getElementById(id); }
 
@@ -431,7 +494,193 @@
       .filter(Boolean);
   }
 
-  ['launchList', 'pastList', 'linkList'].forEach(function(id) { addEntry(id, false); });
+  addEntry('launchList', false);
+  renderChips('past');
+  renderChips('links');
+
+  // ---- posts for "Past brand partnerships" and "Link to your most relevant content" ---------------
+  // The user's own posts (creator_instagram_posts, the same ones as "Your recent Instagram posts" on the profile page)
+  // are chosen in a pop-up with a blurred background: up to 3 per field. A post the user adds there by link is read by
+  // MAVLIT (Apify, only when it has never been saved) and saved to the same list. The two fields are sent comma-separated.
+  var MAX_PICKS = 3;
+  var PICK_TITLES = { links: 'Choose the posts that show your connection to the brand', past: 'Choose your past brand partnership posts' };
+
+  function pickList(kind) { return kind === 'past' ? state.sel.past : state.sel.links; }
+
+  function renderChips(kind) {
+    var box = $(kind === 'past' ? 'pastChips' : 'linkChips');
+    box.innerHTML = '';
+    pickList(kind).forEach(function(entry, index) {
+      var chip = document.createElement('div');
+      chip.className = 'chip';
+      var text = document.createElement('span');
+      text.className = 'chip-text';
+      text.textContent = entry.kind === 'text' ? entry.text : (entry.caption ? entry.caption : entry.url);
+      text.title = entry.kind === 'text' ? entry.text : entry.url;
+      var type = document.createElement('span');
+      type.className = 'chip-kind';
+      type.textContent = entry.kind === 'text' ? 'described' : 'post';
+      var remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = '×';
+      remove.title = 'Remove';
+      remove.onclick = function() { pickList(kind).splice(index, 1); renderChips(kind); if (state.picker.kind === kind) renderPicker(); };
+      chip.appendChild(text); chip.appendChild(type); chip.appendChild(remove);
+      box.appendChild(chip);
+    });
+    $(kind === 'past' ? 'pastPickBtn' : 'linkPickBtn').textContent =
+      pickList(kind).length ? (pickList(kind).length >= MAX_PICKS ? 'Change my choice' : '+ Choose more') : (kind === 'past' ? '+ Choose from your partnership posts' : '+ Choose your posts');
+  }
+
+  function pickApi(url, options) {
+    options = options || {};
+    options.credentials = 'include';
+    if (options.body) options.headers = { 'Content-Type': 'application/json' };
+    return fetch(url, options).then(function(r) {
+      if (r.status === 401) { window.location.replace('/signin?return_to=/pitch'); throw new Error('auth'); }
+      return r.json().catch(function() { return {}; }).then(function(data) {
+        if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Something went wrong. Please try again.');
+        return data;
+      });
+    });
+  }
+
+  function pickMessage(text, kind) {
+    var el = $('pickMsg');
+    el.textContent = text || '';
+    el.className = 'pick-msg' + (kind ? ' ' + kind : '');
+  }
+
+  function openPicker(kind) {
+    state.picker = { kind: kind, posts: [], busy: false };
+    $('pickTitle').textContent = PICK_TITLES[kind];
+    $('pickTextRow').hidden = kind !== 'past';
+    $('pickNewUrl').value = '';
+    $('pickNewText').value = '';
+    pickMessage('', '');
+    $('pickModal').hidden = false;
+    document.body.style.overflow = 'hidden';
+    renderPicker();
+    loadPickerPosts();
+  }
+
+  function closePicker() {
+    $('pickModal').hidden = true;
+    document.body.style.overflow = '';
+    state.picker.kind = null;
+  }
+
+  document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape' && !$('pickModal').hidden) closePicker();
+  });
+
+  function loadPickerPosts() {
+    var kind = state.picker.kind;
+    var url = '/creator-profile/me/posts' + (kind === 'past' ? '?partnership_only=true' : '');
+    return pickApi(url)
+      .then(function(data) { if (state.picker.kind === kind) { state.picker.posts = data.posts; renderPicker(); } })
+      .catch(function(err) { if (err.message !== 'auth') pickMessage(err.message, 'error'); });
+  }
+
+  function isChosen(kind, url) { return pickList(kind).some(function(e) { return e.kind === 'post' && e.url === url; }); }
+
+  function renderPicker() {
+    var kind = state.picker.kind;
+    if (!kind) return;
+    var chosen = pickList(kind).length;
+    $('pickNote').textContent = (kind === 'past'
+      ? 'Showing the posts you marked as paid partnerships. '
+      : 'Showing all your saved posts. ') + chosen + ' of ' + MAX_PICKS + ' chosen.';
+    var list = $('pickList');
+    list.innerHTML = '';
+    if (!state.picker.posts.length) {
+      var empty = document.createElement('p');
+      empty.className = 'hint';
+      empty.textContent = kind === 'past'
+        ? 'No post is marked as a paid partnership yet. Add a post link below, describe a partnership, or switch the toggle on in "Your recent Instagram posts" on your profile page.'
+        : 'No saved posts yet. Add a post link below.';
+      list.appendChild(empty);
+    }
+    state.picker.posts.forEach(function(post) {
+      var on = isChosen(kind, post.post_url);
+      var row = document.createElement('label');
+      row.className = 'pick-row' + (on ? ' on' : '') + (!on && chosen >= MAX_PICKS ? ' off' : '');
+      var box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = on;
+      box.disabled = !on && chosen >= MAX_PICKS;
+      box.onchange = function() { togglePick(kind, post, box.checked); };
+      var body = document.createElement('div');
+      body.className = 'pick-body';
+      var link = document.createElement('a');
+      link.className = 'pick-link';
+      link.href = post.post_url || '#';
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = post.post_url || '';
+      link.onclick = function(e) { e.stopPropagation(); };
+      var caption = document.createElement('div');
+      caption.className = 'pick-caption';
+      caption.textContent = post.caption_preview || '(no caption)';
+      var stats = document.createElement('div');
+      stats.className = 'pick-stats';
+      var n = function(v) { return v === null || v === undefined ? '–' : Number(v).toLocaleString(); };
+      stats.textContent = 'Likes ' + n(post.likes_count) + '  ·  Comments ' + n(post.comments_count) + '  ·  Views ' + n(post.views_count);
+      body.appendChild(link); body.appendChild(caption); body.appendChild(stats);
+      row.appendChild(box); row.appendChild(body);
+      list.appendChild(row);
+    });
+  }
+
+  function togglePick(kind, post, checked) {
+    var list = pickList(kind);
+    var at = list.findIndex(function(e) { return e.kind === 'post' && e.url === post.post_url; });
+    if (checked && at === -1) {
+      if (list.length >= MAX_PICKS) { pickMessage('You can choose up to ' + MAX_PICKS + '.', 'error'); renderPicker(); return; }
+      list.push({ kind: 'post', url: post.post_url, caption: post.caption_preview || '' });
+    } else if (!checked && at !== -1) {
+      list.splice(at, 1);
+    }
+    pickMessage('', '');
+    renderChips(kind);
+    renderPicker();
+  }
+
+  // Add a post by its link: MAVLIT reads it only when it has never been saved. From the partnerships picker the post
+  // is also marked as a paid partnership, so it shows in this list. It is chosen straight away when there is room.
+  function pickAddPost() {
+    var kind = state.picker.kind;
+    var url = $('pickNewUrl').value.trim();
+    if (!url) { pickMessage('Paste the link of an Instagram post.', 'error'); return; }
+    if (state.picker.busy) return;
+    state.picker.busy = true;
+    $('pickAddBtn').disabled = true;
+    $('pickAddBtn').textContent = 'Reading the post…';
+    pickMessage('MAVLIT is reading this post. This can take up to a minute.', '');
+    pickApi('/creator-profile/me/posts', { method: 'POST', body: JSON.stringify({ post_url: url, is_partnership_post: kind === 'past' }) })
+      .then(function(post) {
+        $('pickNewUrl').value = '';
+        if (!isChosen(kind, post.post_url) && pickList(kind).length < MAX_PICKS) {
+          pickList(kind).push({ kind: 'post', url: post.post_url, caption: post.caption_preview || '' });
+          renderChips(kind);
+        }
+        return loadPickerPosts().then(function() { pickMessage('Post added.', 'ok'); });
+      })
+      .catch(function(err) { if (err.message !== 'auth') pickMessage(err.message, 'error'); })
+      .finally(function() { state.picker.busy = false; $('pickAddBtn').disabled = false; $('pickAddBtn').textContent = 'Add post'; });
+  }
+
+  // "Past brand partnerships" also takes a short description (a brand name...), sent to the LLM as typed.
+  function pickAddText() {
+    var text = $('pickNewText').value.replace(/,/g, ' ').replace(/\s+/g, ' ').trim();   // the field is sent comma-separated
+    if (!text) { pickMessage('Describe a partnership first.', 'error'); return; }
+    if (state.sel.past.length >= MAX_PICKS) { pickMessage('You can choose up to ' + MAX_PICKS + '. Remove one first.', 'error'); return; }
+    state.sel.past.push({ kind: 'text', text: text });
+    $('pickNewText').value = '';
+    pickMessage('', '');
+    renderChips('past');
+    renderPicker();
+  }
 
   // ---- pitch ------------------------------------------------------------------------
   function validUrl(value) {
@@ -445,13 +694,12 @@
     var brand = currentBrand();
     var story = $('story').value.trim();
     var launches = getEntries('launchList');
-    var pasts = getEntries('pastList');
-    var links = getEntries('linkList');
+    var pasts = state.sel.past.map(function(e) { return e.kind === 'post' ? e.url : e.text; });   // chosen posts + described partnerships
+    var links = state.sel.links.map(function(e) { return e.url; });                                // chosen posts
 
     if (!brand) { setStatus(state.tab === 'own' ? "Enter the brand's Instagram URL or handle and click Find this brand." : 'Select one of your matched brands.', 'error'); return; }
     if (!story) { setStatus('Tell us your connection to ' + brand.name + ' first.', 'error'); return; }
-    if (!links.length) { setStatus('Add a link to your most relevant content.', 'error'); return; }
-    if (!links.every(validUrl)) { setStatus('Every content link must start with http:// or https://', 'error'); return; }
+    if (!links.length) { setStatus('Choose at least one post that shows your connection to this brand.', 'error'); return; }
 
     state.busy = true;
     $('generateBtn').disabled = true; $('regenBtn').disabled = true;

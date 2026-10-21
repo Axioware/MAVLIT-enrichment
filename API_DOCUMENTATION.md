@@ -367,7 +367,7 @@ The following endpoints are authenticated and implemented for API consumers, but
 
 - **Purpose:** "Your recent Instagram posts" on the profile page: the posts saved for the creator (scraped when MAVLIT generated the description, or added by the creator).
 - **Auth:** Required.
-- **Query:** optional `q` (up to 100 characters) returns only the posts whose whole caption contains that text, in any case. `total` and `can_delete` still count all posts.
+- **Query:** optional `q` (up to 100 characters) returns only the posts whose whole caption contains that text, in any case; optional `partnership_only=true` returns only the posts marked as paid partnerships. `total` and `can_delete` still count all posts.
 - **Response:** `200`, `{ "total": 20, "shown": 20, "min_keep": 10, "can_delete": true, "posts": [{ "id", "post_url", "caption_preview" (start of the caption only), "post_type", "timestamp", "likes_count", "comments_count", "views_count", "is_partnership_post" }] }`, newest first. `total` is 0 for a creator whose Instagram was never scraped (the page hides the section).
 
 #### `PATCH /creator-profile/me/posts/{id}`
@@ -380,7 +380,7 @@ The following endpoints are authenticated and implemented for API consumers, but
 
 #### `POST /creator-profile/me/posts`
 
-- **Body:** `{ "post_url": "https://www.instagram.com/p/XXXX/" }` (post or reel link).
+- **Body:** `{ "post_url": "https://www.instagram.com/p/XXXX/", "is_partnership_post": false }` (post or reel link; `is_partnership_post: true` also marks the post as a paid partnership, which the pitch page's "Past brand partnerships" picker uses).
 - **Purpose:** Add a post. One already on the profile is returned unchanged; one saved for another MAVLIT user is copied; only a post MAVLIT has not read before is scraped with Apify (a few seconds to a minute) and saved.
 - **Response:** `200`, the post (same shape as an item above). **Errors:** `400` not an Instagram post link, or the 50-post limit is reached; `422` the post could not be read (private, deleted, Instagram unreachable).
 

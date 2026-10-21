@@ -32,9 +32,14 @@ def posts_query(db: Session, creator_id: int):
     )
 
 
-def list_posts(db: Session, creator_id: int, search: str | None = None) -> list[CreatorInstagramPost]:
-    """The user's saved posts, newest first. With `search`, only the posts whose WHOLE caption contains that text (any case)."""
+def list_posts(db: Session, creator_id: int, search: str | None = None, partnership_only: bool = False) -> list[CreatorInstagramPost]:
+    """
+    The user's saved posts, newest first. With `search`, only the posts whose WHOLE caption contains that text (any
+    case); with `partnership_only`, only the posts the user marked as paid partnerships.
+    """
     query = posts_query(db, creator_id)
+    if partnership_only:
+        query = query.filter(CreatorInstagramPost.partnership_post.is_(True))
     text_ = (search or "").strip()
     if text_:
         escaped = text_.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")   # % and _ are searched as plain characters
