@@ -449,7 +449,7 @@
       </div>
       <p class="niche-hint" id="postsNote"></p>
       <div class="posts-search">
-        <input type="search" id="postsSearch" placeholder="Search your posts by caption…" autocomplete="off" onkeydown="if (event.key === 'Enter') { event.preventDefault(); searchPosts(); }" />
+        <input type="search" id="postsSearch" placeholder="Search your posts by caption…" autocomplete="off" oninput="searchPostsSoon()" onkeydown="if (event.key === 'Enter') { event.preventDefault(); searchPosts(); }" />
         <button type="button" onclick="searchPosts()">Search</button>
         <button type="button" id="postsSearchClear" onclick="clearPostsSearch()" hidden>Clear</button>
       </div>
@@ -1198,12 +1198,25 @@
   }
 
   // The list, or only the posts whose caption contains postsState.query (the server searches the whole caption).
+  var postsRequest = 0;       // numbers the list requests: only the newest answer is shown
+  var postsSearchTimer = null;
+
   function loadPosts() {
     var url = '/creator-profile/me/posts' + (postsState.query ? '?q=' + encodeURIComponent(postsState.query) : '');
-    return postsFetch(url).then(setPostsList).catch(function() { /* not signed in yet: no card */ });
+    var mine = ++postsRequest;
+    return postsFetch(url)
+      .then(function(data) { if (mine === postsRequest) setPostsList(data); })   // a slower, older answer must not overwrite a newer one
+      .catch(function() { /* not signed in yet: no card */ });
+  }
+
+  // Search while typing: shortly after the last key press (the Search button and Enter search at once).
+  function searchPostsSoon() {
+    clearTimeout(postsSearchTimer);
+    postsSearchTimer = setTimeout(searchPosts, 250);
   }
 
   function searchPosts() {
+    clearTimeout(postsSearchTimer);
     postsState.query = document.getElementById('postsSearch').value.trim();
     document.getElementById('postsSearchClear').hidden = !postsState.query;
     postsMessage('', '');
@@ -1223,6 +1236,7 @@
 
   function openPosts() {
     postsState.query = '';
+    clearTimeout(postsSearchTimer);
     document.getElementById('postsSearch').value = '';
     document.getElementById('postsSearchClear').hidden = true;
     document.getElementById('postsModal').hidden = false;

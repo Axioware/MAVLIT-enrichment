@@ -256,7 +256,7 @@ def _build_pitch_prompt(
         brand_partner_creators=partners_text,
         contact_name=contact_name,
         contact_title=contact_title,
-        story=story,
+        story=(story or "").strip() or "none provided",
         past_brand_partnership=past_text or "none provided",
         content_link=link_text or "none provided",
     )

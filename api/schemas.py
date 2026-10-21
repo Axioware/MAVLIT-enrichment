@@ -204,7 +204,7 @@ class PitchRequest(BaseModel):
     is_custom: bool
     brand_id: int | None = None
     custom_brand_name: str | None = None
-    story: str
+    story: str = ""   # optional: without it the pitch is written from the creator's content and the brand's fit
     product_reference: str | None = None
     past_brand_partnership: str | None = None
     content_link: str | None = None

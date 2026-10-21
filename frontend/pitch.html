@@ -160,7 +160,7 @@
 
   <div class="wrap">
     <h1>Pitch a brand</h1>
-    <p class="subtitle">Choose the brand you want to work with, tell us your story, and MAVLIT writes a rough draft of your pitch email.</p>
+    <p class="subtitle">Choose the brand you want to work with, add your story and proof if you like, and MAVLIT writes a rough draft of your pitch email.</p>
 
     <div class="card">
       <h2><span class="step">1</span> Choose the brand</h2>
@@ -201,8 +201,9 @@
     <div class="card">
       <h2><span class="step">2</span> Your story &amp; social proof</h2>
       <div class="field">
-        <label class="lbl" for="story">Your authentic connection to <span class="brand-ref">the brand</span> — the story</label>
+        <label class="lbl" for="story">Your authentic connection to <span class="brand-ref">the brand</span> — the story <span class="opt">(optional)</span></label>
         <textarea id="story" maxlength="3000" placeholder="Why this brand? How did you discover it, and what makes the fit real for you and your audience?"></textarea>
+        <p class="hint">Optional. If you leave it empty, MAVLIT opens the email with what you make and why the brand fits your audience.</p>
       </div>
       <div class="field">
         <label class="lbl">Reference a recent product launch <span class="opt">(optional)</span></label>
@@ -251,7 +252,7 @@
       </div>
       <p class="hint" id="pickNote"></p>
       <div class="pick-search">
-        <input type="search" id="pickSearch" placeholder="Search your posts by caption…" autocomplete="off" onkeydown="if (event.key === 'Enter') { event.preventDefault(); pickSearch(); }" />
+        <input type="search" id="pickSearch" placeholder="Search your posts by caption…" autocomplete="off" oninput="pickSearchSoon()" onkeydown="if (event.key === 'Enter') { event.preventDefault(); pickSearch(); }" />
         <button type="button" onclick="pickSearch()">Search</button>
         <button type="button" id="pickSearchClear" onclick="pickClearSearch()" hidden>Clear</button>
       </div>
@@ -573,6 +574,7 @@
   function openPicker(kind) {
     state.picker = { kind: kind, posts: [], busy: false, query: '' };
     $('pickSearch').value = '';
+    clearTimeout(pickSearchTimer);
     $('pickSearchClear').hidden = true;
     $('pickTitle').textContent = PICK_TITLES[kind];
     $('pickTextRow').hidden = kind !== 'past';
@@ -602,12 +604,22 @@
     if (kind === 'past') params.push('partnership_only=true');
     if (state.picker.query) params.push('q=' + encodeURIComponent(state.picker.query));
     var url = '/creator-profile/me/posts' + (params.length ? '?' + params.join('&') : '');
+    var mine = state.picker.request = (state.picker.request || 0) + 1;   // only the newest answer is shown
     return pickApi(url)
-      .then(function(data) { if (state.picker.kind === kind) { state.picker.posts = data.posts; renderPicker(); } })
+      .then(function(data) { if (state.picker.kind === kind && mine === state.picker.request) { state.picker.posts = data.posts; renderPicker(); } })
       .catch(function(err) { if (err.message !== 'auth') pickMessage(err.message, 'error'); });
   }
 
+  var pickSearchTimer = null;
+
+  // Search while typing: shortly after the last key press (the Search button and Enter search at once).
+  function pickSearchSoon() {
+    clearTimeout(pickSearchTimer);
+    pickSearchTimer = setTimeout(pickSearch, 250);
+  }
+
   function pickSearch() {
+    clearTimeout(pickSearchTimer);
     state.picker.query = $('pickSearch').value.trim();
     $('pickSearchClear').hidden = !state.picker.query;
     pickMessage('', '');
@@ -738,7 +750,6 @@
     var links = state.sel.links.map(function(e) { return e.url; });                                // chosen posts
 
     if (!brand) { setStatus(state.tab === 'own' ? "Enter the brand's Instagram URL or handle and click Find this brand." : 'Select one of your matched brands.', 'error'); return; }
-    if (!story) { setStatus('Tell us your connection to ' + brand.name + ' first.', 'error'); return; }
     if (!links.length) { setStatus('Choose at least one post that shows your connection to this brand.', 'error'); return; }
 
     state.busy = true;
