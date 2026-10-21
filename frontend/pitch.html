@@ -109,6 +109,12 @@
     .pick-caption { font-size: .84rem; color: #cbd5e1; margin: .2rem 0; }
     .pick-stats { font-size: .76rem; color: #94a3b8; }
     .pick-date { font-size: .74rem; color: #64748b; margin-bottom: .15rem; }
+    .pick-search { display: flex; gap: .5rem; margin: .3rem 0 .1rem; }
+    .pick-search input { flex: 1; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: .5rem .7rem; font-size: .85rem; font-family: inherit; }
+    .pick-search input:focus { outline: none; border-color: #38bdf8; }
+    .pick-search button { padding: .5rem .85rem; background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; cursor: pointer; font-size: .85rem; font-family: inherit; }
+    .pick-search button:hover { border-color: #38bdf8; color: #38bdf8; }
+    .pick-search button[hidden] { display: none; }
     .pick-add { border-top: 1px solid #334155; padding-top: .8rem; }
     .pick-add .row { display: flex; gap: .5rem; margin-bottom: .5rem; }
     .pick-add input { flex: 1; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: .55rem .7rem; font-size: .85rem; font-family: inherit; }
@@ -244,6 +250,11 @@
         <button type="button" class="modal-close" onclick="closePicker()" aria-label="Close">&times;</button>
       </div>
       <p class="hint" id="pickNote"></p>
+      <div class="pick-search">
+        <input type="search" id="pickSearch" placeholder="Search your posts by caption…" autocomplete="off" onkeydown="if (event.key === 'Enter') { event.preventDefault(); pickSearch(); }" />
+        <button type="button" onclick="pickSearch()">Search</button>
+        <button type="button" id="pickSearchClear" onclick="pickClearSearch()" hidden>Clear</button>
+      </div>
       <div id="pickList"></div>
       <div class="pick-add">
         <label class="lbl" for="pickNewUrl">Add a post</label>
@@ -267,7 +278,7 @@
   </div>
 
 <script>
-  var state = { tab: 'matches', matches: [], selected: null, busy: false, pitchId: null, savedText: '', launchTouched: false, sel: { links: [], past: [] }, picker: { kind: null, posts: [], busy: false }, own: { jobId: null, brand: null, timer: null, busy: false } };
+  var state = { tab: 'matches', matches: [], selected: null, busy: false, pitchId: null, savedText: '', launchTouched: false, sel: { links: [], past: [] }, picker: { kind: null, posts: [], busy: false, query: '' }, own: { jobId: null, brand: null, timer: null, busy: false } };
 
   function $(id) { return document.getElementById(id); }
 
@@ -560,7 +571,9 @@
   }
 
   function openPicker(kind) {
-    state.picker = { kind: kind, posts: [], busy: false };
+    state.picker = { kind: kind, posts: [], busy: false, query: '' };
+    $('pickSearch').value = '';
+    $('pickSearchClear').hidden = true;
     $('pickTitle').textContent = PICK_TITLES[kind];
     $('pickTextRow').hidden = kind !== 'past';
     $('pickNewUrl').value = '';
@@ -584,10 +597,26 @@
 
   function loadPickerPosts() {
     var kind = state.picker.kind;
-    var url = '/creator-profile/me/posts' + (kind === 'past' ? '?partnership_only=true' : '');
+    // Only the partnership posts for "Past brand partnerships", and only the posts whose caption contains the search text.
+    var params = [];
+    if (kind === 'past') params.push('partnership_only=true');
+    if (state.picker.query) params.push('q=' + encodeURIComponent(state.picker.query));
+    var url = '/creator-profile/me/posts' + (params.length ? '?' + params.join('&') : '');
     return pickApi(url)
       .then(function(data) { if (state.picker.kind === kind) { state.picker.posts = data.posts; renderPicker(); } })
       .catch(function(err) { if (err.message !== 'auth') pickMessage(err.message, 'error'); });
+  }
+
+  function pickSearch() {
+    state.picker.query = $('pickSearch').value.trim();
+    $('pickSearchClear').hidden = !state.picker.query;
+    pickMessage('', '');
+    return loadPickerPosts();
+  }
+
+  function pickClearSearch() {
+    $('pickSearch').value = '';
+    return pickSearch();
   }
 
   function isChosen(kind, url) { return pickList(kind).some(function(e) { return e.kind === 'post' && e.url === url; }); }
@@ -604,7 +633,7 @@
     if (!state.picker.posts.length) {
       var empty = document.createElement('p');
       empty.className = 'hint';
-      empty.textContent = kind === 'past'
+      empty.textContent = state.picker.query ? 'No ' + (kind === 'past' ? 'partnership ' : '') + 'post caption contains "' + state.picker.query + '".' : kind === 'past'
         ? 'No post is marked as a paid partnership yet. Add a post link below, describe a partnership, or switch the toggle on in "Your recent Instagram posts" on your profile page.'
         : 'No saved posts yet. Add a post link below.';
       list.appendChild(empty);
