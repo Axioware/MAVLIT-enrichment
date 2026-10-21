@@ -99,6 +99,20 @@ def sub_niches_from_result(result: dict, options: list[str]) -> list[str]:
     return picked[:_SUB_NICHES_MAX]
 
 
+def highest_views_from_items(items: list[dict]) -> int | None:
+    """
+    The most views on any scraped reel / video post: the maximum of Apify's videoViewCount over the posts.
+    The play count (videoPlayCount) is not used. None when no post has a view count (image-only posts, or
+    views hidden), so a value the creator typed is not overwritten.
+    """
+    best = None
+    for item in items:
+        value = item.get("videoViewCount")
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            best = int(value) if best is None else max(best, int(value))
+    return best
+
+
 def followers_from_items(items: list[dict]) -> int | None:
     """The account's follower count from the Apify items (profile data sits under metaData)."""
     for item in items:
@@ -226,5 +240,5 @@ def generate_instagram_description(db: Session, username: str, niche: str, creat
         raise RuntimeError("The LLM did not return a creator description")
 
     return {"description": description, "posts_analyzed": len(captions), "bio_found": bool(bio),
-            "followers_count": followers, "sub_niches": sub_niches_from_result(result, options),
+            "followers_count": followers, "highest_views": highest_views_from_items(items[:_POSTS_LIMIT]), "sub_niches": sub_niches_from_result(result, options),
             **audience_from_result(result)}

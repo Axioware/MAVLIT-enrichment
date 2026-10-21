@@ -574,6 +574,7 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS youtube_stats",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS facebook_stats",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_followers INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_highest_views INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_following INTEGER",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS tiktok_handle",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS tiktok_followers",
@@ -1753,6 +1754,7 @@ class CreatorProfileRequest(BaseModel):
 
     instagram_handle: str | None = None
     instagram_followers: int | None = None
+    instagram_highest_views: int | None = Field(default=None, ge=0)
 
     primary_platform: str | None = None
     follower_count:   int | None = None
@@ -1982,6 +1984,9 @@ def _run_creator_description_job(
             row.instagram_followers = result["followers_count"]
             if (row.primary_platform or "").split(",")[0].strip().lower() == "instagram":
                 row.follower_count = result["followers_count"]
+        # The most views on any of the scraped reels / video posts (kept as typed when none of them has views).
+        if platform == "instagram" and result.get("highest_views") is not None:
+            row.instagram_highest_views = result["highest_views"]
         # 3-4 sub-niches picked by the LLM; the creator's own choice is kept if they already made one.
         if result.get("sub_niches") and not getattr(row, f"{platform}_sub_niches"):
             setattr(row, f"{platform}_sub_niches", result["sub_niches"])

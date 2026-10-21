@@ -23,6 +23,7 @@ class CreatorProfileResponse(BaseModel):
 
     instagram_handle: str | None = None
     instagram_followers: int | None = None
+    instagram_highest_views: int | None = None
 
     primary_platform: str | None = None
     follower_count:   int | None = None
@@ -92,6 +93,7 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         pitch_style_preferences=row.pitch_style_preferences,
         instagram_handle=row.instagram_handle,
         instagram_followers=row.instagram_followers,
+        instagram_highest_views=row.instagram_highest_views,
         primary_platform=row.primary_platform,
         follower_count=row.follower_count,
         instagram_primary_niche=row.instagram_primary_niche,
