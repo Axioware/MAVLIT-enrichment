@@ -767,97 +767,78 @@
       past_brand_partnership: pasts.join(', ') || null,
       content_link: links.join(', '),
     };
-    // The draft card opens at once and the email is written into it live, as the LLM produces it.
+    // The email is written by the server in one go (POST /pitches, saved right away). The page then types it into the
+    // draft box word by word, so it looks like it is being written live.
     var box = $('draftText');
-    var finished = false;
     state.pitchId = null;
     box.value = '';
     box.readOnly = true;
     box.placeholder = 'MAVLIT is writing your pitch…';
     $('saveEditBtn').disabled = true;
     $('contactNote').textContent = '';
-    setDraftStatus('Writing your pitch…', '');
+    setDraftStatus('MAVLIT is writing your pitch…', '');
     $('draftCard').style.display = 'block';
     $('draftCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-    function handleEvent(ev) {
-      if (ev.type === 'status') {
-        setDraftStatus(ev.text, '');
-      } else if (ev.type === 'delta') {
-        box.value += ev.text;
-        box.scrollTop = box.scrollHeight;
-      } else if (ev.type === 'done') {
-        var pitch = ev.pitch;
-        finished = true;
-        state.pitchId = pitch.id;
-        state.savedText = pitch.pitch_text || '';
-        box.value = state.savedText;
-        $('contactNote').textContent = pitch.contact_name
-          ? 'Suggested contact at ' + pitch.brand_name + ': ' + pitch.contact_name + (pitch.contact_email ? ' (' + pitch.contact_email + ')' : '')
-          : '';
-        setDraftStatus('', '');
-      } else if (ev.type === 'error') {
-        throw new Error(ev.detail || 'Could not generate the pitch. Please try again.');
-      }
-    }
-
-    // Server-sent events: "data: {json}" blocks separated by a blank line.
-    function readEvents(buffer, flush) {
-      var blocks = buffer.split('\n\n');
-      var rest = flush ? '' : blocks.pop();
-      blocks.forEach(function(block) {
-        block.split('\n').forEach(function(line) {
-          if (line.indexOf('data:') === 0) handleEvent(JSON.parse(line.slice(5).trim()));
-        });
-      });
-      return rest;
-    }
-
-    fetch('/pitches/stream', {
+    fetch('/pitches', {
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
       .then(function(r) {
-        if (r.status === 401) { window.location.replace('/signin?return_to=/pitch'); throw new Error('auth'); }
-        if (!r.ok) {
-          return r.json().catch(function() { return {}; }).then(function(data) {
-            throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not generate the pitch. Please try again.');
-          });
-        }
-        if (!r.body || !r.body.getReader) {   // browser without streaming: show the whole email at the end
-          return r.text().then(function(all) { readEvents(all, true); });
-        }
-        var reader = r.body.getReader();
-        var decoder = new TextDecoder();
-        var buffer = '';
-        function pump() {
-          return reader.read().then(function(chunk) {
-            if (chunk.done) { readEvents(buffer + decoder.decode(), true); return; }
-            buffer = readEvents(buffer + decoder.decode(chunk.value, { stream: true }), false);
-            return pump();
-          });
-        }
-        return pump();
+        return r.json().catch(function() { return {}; }).then(function(data) {
+          if (r.status === 401) { window.location.replace('/signin?return_to=/pitch'); throw new Error('auth'); }
+          if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not generate the pitch. Please try again.');
+          return data;
+        });
       })
-      .then(function() {
-        if (!finished) throw new Error('The connection ended before your pitch was finished. Please try again.');
+      .then(function(pitch) {
+        setDraftStatus('', '');
+        return typeInto(box, pitch.pitch_text || '').then(function() {
+          state.pitchId = pitch.id;
+          state.savedText = pitch.pitch_text || '';
+          box.value = state.savedText;   // exactly the saved text
+          $('contactNote').textContent = pitch.contact_name
+            ? 'Suggested contact at ' + pitch.brand_name + ': ' + pitch.contact_name + (pitch.contact_email ? ' (' + pitch.contact_email + ')' : '')
+            : '';
+        });
       })
       .catch(function(err) {
         if (err && err.message === 'auth') return;
-        $('draftCard').style.display = 'none';   // nothing was saved: drop the partial text
+        $('draftCard').style.display = 'none';   // nothing to show
         box.value = '';
         setStatus(err.message || 'Something went wrong. Please try again.', 'error');
       })
       .finally(function() {
         box.readOnly = false;
         box.placeholder = '';
+        box.onclick = null;
         $('saveEditBtn').disabled = true;
         state.busy = false;
         $('regenBtn').disabled = false;
         $('generateBtn').textContent = 'Generate pitch email draft';
         onBrandChange();   // re-enables the button when a brand is chosen
       });
+  }
+
+  // Types `text` into the box word by word (about 4 seconds at most, however long the email is) so it looks like it is
+  // being written live. Clicking the box shows the rest at once. Resolves when the whole text is in the box.
+  function typeInto(box, text) {
+    return new Promise(function(resolve) {
+      var words = text.match(/\s*\S+\s*/g) || [];
+      if (!words.length) { resolve(); return; }
+      var delay = Math.max(12, Math.min(60, 4000 / words.length));
+      var shown = 0;
+      var timer = null;
+      function finish() { clearTimeout(timer); box.onclick = null; box.value = text; box.scrollTop = box.scrollHeight; resolve(); }
+      box.onclick = finish;
+      function step() {
+        box.value += words[shown++];
+        box.scrollTop = box.scrollHeight;
+        if (shown >= words.length) finish(); else timer = setTimeout(step, delay);
+      }
+      step();
+    });
   }
 
   // Edits are only stored when the creator clicks "Save changes".
