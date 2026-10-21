@@ -21,6 +21,8 @@ from pipeline.helpers.prompts import (
     PITCH_PRODUCT_RULE,
     PITCH_PROMPT_NAME,
     PITCH_STYLE_BLOCK,
+    PITCH_VIEWS_LINE,
+    PITCH_VIEWS_RULE,
 )
 
 logger = logging.getLogger(__name__)
@@ -218,8 +220,12 @@ def _build_pitch_prompt(
     if (product_reference or "").strip() and "{product_reference}" not in template:
         # an edited stored copy without the placeholder: still use the product launch
         template = template.rstrip() + "\n\n" + PITCH_PRODUCT_INPUT_LINE + PITCH_PRODUCT_RULE
+    if creator.instagram_highest_views and "{creator_highest_views}" not in template:
+        # an edited stored copy without the placeholder: still give the LLM the creator's highest views
+        template = template.rstrip() + "\n\n" + PITCH_VIEWS_LINE + PITCH_VIEWS_RULE
     prompt = fill_template(
         template,
+        creator_highest_views=f"{creator.instagram_highest_views:,}" if creator.instagram_highest_views else "unknown",
         pitch_style_preferences=style or "none",
         product_reference=(product_reference or "").strip() or "none provided",
         creator_name=creator.full_name or "unknown",

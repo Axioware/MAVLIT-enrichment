@@ -1619,6 +1619,15 @@ PITCH_PRODUCT_RULE = """\
 - If a recent product launch is given above, weave it into the email as the natural reason for writing now (the timing), inside a sentence that also carries the creator's connection or interest. Do NOT add it as a separate line or paragraph, and do not add details about the launch beyond what the creator wrote. If it says "none provided", do not mention any launch.
 """
 
+# The creator's highest view count on a reel / video among their latest 20 posts
+# (creator_profiles.instagram_highest_views). Own constants so earlier stored copies can be recognised.
+PITCH_VIEWS_LINE = """\
+Highest views on one of their recent reels or videos (among their latest 20 posts): {creator_highest_views}
+"""
+PITCH_VIEWS_RULE = """\
+- If the creator's highest views are given above, you may mention it once, briefly, as proof of reach (for example "one of my recent reels reached about 120k views"), rounded naturally and tied to a recent reel or video. It is the best of their latest 20 posts, so never present it as their typical or average views or as a promised result. If it says "unknown", leave it out.
+"""
+
 PITCH_DEFAULT_PROMPT = """\
 You are writing the first draft of an outreach email FROM a content creator TO a brand, pitching a paid sponsorship / partnership. Write it in the creator's own voice, as if they wrote it themselves: a real person emailing another real person.
 
@@ -1640,7 +1649,7 @@ Instagram: @{creator_handle}
 Niche: {creator_niche}
 Sub-niches: {creator_sub_niches}
 Instagram followers: {creator_follower_count}
-Main audience gender: {creator_audience_gender}
+""" + PITCH_VIEWS_LINE + """Main audience gender: {creator_audience_gender}
 What their content is about: {creator_content_description}
 Their audience: {creator_audience_description}
 
@@ -1664,7 +1673,7 @@ Rules:
 - Sound warm, specific and human (or in the tone the creator's style preferences ask for). Do NOT sound salesy, generic or like a template.
 - Do NOT use em dashes anywhere. Use commas, periods or separate sentences.
 - Do NOT use stock phrases such as "I hope this email finds you well", "I'm reaching out because", "I wanted to touch base", "in today's digital landscape", "collaboration opportunity", "synergy", "game-changer".
-""" + PITCH_PRODUCT_RULE + """- Use ONLY facts given above. Do not invent products, results, prices, rates, engagement numbers, locations or past work. If an item says "none provided" or "unknown", leave it out instead of guessing.
+""" + PITCH_PRODUCT_RULE + PITCH_VIEWS_RULE + """- Use ONLY facts given above. Do not invent products, results, prices, rates, engagement numbers, locations or past work. If an item says "none provided" or "unknown", leave it out instead of guessing.
 - The brand information is background, not something the creator knows for sure: do not claim inside knowledge of the brand's plans, sales or audience data. Anything marked as not confirmed must not be stated as a fact.
 - Do not mention MAVLIT, matching scores or that the information came from a database.
 - Do not ask for a specific rate or payment in this first email.
@@ -1677,7 +1686,7 @@ Rules:
 def _previous_pitch_defaults() -> tuple[str, ...]:
     """The default prompt with every combination of its later additions left out."""
     from itertools import product
-    blocks = (PITCH_STYLE_BLOCK, PITCH_EXAMPLE_BLOCK, PITCH_PRODUCT_INPUT_LINE, PITCH_PRODUCT_RULE)
+    blocks = (PITCH_STYLE_BLOCK, PITCH_EXAMPLE_BLOCK, PITCH_PRODUCT_INPUT_LINE, PITCH_PRODUCT_RULE, PITCH_VIEWS_LINE, PITCH_VIEWS_RULE)
     versions = []
     for keep in product((True, False), repeat=len(blocks)):
         text = PITCH_DEFAULT_PROMPT
