@@ -84,6 +84,13 @@
     .status.error { color: #f87171; }
     .status.ok { color: #4ade80; }
 
+    .multi-row { display: flex; gap: .5rem; margin-bottom: .5rem; }
+    .multi-row input { flex: 1; }
+    .remove-entry { background: #0f172a; color: #94a3b8; border: 1px solid #334155; border-radius: 8px; width: 2.4rem; cursor: pointer; font-size: 1.1rem; line-height: 1; font-family: inherit; }
+    .remove-entry:hover { color: #f87171; border-color: #f87171; }
+    .add-more { background: none; border: none; color: #38bdf8; font-size: .82rem; cursor: pointer; padding: .15rem 0; font-family: inherit; }
+    .add-more:hover { text-decoration: underline; }
+    .add-more[hidden] { display: none; }
     .own-row { display: flex; gap: .6rem; }
     .own-row input { flex: 1; }
     .own-status { display: flex; align-items: center; gap: .6rem; font-size: .85rem; color: #38bdf8; margin-top: .8rem; min-height: 1.3em; }
@@ -157,19 +164,23 @@
         <textarea id="story" maxlength="3000" placeholder="Why this brand? How did you discover it, and what makes the fit real for you and your audience?"></textarea>
       </div>
       <div class="field">
-        <label class="lbl" for="productLaunch">Reference a recent product launch <span class="opt">(optional)</span></label>
-        <input type="text" id="productLaunch" maxlength="300" placeholder="e.g. the new Revitalift Hyaluronic Acid serum" autocomplete="off" oninput="state.launchTouched = true; $('launchAutoNote').textContent = ''" />
-        <p class="hint">If filled in, it'll be woven into your pitch as a natural reason for the timing, not added as a separate line.</p>
+        <label class="lbl">Reference a recent product launch <span class="opt">(optional)</span></label>
+        <div id="launchList" data-first-id="productLaunch" data-maxlength="300" data-placeholder="e.g. the new Revitalift Hyaluronic Acid serum"></div>
+        <button type="button" class="add-more" id="launchListAdd" onclick="addEntry('launchList')">+ Add another product launch</button>
+        <p class="hint">If filled in, it'll be woven into your pitch as a natural reason for the timing, not added as a separate line. Up to 3.</p>
         <p class="hint" id="launchAutoNote" style="color:#38bdf8"></p>
       </div>
       <div class="field">
-        <label class="lbl" for="pastPartnerships">Past brand partnerships <span class="opt">(optional)</span></label>
-        <textarea id="pastPartnerships" maxlength="2000" placeholder="Brands you have worked with and any results worth mentioning."></textarea>
+        <label class="lbl">Past brand partnerships <span class="opt">(optional)</span></label>
+        <div id="pastList" data-maxlength="500" data-placeholder="A brand you have worked with and any result worth mentioning"></div>
+        <button type="button" class="add-more" id="pastListAdd" onclick="addEntry('pastList')">+ Add another partnership</button>
+        <p class="hint">Up to 3.</p>
       </div>
       <div class="field">
-        <label class="lbl" for="contentLink">Link to your most relevant content</label>
-        <input type="url" id="contentLink" maxlength="500" placeholder="https://www.instagram.com/p/…" autocomplete="off" />
-        <p class="hint">Link to content that shows your connection to this brand.</p>
+        <label class="lbl">Link to your most relevant content</label>
+        <div id="linkList" data-type="url" data-maxlength="500" data-placeholder="https://www.instagram.com/p/…"></div>
+        <button type="button" class="add-more" id="linkListAdd" onclick="addEntry('linkList')">+ Add another link</button>
+        <p class="hint">Link to content that shows your connection to this brand. Up to 3.</p>
       </div>
       <div class="actions">
         <button type="button" class="btn" id="generateBtn" onclick="generatePitch()">Generate pitch email draft</button>
@@ -378,6 +389,50 @@
     });
   }
 
+  // ---- fields that take up to 3 values (launches, past partnerships, content links) ------------
+  var MAX_ENTRIES = 3;
+
+  function entryRows(listId) { return $(listId).querySelectorAll('.multi-row'); }
+
+  // One more input in the list (the first row keeps the id given in data-first-id).
+  function addEntry(listId, focus) {
+    var list = $(listId);
+    var rows = entryRows(listId);
+    if (rows.length >= MAX_ENTRIES) return;
+    var row = document.createElement('div');
+    row.className = 'multi-row';
+    var input = document.createElement('input');
+    input.type = list.dataset.type || 'text';
+    input.maxLength = Number(list.dataset.maxlength) || 300;
+    input.placeholder = list.dataset.placeholder || '';
+    input.autocomplete = 'off';
+    if (!rows.length && list.dataset.firstId) input.id = list.dataset.firstId;
+    if (listId === 'launchList') input.oninput = function() { state.launchTouched = true; $('launchAutoNote').textContent = ''; };
+    row.appendChild(input);
+    if (rows.length) {   // the first row cannot be removed
+      var remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'remove-entry';
+      remove.textContent = '×';
+      remove.title = 'Remove';
+      remove.onclick = function() { row.remove(); refreshAdd(listId); };
+      row.appendChild(remove);
+    }
+    list.appendChild(row);
+    refreshAdd(listId);
+    if (focus) input.focus();
+  }
+
+  function refreshAdd(listId) { $(listId + 'Add').hidden = entryRows(listId).length >= MAX_ENTRIES; }
+
+  // The filled-in values of a list, trimmed, empty ones skipped.
+  function getEntries(listId) {
+    return Array.prototype.map.call($(listId).querySelectorAll('input'), function(i) { return i.value.trim(); })
+      .filter(Boolean);
+  }
+
+  ['launchList', 'pastList', 'linkList'].forEach(function(id) { addEntry(id, false); });
+
   // ---- pitch ------------------------------------------------------------------------
   function validUrl(value) {
     try { var u = new URL(value); return u.protocol === 'http:' || u.protocol === 'https:'; } catch (e) { return false; }
@@ -389,14 +444,14 @@
         !confirm('You have unsaved changes to this email. Generate a new one anyway?')) return;
     var brand = currentBrand();
     var story = $('story').value.trim();
-    var past = $('pastPartnerships').value.trim();
-    var launch = $('productLaunch').value.trim();
-    var link = $('contentLink').value.trim();
+    var launches = getEntries('launchList');
+    var pasts = getEntries('pastList');
+    var links = getEntries('linkList');
 
     if (!brand) { setStatus(state.tab === 'own' ? "Enter the brand's Instagram URL or handle and click Find this brand." : 'Select one of your matched brands.', 'error'); return; }
     if (!story) { setStatus('Tell us your connection to ' + brand.name + ' first.', 'error'); return; }
-    if (!link) { setStatus('Add a link to your most relevant content.', 'error'); return; }
-    if (!validUrl(link)) { setStatus('The content link must start with http:// or https://', 'error'); return; }
+    if (!links.length) { setStatus('Add a link to your most relevant content.', 'error'); return; }
+    if (!links.every(validUrl)) { setStatus('Every content link must start with http:// or https://', 'error'); return; }
 
     state.busy = true;
     $('generateBtn').disabled = true; $('regenBtn').disabled = true;
@@ -408,9 +463,10 @@
       brand_id: brand.id,
       custom_brand_name: null,
       story: story,
-      product_reference: launch || null,
-      past_brand_partnership: past || null,
-      content_link: link,
+      // Up to 3 values per field, sent to the API as one comma-separated text (the fields the API already has).
+      product_reference: launches.join(', ') || null,
+      past_brand_partnership: pasts.join(', ') || null,
+      content_link: links.join(', '),
     };
     // The draft card opens at once and the email is written into it live, as the LLM produces it.
     var box = $('draftText');
