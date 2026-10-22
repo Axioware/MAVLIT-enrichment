@@ -553,11 +553,3 @@ python3 -m pipeline.enrichment.brand_branded_content_check --dry-run
 python3 -m pipeline.enrichment.brand_branded_content_check --limit 20
 python3 -m pipeline.enrichment.brand_branded_content_check
 python3 -m pipeline.enrichment.brand_branded_content_check --brand-id 123 --recheck
-
-
-## TASKS
-### after all have to run LLM(one time) for niche of creators for specific selected niche
-### have to make another pipeline so that it scrape creator re and brands after month or two month for recency posts
-### brands creators insta follower min max +20% up down to users
-
-### task for 23-9-26 (update the hard filters brandraw.geo_reach_score null or 0-40 and brands_raw.refferls = false)
