@@ -82,6 +82,11 @@ def _contacts(db: Session, brand_raw_id: int) -> tuple[dict | None, list[dict]]:
     return top[1], [d for c, d in rows if c is not top[0]]
 
 
+def _top_contact(db: Session, brand_raw_id: int) -> dict | None:
+    """The contact shown first for a brand (also used to address a pitch)."""
+    return _contacts(db, brand_raw_id)[0]
+
+
 def get_brand_detail(db: Session, brand_raw_id: int) -> dict | None:
     brand = db.query(BrandRaw).filter(BrandRaw.id == brand_raw_id).first()
     if not brand:
