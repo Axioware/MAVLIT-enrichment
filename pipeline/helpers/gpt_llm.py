@@ -13,8 +13,8 @@ from config import EMBEDDING_MODEL, OPENAI_KEY
 logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.openai.com/v1"
-_MODEL = "gpt-5-mini"
-# gpt-5-mini rejects any custom "temperature" value (only the model default
+_MODEL = "gpt-6-luna"
+# gpt-5-mini (and, to be safe, the newer models) reject any custom "temperature" value (only the model default
 # is accepted) — confirmed live: passing temperature=0 returns a 400
 # "Unsupported value" error. Do not add a temperature param to these calls.
 
@@ -39,6 +39,9 @@ _TIMEOUT = 60.0
 _PRICES = {
     "gpt-5":                  (1.25, 0.125, 10.00),
     "gpt-5-mini":             (0.25, 0.025, 2.00),
+    # The two Luna prices are third-party reports of OpenAI's list prices (not read from OpenAI's page): verify.
+    "gpt-5.6-luna":           (0.20, 0.02, 1.20),
+    "gpt-6-luna":             (0.10, 0.01, 0.50),
     "gpt-5-nano":             (0.05, 0.005, 0.40),
     "gpt-5.4-mini":           (0.75, 0.075, 4.50),
     "text-embedding-3-small": (0.02, 0.02, 0.0),
@@ -337,7 +340,7 @@ def call_gpt_json(
 
 def call_gpt_text(prompt: str, context: str = "") -> str:
     """
-    Send prompt to OpenAI (gpt-5-mini) and return the raw text response.
+    Send prompt to OpenAI (the default _MODEL) and return the raw text response.
     Returns "" on an invalid request / unparseable response; raises
     LLMUnavailableError when OpenAI itself is unavailable.
     """

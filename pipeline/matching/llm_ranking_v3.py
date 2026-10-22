@@ -61,7 +61,7 @@ from pipeline.matching.matcher import hard_filtered_brands
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gpt-5-mini"
+_MODEL = "gpt-6-luna"
 
 
 def _gender_label(value: str | None) -> str:

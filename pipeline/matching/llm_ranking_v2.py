@@ -41,7 +41,7 @@ from pipeline.matching.matcher import hard_filtered_brands
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gpt-5"           # V2 ranking only — the rest of the pipeline uses gpt_llm's default (gpt-5-mini)
+_MODEL = "gpt-6-luna"      # same as gpt_llm's default
 _MAX_BRANDS = 300          # nearest-first cap on hard-filtered brands sent to the LLM
 _BATCH_SIZE = 20           # brands per LLM call
 _WORKERS = 4               # LLM calls in flight at once

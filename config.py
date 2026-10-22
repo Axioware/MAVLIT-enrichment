@@ -67,7 +67,7 @@ FACEBOOK_PROXIES = os.getenv("FACEBOOK_PROXIES", "")
 # LLM verification (Claude) — set ENABLE_LLM=true to activate
 ENABLE_LLM        = os.getenv("ENABLE_LLM", "false").strip().lower() == "true"
 
-# LLM classification/extraction + embeddings (OpenAI, gpt-5-mini + text-embedding-3-small)
+# LLM classification/extraction + embeddings (OpenAI, gpt-6-luna + text-embedding-3-small)
 OPENAI_KEY = os.getenv("OPENAI_KEY", "")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 
