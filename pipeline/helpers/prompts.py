@@ -1738,7 +1738,8 @@ CREATOR VALUE AND AUDIENCE RELEVANCE
   brand experience, relevant past partnerships, or a documented recent
   video's performance.
 - Use only the strongest available evidence. Do not force every supplied
-  detail into the email.
+  detail into the email, except the creator's past brand partnerships,
+  which must always be mentioned when supplied.
 - Mention follower count only when it adds useful context. Never make
   the email primarily about follower count.
 - Never claim that followers have purchased products, intend to purchase
@@ -1750,8 +1751,10 @@ CREATOR VALUE AND AUDIENCE RELEVANCE
 
 PAST BRAND PARTNERSHIPS
 
-- Mention the creator's previous partnerships only when they are supplied
-  and relevant to the current brand.
+- When the creator supplies past brand partnerships, always mention them
+  in the email (see SUPPORTING EVIDENCE). Never drop them for being
+  unrelated to the current brand; frame them as sponsored-content
+  experience instead.
 - Do not invent brand names, campaign details, deliverables, results,
   or professional relationships.
 - If confirmed sponsored creators are supplied for the current brand,
@@ -1950,11 +1953,20 @@ should communicate relevance, not just audience size.
 
 3. SUPPORTING EVIDENCE
 
-Mention relevant past partnerships only when provided and useful.
+If the creator supplied past brand partnerships, the email must mention
+them. The creator added them on purpose, so do not leave them out. Work
+them in as one or two natural sentences of proof that the creator already
+works with brands, naming the brands or posts exactly as supplied (at
+most three, briefly). If a partnership is in a different category from
+the current brand, still mention it, framed simply as experience
+delivering sponsored content, and do not claim it is relevant beyond what
+the supplied information shows. When a partnership comes with a post URL
+and caption, describe it in your own words (the brand and what the post
+was, taken from the caption) instead of pasting the caption, and give the
+URL once. If the value is "none provided", skip this step.
 
-If the creator has a relevant confirmed partnership or a strong example
-of existing content, use it to support the pitch without exaggerating
-its significance.
+If the creator also has a strong example of existing content, use it to
+support the pitch without exaggerating its significance.
 
 If confirmed creators already partner with the brand, mentioning one is
 optional. Do so only if it adds meaningful context. Never imply that the
@@ -1965,7 +1977,7 @@ Include the highest recent video views only when they strengthen the
 pitch. Describe them as the views of one specific recent reel or video,
 not as typical or average performance.
 
-Do not force social proof into the email when it adds little value.
+Do not force other social proof into the email when it adds little value.
 
 4. RELEVANT CONTENT
 
