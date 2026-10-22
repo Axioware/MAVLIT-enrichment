@@ -146,6 +146,9 @@ class TopContact(BaseModel):
     name:  str | None = None
     email: str | None = None
     title: str | None = None
+    apollo_verified: bool = False       # Apollo's email_status is "verified"
+    hunter_verified: bool = False       # Hunter's status is "valid"
+    still_at_brand:  bool | None = None
 
 
 class BrandDetailResponse(BaseModel):
@@ -160,6 +163,7 @@ class BrandDetailResponse(BaseModel):
     platform_signals: PlatformSignals
     sponsorship_activity_score: float | None = None
     top_contact: TopContact | None = None
+    other_contacts: list[TopContact] = []   # the brand's other enriched contacts with an email, best rank first
 
 
 def brand_detail_to_response(detail: dict) -> BrandDetailResponse:
@@ -175,6 +179,7 @@ def brand_detail_to_response(detail: dict) -> BrandDetailResponse:
         platform_signals=PlatformSignals(**detail["platform_signals"]),
         sponsorship_activity_score=detail["sponsorship_activity_score"],
         top_contact=TopContact(**detail["top_contact"]) if detail["top_contact"] else None,
+        other_contacts=[TopContact(**c) for c in detail.get("other_contacts", [])],
     )
 
 

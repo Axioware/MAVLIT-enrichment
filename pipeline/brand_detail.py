@@ -13,6 +13,7 @@ recomputing them:
 
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from pipeline.db import BrandContact, BrandNiche, BrandProfile, BrandRaw
@@ -32,20 +33,53 @@ def _bucket_signal(points: int) -> str:
     return "strong"
 
 
-def _top_contact(db: Session, brand_raw_id: int) -> dict | None:
-    contact = (
+def _contact_dict(contact: BrandContact) -> dict:
+    return {
+        "name": contact.full_name,
+        "email": contact.email,
+        "title": contact.title,
+        "apollo_verified": (contact.email_status or "").lower() == "verified",
+        "hunter_verified": (contact.hunter_status or "").lower() == "valid",
+        "still_at_brand": contact.still_at_brand,
+    }
+
+
+def _contacts(db: Session, brand_raw_id: int) -> tuple[dict | None, list[dict]]:
+    """
+    The contact shown first plus the brand's other contacts.
+
+    Only enriched contacts with an email are considered. The first is the best-ranked contact (rank 1
+    = best) of the strictest group that has anyone, relaxing one condition at a time:
+      1. email verified by Apollo AND by Hunter AND still at the brand
+      2. verified by Apollo and Hunter (still_at_brand dropped)
+      3. verified by Apollo (Hunter dropped)
+      4. any email (Apollo verification dropped)
+    The others (verified or not), best rank first, are what "view more" lists.
+    """
+    contacts = (
         db.query(BrandContact)
         .filter(
             BrandContact.brand_raw_id == brand_raw_id,
             BrandContact.is_enriched.is_(True),
-            BrandContact.email.isnot(None),
+            func.btrim(func.coalesce(BrandContact.email, "")) != "",
         )
-        .order_by(BrandContact.rank.asc())
-        .first()
+        .order_by(BrandContact.rank.asc().nulls_last(), BrandContact.id.asc())
+        .all()
     )
-    if not contact:
-        return None
-    return {"name": contact.full_name, "email": contact.email, "title": contact.title}
+    if not contacts:
+        return None, []
+    rows = [(c, _contact_dict(c)) for c in contacts]
+    tiers = (
+        lambda d: d["still_at_brand"] is True and d["apollo_verified"] and d["hunter_verified"],
+        lambda d: d["apollo_verified"] and d["hunter_verified"],
+        lambda d: d["apollo_verified"],
+        lambda d: True,
+    )
+    for tier in tiers:
+        top = next((row for row in rows if tier(row[1])), None)
+        if top:
+            break
+    return top[1], [d for c, d in rows if c is not top[0]]
 
 
 def get_brand_detail(db: Session, brand_raw_id: int) -> dict | None:
@@ -87,6 +121,7 @@ def get_brand_detail(db: Session, brand_raw_id: int) -> dict | None:
         ) if v is not None
     ]
 
+    top_contact, other_contacts = _contacts(db, brand_raw_id)
     return {
         "brand_id": brand.id,
         "name": brand.name,
@@ -105,5 +140,6 @@ def get_brand_detail(db: Session, brand_raw_id: int) -> dict | None:
             "youtube": _bucket_signal(yt_pts),
         },
         "sponsorship_activity_score": profile.sponsorship_activity_score if profile else None,
-        "top_contact": _top_contact(db, brand_raw_id),
+        "top_contact": top_contact,
+        "other_contacts": other_contacts,
     }
