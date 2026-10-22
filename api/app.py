@@ -89,6 +89,8 @@ from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.gpt_llm import llm_usage_scope
 from pipeline.helpers.passwords import hash_password
 from pipeline.helpers.prompts import (
+    LINKEDIN_COMPANY_MATCH_DEFAULT_PROMPT,
+    LINKEDIN_COMPANY_MATCH_PROMPT_NAME,
     APOLLO_RANK_DEFAULT_PROMPT,
     APOLLO_RANK_PROMPT_NAME,
     BRAND_AUDIENCE_ANALYSIS_DEFAULT_PROMPT,
@@ -621,6 +623,7 @@ def _run_migrations() -> None:
         # LinkedIn employment verification — pipeline/enrichment/linkedin_verify.py
         "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS linkedin_verified_at TIMESTAMPTZ",
         "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS still_at_brand BOOLEAN",
+        "ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS still_at_brand_confidence INTEGER",
         # linkedin_current_company (raw employer name from LinkedIn) dropped —
         # still_at_brand's LLM verdict is kept, the raw string isn't.
         "ALTER TABLE brand_contacts DROP COLUMN IF EXISTS linkedin_current_company",
@@ -700,6 +703,9 @@ def _run_migrations() -> None:
         brand_check_prompt = db.query(Prompt).filter(Prompt.name == BRAND_CHECK_PROMPT_NAME).first()
         if brand_check_prompt and "has_referral_code" not in (brand_check_prompt.content or ""):
             brand_check_prompt.content = BRAND_CHECK_DEFAULT_PROMPT
+        linkedin_prompt = db.query(Prompt).filter(Prompt.name == LINKEDIN_COMPANY_MATCH_PROMPT_NAME).first()
+        if linkedin_prompt and "{experience}" not in (linkedin_prompt.content or ""):   # an older prompt without the work-experience input
+            linkedin_prompt.content = LINKEDIN_COMPANY_MATCH_DEFAULT_PROMPT
         db.commit()
 
 

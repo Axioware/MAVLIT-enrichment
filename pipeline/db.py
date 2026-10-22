@@ -613,6 +613,9 @@ class BrandContact(Base):
     # (private/deleted profile, actor error) — distinct from a checked
     # "no longer there" (False).
     still_at_brand = Column(Boolean)
+    # 0-100: how confident the LLM was in its still_at_brand verdict (true OR false). NULL when no
+    # LLM call was made (profile fetch failed, or LinkedIn showed no current employer).
+    still_at_brand_confidence = Column(Integer)
 
     #  Email deliverability verification (pipeline/enrichment/hunter_verify.py)
     # NULL until a verification attempt has been made against email.

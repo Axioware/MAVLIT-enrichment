@@ -2204,7 +2204,7 @@ Use the 1-based index of the correct result from the numbered list above only wh
 
 LINKEDIN_COMPANY_MATCH_PROMPT_NAME = "linkedin_company_match"
 LINKEDIN_COMPANY_MATCH_DEFAULT_PROMPT = """\
-You are checking whether a person's current employer, as shown on their public LinkedIn profile, is still the same company as a specific brand — to confirm whether a previously-found contact at that brand is still there.
+You are checking whether a person still works at a specific brand, using their public LinkedIn profile. The person was previously found as a contact at that brand.
 
 Brand name: {brand_name}
 Brand domain (if known): {brand_domain}
@@ -2212,12 +2212,21 @@ Brand domain (if known): {brand_domain}
 LinkedIn profile's current employer: {current_company}
 LinkedIn current-employer company page URL (if any): {current_company_url}
 
-Decide whether the LinkedIn current employer is the SAME real-world company as the brand — allowing for naming differences that don't change the underlying company (legal suffixes like "Inc"/"LLC"/"Ltd"/"Co", punctuation, capitalization, a parent/holding company name being used interchangeably with a well-known sub-brand it's known to own, regional divisions of the same company). Do NOT match a different, unrelated company just because it's in the same industry or has a superficially similar name (e.g. "Nike" is not "Nike Foundation" is not "Nike Golf" unless you're confident those are genuinely the same operating entity being pitched).
+LinkedIn work experience (most recent first; "current" marks a role with no end date):
+{experience}
 
-If the current employer is missing/empty, that means LinkedIn doesn't show one (private, unemployed, hidden) — answer "match": false, since there's nothing to confirm they're still there.
+Treat two company names as the SAME company when the difference does not change the underlying company: legal suffixes ("Inc", "LLC", "Ltd", "Co"), punctuation, capitalization, a parent/holding company name used interchangeably with a well-known sub-brand it is known to own, or a regional division of the same company. Do NOT treat a different, unrelated company as the same just because it is in the same industry or has a superficially similar name (e.g. "Nike" is not "Nike Foundation" is not "Nike Golf" unless you are confident they are genuinely the same operating entity).
+
+Choose exactly one status:
+
+- "still_there": the profile shows the person currently works at the brand. This is true when the current employer is the brand, or when any current role in the experience list (no end date) is at the brand.
+- "left": the experience list shows the person DID work at the brand, but that role has ended (it has an end date) and they have no current role at the brand, and they now work somewhere else or have no current role at the brand. Use this only when the brand appears in the experience list with an end date.
+- "unknown": anything else. In particular, if the current employer is a different company and the brand does NOT appear anywhere in the experience list, answer "unknown": the person may simply not have listed that role, so you cannot say they left. Also use "unknown" when the profile shows no current employer and no experience, or when the evidence is too unclear to decide.
+
+"confidence" is an integer from 0 to 100: how sure you are of your status. Use 90-100 when the names and dates clearly support it; 60-89 when you are fairly sure; below 60 when it is a guess, for example an unfamiliar sub-brand or parent-company relationship you cannot confirm.
 
 Reply ONLY with this JSON object, no extra text:
-{"match": false, "reason": "short one-line reason"}
+{"status": "unknown", "confidence": 0, "reason": "short one-line reason"}
 """
 
 

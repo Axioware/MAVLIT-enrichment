@@ -26,19 +26,24 @@ Pipeline:
               actor normalizes a stored "http://" URL to "https://" (and
               possibly other cosmetic changes) in its own output, so exact
               URL matching silently drops every result.
-  2. COMPARE -> for each contact whose profile fetch succeeded, an LLM
-              call (linkedin_company_match) judges whether currentCompany
-              is the same real-world company as the brand — allowing for
-              legal-suffix/punctuation/parent-brand differences, but never
-              matching an unrelated same-industry company. See that
-              prompt for the exact rules.
+  2. DECIDE  -> for each contact whose profile fetch succeeded, an LLM
+              call (linkedin_company_match) reads currentCompany AND the
+              profile's work-experience list and answers one of:
+                still_there - current employer (or a current role) is the brand -> True
+                left        - the experience shows a role AT the brand that has ended and no
+                              current role there -> False
+                unknown     - anything else -> NULL. Notably: they now work elsewhere but the
+                              brand is not in their experience at all. They may just not have
+                              listed that role, so it is never turned into "left".
+              See that prompt for the exact rules.
 
 Writes, per contact:
   linkedin_verified_at — when this check last ran (NULL = never)
-  still_at_brand       — True/False once checked; stays NULL if the
-                          profile fetch itself failed (private/deleted/
-                          actor error) — genuinely unknown, distinct from a
-                          checked "no longer there" (False).
+  still_at_brand       — True (works there now) / False (experience shows they left) /
+                          NULL when unknown: the profile fetch failed (private/deleted/
+                          actor error) or the profile does not show enough to say.
+  still_at_brand_confidence — 0-100, how sure the LLM was of that verdict;
+                          NULL when no LLM call was made.
 
 Cost-conscious by design: this actor is pay-per-profile (~$0.005-0.01
 each depending on plan tier, per Apify's own pricing) — only runs against
@@ -91,29 +96,63 @@ def _get_prompt(db: Session, name: str, default: str) -> str:
     return row.content if row else default
 
 
-def _llm_company_match(db: Session, brand_name: str, brand_domain: str, current_company: dict) -> bool:
+_MAX_EXPERIENCE_ENTRIES = 12
+
+
+def _experience_text(experience: list | None) -> str:
+    """The profile's work history as one line per role, e.g. 'Marketing Manager at Nike (2015 - 2020)'."""
+    lines = []
+    for role in (experience or [])[:_MAX_EXPERIENCE_ENTRIES]:
+        if not isinstance(role, dict) or not role.get("company"):
+            continue
+        dates = role.get("dateRange") or "dates not shown"
+        marker = " [current]" if role.get("current") else ""
+        title = role.get("title") or "role not shown"
+        lines.append(f"- {title} at {role['company']} ({dates}){marker}")
+    return "\n".join(lines) or "none shown"
+
+
+_STATUS_TO_STILL_AT_BRAND = {"still_there": True, "left": False, "unknown": None}
+
+
+def _llm_employment_status(
+    db: Session, brand_name: str, brand_domain: str, current_company: dict, experience: list | None,
+) -> tuple[bool | None, int | None]:
     """
-    current_company is the raw {"name":..., "url":...} dict from the actor
-    (or {} if the profile showed none). Returns False whenever there's
-    nothing to compare (empty current_company) or the LLM isn't confident
-    it's the same company — never guesses "still there" on weak evidence.
+    Returns (still_at_brand, confidence).
+      True  - the profile shows them working at the brand now.
+      False - their experience shows a role at the brand that has ended and no current role there.
+      None  - unknown: the profile shows nothing to decide on, or they now work elsewhere but the
+              brand is not in their experience at all (they may just not have listed it) - that is
+              never treated as "left".
+    confidence is the LLM's own 0-100 certainty; None when no LLM call was made or it gave no number.
     """
     name = (current_company or {}).get("name") or ""
-    if not name:
-        return False
+    experience_text = _experience_text(experience)
+    if not name and experience_text == "none shown":
+        return None, None
     if not OPENAI_KEY:
-        logger.warning("OPENAI_KEY not set — skipping LinkedIn company-match LLM call")
-        return False
+        logger.warning("OPENAI_KEY not set — skipping LinkedIn employment LLM call")
+        return None, None
 
     prompt = fill_template(
         _get_prompt(db, LINKEDIN_COMPANY_MATCH_PROMPT_NAME, LINKEDIN_COMPANY_MATCH_DEFAULT_PROMPT),
         brand_name=brand_name or "unknown",
         brand_domain=brand_domain or "none",
-        current_company=name,
+        current_company=name or "none shown",
         current_company_url=(current_company or {}).get("url") or "none",
+        experience=experience_text,
     )
-    result = call_gpt_json(prompt, context=f"linkedin company match: {name!r} vs {brand_name!r}")
-    return bool(result.get("match", False)) if isinstance(result, dict) else False
+    result = call_gpt_json(prompt, context=f"linkedin employment: {name!r} vs {brand_name!r}")
+    if not isinstance(result, dict):
+        return None, None
+    still_at_brand = _STATUS_TO_STILL_AT_BRAND.get(str(result.get("status", "")).strip().lower())
+    confidence = result.get("confidence")
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        confidence = None
+    else:
+        confidence = max(0, min(100, round(confidence)))
+    return still_at_brand, confidence
 
 
 def _apply_verification(db: Session, contact: BrandContact, item: dict | None) -> None:
@@ -124,19 +163,23 @@ def _apply_verification(db: Session, contact: BrandContact, item: dict | None) -
         # retried forever; pass contact_id to force a retry later.
         contact.linkedin_verified_at = func.now()
         contact.still_at_brand = None
+        contact.still_at_brand_confidence = None
         db.commit()
         return
 
     current_company = item.get("currentCompany") or {}
     company_name = current_company.get("name") or None
 
-    contact.still_at_brand = _llm_company_match(db, contact.brand_raw.name, contact.brand_raw.domain, current_company)
+    contact.still_at_brand, contact.still_at_brand_confidence = _llm_employment_status(
+        db, contact.brand_raw.name, contact.brand_raw.domain, current_company, item.get("experience"),
+    )
     contact.linkedin_verified_at = func.now()
     db.commit()
 
     logger.info(
-        "LinkedIn verify: contact_id=%s '%s' at '%s' — LinkedIn shows '%s' -> still_at_brand=%s",
-        contact.id, contact.full_name, contact.brand_raw.name, company_name or "(none shown)", contact.still_at_brand,
+        "LinkedIn verify: contact_id=%s '%s' at '%s' — LinkedIn shows '%s' -> still_at_brand=%s (confidence %s)",
+        contact.id, contact.full_name, contact.brand_raw.name, company_name or "(none shown)",
+        contact.still_at_brand, contact.still_at_brand_confidence,
     )
 
 
