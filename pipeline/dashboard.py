@@ -8,8 +8,8 @@ actually engaged with (saved or pitched) — not a platform-wide total.
 
 from sqlalchemy.orm import Session
 
-from pipeline.db import BrandContact, CreatorProfile, Pitch, SavedBrand
-from pipeline.matching.matcher import get_matches
+from pipeline.db import BrandContact, BrandRaw, CreatorBrandLlmV3Ranking, CreatorProfile, Pitch, SavedBrand
+from pipeline.matching.matcher import apply_brand_hard_filters
 
 # Nothing sets these yet (no status-update endpoint exists), but "active"
 # is defined against this set now so the definition doesn't need to change
@@ -17,7 +17,15 @@ from pipeline.matching.matcher import get_matches
 _TERMINAL_PITCH_STATUSES = {"closed_won", "closed_lost", "declined"}
 
 def get_dashboard_summary(db: Session, creator: CreatorProfile) -> dict:
-    _, brand_matches = get_matches(db, creator.id, include_total=True)
+    # The brands shown on the Brand Matches page: the stored v3 ranking, re-checked against the
+    # brand-only hard filters exactly like GET /matches/me/v3.
+    brand_matches = (
+        apply_brand_hard_filters(
+            db.query(CreatorBrandLlmV3Ranking.brand_raw_id)
+            .join(BrandRaw, BrandRaw.id == CreatorBrandLlmV3Ranking.brand_raw_id)
+            .filter(CreatorBrandLlmV3Ranking.creator_profile_id == creator.id)
+        ).count()
+    )
 
     active_deals = (
         db.query(Pitch)

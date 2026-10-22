@@ -413,16 +413,10 @@
 
   // ---- matched brands ---------------------------------------------------------------
   function loadMatches() {
-    // Matches v3 (AI ranking); falls back to the standard matches while v3 has nothing yet.
+    // The brands of Matches v3 (AI ranking), the same list as the Brand Matches page.
     fetch('/matches/me/v3', { credentials: 'include' })
-      .then(function(r) { if (r.status === 401) { window.location.replace('/signin?return_to=/pitch'); throw new Error('auth'); } return r.ok ? r.json() : { matches: [] }; })
-      .then(function(data) {
-        var rows = (data.matches || []);
-        if (rows.length) return rows;
-        return fetch('/matches/me?limit=100', { credentials: 'include' })
-          .then(function(r) { return r.ok ? r.json() : { matches: [] }; })
-          .then(function(d) { return d.matches || []; });
-      })
+      .then(function(r) { if (r.status === 401) { window.location.replace('/signin?return_to=/pitch'); throw new Error('auth'); } if (!r.ok) throw new Error('matches'); return r.json(); })
+      .then(function(data) { return data.matches || []; })
       .then(function(rows) {
         state.matches = rows.map(function(m) { return { id: m.brand_raw_id, name: m.brand_name, niche: m.niche || '', latestProduct: m.latest_product || '' }; });
         renderMatches();
