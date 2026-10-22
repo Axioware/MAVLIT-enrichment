@@ -2,8 +2,8 @@
 pipeline/dashboard.py
 
 Aggregates the creator-facing dashboard overview: live match count, active
-pitches, saved brands, and verified contacts across brands the creator has
-actually engaged with (saved or pitched) — not a platform-wide total.
+pitches, saved brands, and the number of contacts (with an email) across the
+creator's matched brands (the Matches v3 list) — not a platform-wide total.
 """
 
 from sqlalchemy import func
@@ -20,13 +20,13 @@ _TERMINAL_PITCH_STATUSES = {"closed_won", "closed_lost", "declined"}
 def get_dashboard_summary(db: Session, creator: CreatorProfile) -> dict:
     # The brands shown on the Brand Matches page: the stored v3 ranking, re-checked against the
     # brand-only hard filters exactly like GET /matches/me/v3.
-    brand_matches = (
-        apply_brand_hard_filters(
-            db.query(CreatorBrandLlmV3Ranking.brand_raw_id)
-            .join(BrandRaw, BrandRaw.id == CreatorBrandLlmV3Ranking.brand_raw_id)
-            .filter(CreatorBrandLlmV3Ranking.creator_profile_id == creator.id)
-        ).count()
+    matched_brands = apply_brand_hard_filters(
+        db.query(CreatorBrandLlmV3Ranking.brand_raw_id)
+        .join(BrandRaw, BrandRaw.id == CreatorBrandLlmV3Ranking.brand_raw_id)
+        .filter(CreatorBrandLlmV3Ranking.creator_profile_id == creator.id)
     )
+    matched_brand_ids = [bid for (bid,) in matched_brands.all()]
+    brand_matches = len(matched_brand_ids)
 
     active_deals = (
         db.query(Pitch)
@@ -38,20 +38,13 @@ def get_dashboard_summary(db: Session, creator: CreatorProfile) -> dict:
         db.query(SavedBrand).filter(SavedBrand.creator_profile_id == creator.id).count()
     )
 
-    relevant_brand_ids = {
-        bid for (bid,) in db.query(SavedBrand.brand_raw_id).filter(SavedBrand.creator_profile_id == creator.id).all()
-    }
-    relevant_brand_ids |= {
-        bid for (bid,) in db.query(Pitch.brand_raw_id)
-        .filter(Pitch.creator_profile_id == creator.id, Pitch.brand_raw_id.isnot(None))
-        .all()
-    }
+    # Every email we hold for the matched brands (enriched contacts only), not just one per brand.
     verified_contacts = 0
-    if relevant_brand_ids:
+    if matched_brand_ids:
         verified_contacts = (
             db.query(BrandContact)
             .filter(
-                BrandContact.brand_raw_id.in_(relevant_brand_ids),
+                BrandContact.brand_raw_id.in_(matched_brand_ids),
                 BrandContact.is_enriched.is_(True),
                 func.btrim(func.coalesce(BrandContact.email, "")) != "",   # enriched contacts without an email are not counted
             )
