@@ -216,6 +216,23 @@ def update_pitch(
     return pitch_to_response(pitch)
 
 
+@router.delete("/{pitch_id}")
+def delete_pitch(
+    pitch_id: int,
+    db: Session = Depends(get_db),
+    current_user: CreatorProfile = Depends(get_current_user),
+):
+    """Deletes one of the creator's own pitches (the Pipeline's Delete button)."""
+    pitch = db.query(Pitch).filter(Pitch.id == pitch_id).first()
+    if not pitch:
+        raise HTTPException(status_code=404, detail="Pitch not found")
+    if pitch.creator_profile_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not own this pitch")
+    db.delete(pitch)
+    db.commit()
+    return {"id": pitch_id, "deleted": True}
+
+
 @router.get("/me", response_model=PitchListResponse)
 def list_pitches(
     limit: int = Query(20, ge=1, le=100),
