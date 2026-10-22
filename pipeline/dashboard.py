@@ -6,6 +6,7 @@ pitches, saved brands, and verified contacts across brands the creator has
 actually engaged with (saved or pitched) — not a platform-wide total.
 """
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from pipeline.db import BrandContact, BrandRaw, CreatorBrandLlmV3Ranking, CreatorProfile, Pitch, SavedBrand
@@ -49,7 +50,11 @@ def get_dashboard_summary(db: Session, creator: CreatorProfile) -> dict:
     if relevant_brand_ids:
         verified_contacts = (
             db.query(BrandContact)
-            .filter(BrandContact.brand_raw_id.in_(relevant_brand_ids), BrandContact.is_enriched.is_(True))
+            .filter(
+                BrandContact.brand_raw_id.in_(relevant_brand_ids),
+                BrandContact.is_enriched.is_(True),
+                func.btrim(func.coalesce(BrandContact.email, "")) != "",   # enriched contacts without an email are not counted
+            )
             .count()
         )
 
