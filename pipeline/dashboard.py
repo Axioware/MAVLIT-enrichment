@@ -10,6 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from pipeline.db import BrandContact, BrandRaw, CreatorBrandLlmV3Ranking, CreatorProfile, Pitch, SavedBrand
+from pipeline.matching.llm_ranking_v3 import MIN_MATCH_CONFIDENCE
 from pipeline.matching.matcher import apply_brand_hard_filters
 
 # Nothing sets these yet (no status-update endpoint exists), but "active"
@@ -23,7 +24,8 @@ def get_dashboard_summary(db: Session, creator: CreatorProfile) -> dict:
     matched_brands = apply_brand_hard_filters(
         db.query(CreatorBrandLlmV3Ranking.brand_raw_id)
         .join(BrandRaw, BrandRaw.id == CreatorBrandLlmV3Ranking.brand_raw_id)
-        .filter(CreatorBrandLlmV3Ranking.creator_profile_id == creator.id)
+        .filter(CreatorBrandLlmV3Ranking.creator_profile_id == creator.id,
+                CreatorBrandLlmV3Ranking.confidence >= MIN_MATCH_CONFIDENCE)   # same threshold as GET /matches/me/v3
     )
     matched_brand_ids = [bid for (bid,) in matched_brands.all()]
     brand_matches = len(matched_brand_ids)

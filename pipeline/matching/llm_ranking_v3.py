@@ -63,6 +63,10 @@ logger = logging.getLogger(__name__)
 
 _MODEL = "gpt-6-luna"
 
+# Brands the LLM scored below this fit (0-100) are not shown as matches. Applied when the stored ranking is
+# READ (GET /matches/me/v3, the dashboard count), so the stored ranking stays complete and this can be changed.
+MIN_MATCH_CONFIDENCE = 55
+
 
 def _gender_label(value: str | None) -> str:
     """Brand audience gender for the prompt: male / female / both, else unknown."""

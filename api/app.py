@@ -138,7 +138,7 @@ from pipeline.helpers.prompts import (
     WEBSITE_PICK_PROMPT_NAME,
 )
 from pipeline.matching.llm_ranking_v2 import rank_brands_with_llm
-from pipeline.matching.llm_ranking_v3 import rank_brands_with_llm_v3
+from pipeline.matching.llm_ranking_v3 import MIN_MATCH_CONFIDENCE, rank_brands_with_llm_v3
 from pipeline.matching.match_text import generate_match_reasons
 from pipeline.matching.matcher import apply_brand_hard_filters, get_matches
 from pipeline.seed import run_seed
@@ -2077,7 +2077,8 @@ def generate_my_creator_description(
 _AI_RANKINGS = {
     # v2 temporarily paused to save LLM credits — set paused to False to resume.
     "v2": {"rank": lambda db, cid: rank_brands_with_llm(db, cid),    "model": CreatorBrandLlmRanking,   "prefix": "llm",    "paused": True},
-    "v3": {"rank": lambda db, cid: rank_brands_with_llm_v3(db, cid), "model": CreatorBrandLlmV3Ranking, "prefix": "llm_v3", "paused": False},
+    "v3": {"rank": lambda db, cid: rank_brands_with_llm_v3(db, cid), "model": CreatorBrandLlmV3Ranking, "prefix": "llm_v3", "paused": False,
+           "min_confidence": MIN_MATCH_CONFIDENCE},
 }
 
 
@@ -2285,15 +2286,15 @@ def _ai_matches_response(db, user_id: int, version: str) -> LlmMatchesResponse:
     # Stored rankings are re-checked against the brand-only hard filters (geo,
     # referral, partnership, avoided niches) so a newly blocked brand disappears
     # at once, without waiting for the creator's next re-rank.
-    rows = (
-        apply_brand_hard_filters(
-            db.query(ranking_model, BrandRaw)
-            .join(BrandRaw, BrandRaw.id == ranking_model.brand_raw_id)
-            .filter(ranking_model.creator_profile_id == user_id)
-        )
-        .order_by(ranking_model.rank)
-        .all()
+    query = apply_brand_hard_filters(
+        db.query(ranking_model, BrandRaw)
+        .join(BrandRaw, BrandRaw.id == ranking_model.brand_raw_id)
+        .filter(ranking_model.creator_profile_id == user_id)
     )
+    min_confidence = config.get("min_confidence")
+    if min_confidence is not None:   # v3: weaker fits than the threshold are not shown as matches
+        query = query.filter(ranking_model.confidence >= min_confidence)
+    rows = query.order_by(ranking_model.rank).all()
     # Taglines are stored at ranking time; rows ranked before that existed
     # (reasons NULL) get them built live until the next re-rank.
     missing = [brand.id for ranking, brand in rows if ranking.reasons is None]
