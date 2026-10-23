@@ -38,7 +38,9 @@ def get_dashboard_summary(db: Session, creator: CreatorProfile) -> dict:
         db.query(SavedBrand).filter(SavedBrand.creator_profile_id == creator.id).count()
     )
 
-    # Every email we hold for the matched brands (enriched contacts only), not just one per brand.
+    # Every email we hold for the matched brands (enriched contacts only), not just one per brand,
+    # whether or not Apollo/Hunter verified it. Only contacts LinkedIn showed to have left the brand
+    # (still_at_brand = false) are left out; unchecked (NULL) and confirmed (true) ones count.
     verified_contacts = 0
     if matched_brand_ids:
         verified_contacts = (
@@ -47,6 +49,7 @@ def get_dashboard_summary(db: Session, creator: CreatorProfile) -> dict:
                 BrandContact.brand_raw_id.in_(matched_brand_ids),
                 BrandContact.is_enriched.is_(True),
                 func.btrim(func.coalesce(BrandContact.email, "")) != "",   # enriched contacts without an email are not counted
+                BrandContact.still_at_brand.isnot(False),
             )
             .count()
         )
