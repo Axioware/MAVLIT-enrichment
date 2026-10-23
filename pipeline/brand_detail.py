@@ -41,6 +41,7 @@ def _contact_dict(contact: BrandContact) -> dict:
         "apollo_verified": (contact.email_status or "").lower() == "verified",
         "hunter_verified": (contact.hunter_status or "").lower() == "valid",
         "still_at_brand": contact.still_at_brand,
+        "linkedin_url": (contact.linkedin_url or "").strip() or None,
     }
 
 

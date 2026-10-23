@@ -149,6 +149,7 @@ class TopContact(BaseModel):
     apollo_verified: bool = False       # Apollo's email_status is "verified"
     hunter_verified: bool = False       # Hunter's status is "valid"
     still_at_brand:  bool | None = None
+    linkedin_url:    str | None = None   # the contact's LinkedIn profile, when Apollo gave one
 
 
 class BrandDetailResponse(BaseModel):
