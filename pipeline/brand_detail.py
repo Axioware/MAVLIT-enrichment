@@ -48,7 +48,8 @@ def _contacts(db: Session, brand_raw_id: int) -> tuple[dict | None, list[dict]]:
     """
     The contact shown first plus the brand's other contacts.
 
-    Only enriched contacts with an email are considered. The first is the best-ranked contact (rank 1
+    Only enriched contacts with an email are considered, and never one whose still_at_brand is false
+    (LinkedIn showed they left) - not as the main contact and not under "view more". The first is the best-ranked contact (rank 1
     = best) of the strictest group that has anyone, relaxing one condition at a time:
       1. email verified by Apollo AND by Hunter AND still at the brand
       2. verified by Apollo and Hunter (still_at_brand dropped)
@@ -62,6 +63,7 @@ def _contacts(db: Session, brand_raw_id: int) -> tuple[dict | None, list[dict]]:
             BrandContact.brand_raw_id == brand_raw_id,
             BrandContact.is_enriched.is_(True),
             func.btrim(func.coalesce(BrandContact.email, "")) != "",
+            BrandContact.still_at_brand.isnot(False),   # LinkedIn showed they left the brand: never shown
         )
         .order_by(BrandContact.rank.asc().nulls_last(), BrandContact.id.asc())
         .all()
