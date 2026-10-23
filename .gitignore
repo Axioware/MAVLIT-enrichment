@@ -46,3 +46,4 @@ logs/
 production_dump/
 *.dump
 *.sql.gz
+brands_without_both_verified_contact.csv

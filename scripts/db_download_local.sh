@@ -29,6 +29,17 @@ if [ -z "$LATEST" ]; then
 fi
 BASE="$(basename "$LATEST" .dump)"
 
+# The server's nightly backup can fail silently (it did from Oct 14 to Oct 23, 2026): warn loudly
+# when the newest dump is more than MAX_AGE_DAYS old. Still downloads it below.
+MAX_AGE_DAYS="${MAX_AGE_DAYS:-2}"
+DUMP_DAY="${BASE#mavlit_}"
+AGE_DAYS=$(( ( $(date -u +%s) - $(date -u -d "$DUMP_DAY" +%s) ) / 86400 ))
+if [ "$AGE_DAYS" -gt "$MAX_AGE_DAYS" ]; then
+    MSG="newest server dump is $AGE_DAYS days old ($BASE) - the nightly backup on the server is failing; see /root/db_dumps/backup.log"
+    echo "$(date '+%F %T') WARNING: $MSG" >&2
+    command -v notify-send >/dev/null && DISPLAY="${DISPLAY:-:0}" notify-send -u critical "MAVLIT DB backup stale" "$MSG" || true
+fi
+
 for ext in dump sql.gz; do
     if [ -s "$LOCAL_DIR/$BASE.$ext" ]; then
         echo "$(date '+%F %T') already have $BASE.$ext"
