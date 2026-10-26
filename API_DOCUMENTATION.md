@@ -184,56 +184,7 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
 - **Response:** `200` `{ "tags": ["streetwear"], "tags_by_niche": { "fashion": ["streetwear"] } }`.
 - **Frontend status:** Not currently called; `creator-profile.html` uses `/creator-sub-niches` instead.
 
-### Brand catalog and matching
-
-#### `GET /api/brand-catalog`
-
-- **Purpose:** Public, paginated browsing of `brands_raw` records.
-- **Auth:** Public.
-- **Query parameters:** `q` optional case-insensitive name substring; `niche` optional exact match; `limit` default `50`, range `1..200`; `offset` default `0`, minimum `0`.
-- **Example request:** `GET /api/brand-catalog?q=studio&niche=fitness&limit=20&offset=0`.
-- **Response:** `200` `{ "total": 1, "limit": 20, "offset": 0, "brands": [{ "id": 7, "name": "Studio Fit", "niche": "fitness", "website": "https://studio.example", "domain": "studio.example", "country": "US" }] }`.
-- **Errors:** `422` invalid query bounds.
-- **Frontend:** `frontend/brand-catalog.html`.
-
-#### `GET /api/brand-catalog/niches`
-
-- **Purpose:** Populate the catalog niche filter.
-- **Auth:** Public.
-- **Response:** `200` `{ "niches": ["beauty", "fitness"] }`.
-- **Frontend:** `frontend/brand-catalog.html`.
-
-#### `GET /api/brand-catalog/{brand_id}`
-
-- **Purpose:** Show raw catalog details for one brand.
-- **Auth:** Public.
-- **Response:** `200` includes `id`, `name`, `niche`, `description`, `website`, `domain`, `country`, `headquarters`, social identifiers, `brand_tier`, `geo_reach_score`, `geo_reach_label`, `meta_ads_total`, and `meta_ads`.
-- **Example response:**
-
-  ```json
-  {
-    "id": 7,
-    "name": "Studio Fit",
-    "niche": "fitness",
-    "description": "Training equipment for home gyms",
-    "website": "https://studio.example",
-    "domain": "studio.example",
-    "country": "US",
-    "headquarters": null,
-    "instagram_handle": "studiofit",
-    "youtube_channel_id": null,
-    "facebook_page": null,
-    "brand_tier": "mid",
-    "geo_reach_score": 72.0,
-    "geo_reach_label": "strong",
-    "meta_ads_total": 3,
-    "meta_ads": []
-  }
-  ```
-
-- **Errors:** `404` brand not found; `422` invalid integer path.
-- **Frontend:** `frontend/brand-catalog.html`.
-- **Important:** `meta_ads` is currently a fixed three-example placeholder set shared by every brand; it is not queried from `meta_ads` for this endpoint.
+### Matching
 
 #### `GET /matches/me`
 
@@ -490,7 +441,6 @@ These serve HTML or static assets rather than JSON APIs:
 | GET | `/creator-profile` | `frontend/creator-profile.html` |
 | GET | `/matches` | `frontend/matches.html` |
 | GET | `/add-creators` | `frontend/add-creators.html` |
-| GET | `/brand-catalog` | `frontend/brand-catalog.html` |
 | GET | `/static/{path}` | File from `frontend/` |
 | GET | `/posthog-init.js` | Runtime PostHog loader, or a disabled-analytics warning |
 
@@ -503,11 +453,10 @@ SQLAdmin is mounted at `/admin`. It exposes database model views. Its optional s
 | `frontend/login.html` | `GET /auth/me`, `POST /auth/login` |
 | `frontend/index.html` | `POST /seed`, `GET /seed/status/{job_id}`, `GET /auth/me`, `POST /auth/logout` |
 | `frontend/add-creators.html` | `POST /content-creator-re/bulk-add`, `GET /auth/me`, `POST /auth/logout` |
-| `frontend/brand-catalog.html` | `GET /api/brand-catalog/niches`, `GET /api/brand-catalog`, `GET /api/brand-catalog/{brand_id}` |
 | `frontend/creator-profile.html` | `POST /creator-profile/me/generate-description`, `GET /creator-sub-niches`, `GET /creator-profile/me`, `PUT /creator-profile/me`, `GET /auth/me` |
 | `frontend/matches.html` | `GET /matches/me?limit=20`, `POST /matches/me/refresh?limit=20` |
 
-All six pages also load `/posthog-init.js` for analytics. The API base is implicit because the pages use same-origin relative URLs.
+All five pages also load `/posthog-init.js` for analytics. The API base is implicit because the pages use same-origin relative URLs.
 
 ## External services
 
@@ -568,7 +517,6 @@ External calls can be triggered indirectly by `/seed`, `/enrich/signals`, `/scor
 - **Unused by bundled frontend:** `/brand-niches`, `/brand-niche-tags`, `/brands/{brand_id}`, all saved-brand routes, pitch routes, `/dashboard/me`, advisory routes, `/enrich/signals`, `/score/brands`, and their status endpoints. They are implemented API surface, not necessarily dead code.
 - **Potential duplicate:** `/matches/me/refresh` and `GET /matches/me` currently compute the same live result. Keep both only if the explicit refresh contract is planned.
 - **Compatibility routes:** `/dashboard` duplicates `/`; `/login` is a permanent-style compatibility redirect to `/signin`.
-- **Catalog placeholder:** `/api/brand-catalog/{brand_id}` returns the same hardcoded three ad examples for every brand. Treat `meta_ads` as demo data until this is replaced with a real per-brand query.
 - **Niche source:** `/brand-niches` reads only distinct non-empty values from `content_creator_re.niche`; the profile page still hardcodes its primary-niche options and should consume this endpoint when that UI is updated.
 - **Unauthenticated operator routes:** `/seed`, `/enrich/signals`, `/score/brands`, and `/content-creator-re/bulk-add` have no auth dependency. Put them behind an operator auth boundary before exposing the service outside a trusted network.
 - **In-memory jobs:** Polling IDs stop working after process restart and can diverge across multiple Uvicorn workers. Use a durable job store or enforce one worker if these workflows become production-critical.

@@ -25,7 +25,6 @@ from api.auth import (
     is_profile_complete,
 )
 from api.auth import router as auth_router
-from api.brand_catalog import router as brand_catalog_router
 from api.brands import router as brands_router
 from api.dashboard import router as dashboard_api_router
 from api.creator_posts import router as creator_posts_router
@@ -742,7 +741,6 @@ app.include_router(own_brands_router)
 app.include_router(creator_posts_router)
 app.include_router(dashboard_api_router)
 app.include_router(advisory_router)
-app.include_router(brand_catalog_router)
 
 # Lets a separate frontend app (different domain, see FRONTEND_ORIGINS in
 # config.py) call this API with credentials (cookies) from the browser.
@@ -1564,15 +1562,6 @@ def add_creators_page(current_user: CreatorProfile | None = Depends(get_current_
     if not is_profile_complete(current_user):
         return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
     return FileResponse("frontend/add-creators.html", headers=_PROTECTED_PAGE_HEADERS)
-
-
-@app.get("/brand-catalog", include_in_schema=False)
-def brand_catalog_page(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
-    if not current_user:
-        return RedirectResponse(url="/signin?return_to=/brand-catalog", status_code=307)
-    if not is_profile_complete(current_user):
-        return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
-    return FileResponse("frontend/brand-catalog.html", headers=_PROTECTED_PAGE_HEADERS)
 
 
 class SeedJobResponse(BaseModel):
