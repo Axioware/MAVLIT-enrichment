@@ -25,8 +25,8 @@ from pathlib import Path
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from pipeline.db import BrandRaw, CreatorInstagramPost, CreatorProfile, Prompt, RateEstimate
-from pipeline.helpers.gpt_llm import call_gpt_json, fill_template, llm_usage_scope
+from pipeline.db import BrandRaw, CreatorInstagramPost, CreatorProfile, Prompt, RateEstimate, RateIntelligenceLog
+from pipeline.helpers.gpt_llm import call_gpt_json, capture_llm_usage, fill_template, llm_usage_scope
 from pipeline.helpers.prompts import RATE_INTEL_DEFAULT_PROMPT, RATE_INTEL_PROMPT_NAME
 from pipeline.pitching import _PARTNER_CREATORS_SQL, _brand_instagram_followers
 
@@ -215,6 +215,26 @@ def _resolve_brand(db: Session, brand_id: int | None, brand_name: str | None) ->
     return db.query(BrandRaw).filter(BrandRaw.name.ilike(name)).order_by(BrandRaw.id).first()   # None: a brand outside the database
 
 
+def _finish_log(db: Session, log: RateIntelligenceLog, calls: list[dict], estimate_id: int | None, status: str, error: str | None) -> None:
+    """Fill the log row with what the LLM call(s) used and write it. Never raises: logging must not break an estimate."""
+    try:
+        def total(key: str) -> int:
+            return sum(int(c.get(key) or 0) for c in calls)
+        costs = [c["cost_usd"] for c in calls if c.get("cost_usd") is not None]
+        log.model = calls[-1]["model"] if calls else None
+        log.output = "\n".join(str(c["output"]) for c in calls if c.get("output")) or None
+        log.input_tokens, log.cached_tokens = total("prompt_tokens"), total("cached_tokens")
+        log.output_tokens, log.reasoning_tokens = total("completion_tokens"), total("reasoning_tokens")
+        log.cost_usd = sum(costs) if costs else None
+        log.duration_ms = total("duration_ms") if calls else None
+        log.status, log.error, log.estimate_id = status, error, estimate_id
+        db.add(log)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Rate intelligence log could not be written - %s", exc)
+
+
 def estimate_rate(
     db: Session,
     creator: CreatorProfile,
@@ -262,9 +282,19 @@ def estimate_rate(
         rate_row=row_text,
         rate_ladder=ladder_text,
     )
-    with llm_usage_scope(creator.id, "rate_estimate"):
-        result = call_gpt_json(prompt, context=f"rate estimate for creator_id={creator.id} brand={name!r}")
+    log = RateIntelligenceLog(
+        creator_profile_id=creator.id, creator_handle=(creator.instagram_handle or creator.creator_handle or None),
+        brand_raw_id=brand.id if brand else None, brand_name=name, platform=platform,
+        deliverable_type=deliverable_type, exclusivity=exclusivity, usage=usage, duration_months=duration_months, prompt=prompt,
+    )
+    try:
+        with llm_usage_scope(creator.id, "rate_estimate"), capture_llm_usage() as calls:
+            result = call_gpt_json(prompt, context=f"rate estimate for creator_id={creator.id} brand={name!r}")
+    except Exception as exc:   # OpenAI unavailable: logged, then raised as before
+        _finish_log(db, log, [], None, "error", f"{type(exc).__name__}: {exc}")
+        raise
     if not isinstance(result, dict) or not result:
+        _finish_log(db, log, calls, None, "error", "The LLM returned no usable JSON")
         raise RuntimeError("Rate estimation failed - LLM returned no content")
 
     def whole(key: str) -> int | None:
@@ -312,5 +342,6 @@ def estimate_rate(
     db.add(estimate)
     db.commit()
     db.refresh(estimate)
+    _finish_log(db, log, calls, estimate.id, "ok", None)
     logger.info("Rate estimate: creator_id=%d brand=%r id=%d", creator.id, name, estimate.id)
     return estimate

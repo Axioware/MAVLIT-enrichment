@@ -72,6 +72,7 @@ from pipeline.db import (
     Pitch,
     Prompt,
     RateEstimate,
+    RateIntelligenceLog,
     SavedBrand,
     SessionLocal,
     TestBrandsWithInstagramPosts,
@@ -464,6 +465,7 @@ def _run_migrations() -> None:
         "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS confidence TEXT",
         "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS details JSONB",
         "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS brand_name TEXT",
+        "ALTER TABLE rate_intelligence_logs ADD COLUMN IF NOT EXISTS creator_handle TEXT",   # only matters for a table created before this column
         "ALTER TABLE rate_estimates ALTER COLUMN brand_raw_id DROP NOT NULL",
         # The audience age range is no longer its own field: the age is written in the audience description
         # (existing profiles had their age copied into it before these columns were dropped).
@@ -938,6 +940,37 @@ class LlmUsageAdmin(ModelView, model=LlmUsage):
     page_size  = 25
 
 
+class RateIntelligenceLogAdmin(ModelView, model=RateIntelligenceLog):
+    """
+    Rate Intelligence log (written by pipeline/rate_intelligence.py): one read-only row per request - the MAVLIT user, the
+    brand and deal terms, the exact prompt (input), the LLM's raw answer (output), the tokens, the cost and the status.
+    """
+    name         = "Rate Intelligence Log"
+    name_plural  = "Rate Intelligence Log"
+    category     = "Test"
+    icon         = "fa-solid fa-scale-balanced"
+    column_list  = [RateIntelligenceLog.created_at, RateIntelligenceLog.creator_profile_id, RateIntelligenceLog.creator_handle, RateIntelligenceLog.brand_name,
+                    RateIntelligenceLog.deliverable_type, RateIntelligenceLog.exclusivity, RateIntelligenceLog.usage,
+                    RateIntelligenceLog.input_tokens, RateIntelligenceLog.output_tokens, RateIntelligenceLog.cost_usd,
+                    RateIntelligenceLog.status]
+    column_labels = {RateIntelligenceLog.creator_profile_id: "MAVLIT user id", RateIntelligenceLog.creator_handle: "Instagram handle",
+                     RateIntelligenceLog.cost_usd: "Cost (USD)",
+                     RateIntelligenceLog.input_tokens: "Input tokens", RateIntelligenceLog.output_tokens: "Output tokens"}
+    column_searchable_list = [RateIntelligenceLog.creator_handle, RateIntelligenceLog.brand_name, RateIntelligenceLog.deliverable_type, RateIntelligenceLog.status]
+    column_sortable_list   = [c.name for c in RateIntelligenceLog.__table__.columns if c.name not in ("prompt", "output")]
+    column_default_sort    = [(RateIntelligenceLog.created_at, True)]
+    column_filters = [
+        OperationColumnFilter(RateIntelligenceLog.creator_profile_id),
+        AllUniqueStringValuesFilter(RateIntelligenceLog.status),
+        OperationColumnFilter(RateIntelligenceLog.cost_usd),
+        OperationColumnFilter(RateIntelligenceLog.created_at),
+    ]
+    can_create = False
+    can_edit   = False
+    can_delete = False
+    page_size  = 25
+
+
 class CreatorLlmCostAdmin(ModelView, model=CreatorLlmCost):
     """
     LLM cost per MAVLIT user: one row per creator with calls, total cost and the
@@ -1382,6 +1415,7 @@ admin.add_view(FacebookBrandedContentCheckAdmin)
 admin.add_view(CreatorNicheAdmin)
 admin.add_view(CreatorInstagramPostAdmin)
 admin.add_view(LlmUsageAdmin)
+admin.add_view(RateIntelligenceLogAdmin)
 admin.add_view(CreatorLlmCostAdmin)
 admin.add_view(InstagramUserAdmin)
 admin.add_view(ContentCreatorREAdmin)

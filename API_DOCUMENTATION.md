@@ -369,11 +369,19 @@ The following endpoints are authenticated and implemented for API consumers, but
 
 #### `POST /rate-intelligence`
 
-- **Purpose:** Estimate a creator rate for a brand, platform, and deliverable; saves the estimate.
+- **Purpose:** Estimate the rate for ONE Instagram deliverable of a deal (Deal Tools > Rate Intelligence). The LLM gets the creator's followers, niche, best post results, the deal terms, the brand (name, Instagram followers, the creators it has paid with their follower counts and sponsored-post likes/views) and the matching rows of the creator rate data (`pipeline/data/rate_buckets_by_niche.csv`). Saves the estimate (`rate_estimates`) and writes a log row (`rate_intelligence_logs`: user id and the Instagram handle the profile had at that moment, brand, time, prompt, raw output, tokens, cost, status).
 - **Auth:** Required.
-- **Body:** `{ "brand_id": 7, "platform": "instagram", "deliverable_type": "1 feed post + 3 stories", "exclusivity": null, "usage": "organic only", "duration_months": 1 }`.
-- **Response:** `200`, `{ "id": 7, "rate_min": 800, "rate_max": 1500, "currency": "USD", "reasoning": "...", "created_at": "..." }`.
-- **Errors:** `401` unauthenticated; `404` brand not found; `502` LLM failure; `422` malformed body.
+- **Body:** `{ "brand_id": 7, "brand_name": "Studio Fit", "platform": "Instagram", "deliverable_type": "Reel", "exclusivity": "Broad", "usage": "Includes paid usage or whitelisting", "duration_months": 6 }`. `deliverable_type` is `Reel`, `Story`, `Static post` or `Instagram Live`; `exclusivity` is `None`, `Narrow` or `Broad`; send `brand_id` for a brand in MAVLIT's database, otherwise `brand_name` alone. `duration_months` (integer) only matters for Narrow / Broad.
+- **Response:** `200`, `{ "id": 7, "brand_id": 7, "brand_name": "Studio Fit", "platform": "Instagram", "deliverable_type": "Reel", "exclusivity": "Broad", "usage": "...", "duration_months": 6, "rate_min": 800, "rate_typical": 1100, "rate_max": 1500, "currency": "USD", "confidence": "medium", "reasoning": "...", "basis": "...", "adjustments": [{ "factor": "usage", "effect": "..." }], "details": { ... }, "created_at": "..." }`.
+- **Errors:** `401` unauthenticated; `404` brand_id not found (or neither a brand id nor a name given); `502` LLM failure; `422` malformed body.
+
+#### `GET /rate-intelligence/latest`
+
+- **Purpose:** The creator's saved estimate, so Deal Tools shows it again after a page reload.
+- **Auth:** Required.
+- **Query:** with `deliverable_type` and a brand (`brand_id`, or `brand_name`): the newest estimate made for exactly those inputs (`exclusivity`, `usage`, and for Narrow / Broad `duration_months`). With no query: the creator's newest estimate of all, whose inputs the page restores.
+- **Response:** `200`, the same object as `POST /rate-intelligence`, or `null` when there is none.
+- **Errors:** `401` unauthenticated.
 
 #### `POST /contract-advice`
 

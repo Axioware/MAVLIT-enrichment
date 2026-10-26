@@ -301,6 +301,12 @@ class RateIntelligenceRequest(BaseModel):
 
 class RateIntelligenceResponse(BaseModel):
     id: int
+    brand_id:        int | None = None
+    platform:        str | None = None
+    deliverable_type: str | None = None
+    exclusivity:     str | None = None
+    usage:           str | None = None
+    duration_months: int | None = None
     brand_name:   str | None = None
     rate_min:     int | None = None
     rate_typical: int | None = None
@@ -317,6 +323,12 @@ class RateIntelligenceResponse(BaseModel):
 def rate_estimate_to_response(estimate: RateEstimate) -> RateIntelligenceResponse:
     return RateIntelligenceResponse(
         id=estimate.id,
+        brand_id=estimate.brand_raw_id,
+        platform=estimate.platform,
+        deliverable_type=estimate.deliverable_type,
+        exclusivity=estimate.exclusivity,
+        usage=estimate.usage,
+        duration_months=estimate.duration_months,
         brand_name=estimate.brand_name,
         rate_min=estimate.rate_min,
         rate_typical=estimate.rate_typical,

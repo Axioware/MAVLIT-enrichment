@@ -85,6 +85,21 @@ def llm_usage_scope(creator_profile_id: int, feature: str):
         _usage_scope.reset(token)
 
 
+# A caller that needs the tokens, cost and raw answer of the calls it makes (the rate-intelligence log) wraps them in
+# capture_llm_usage(); every call made in this thread inside the block appends one dict to the yielded list.
+_usage_capture: contextvars.ContextVar[list | None] = contextvars.ContextVar("llm_usage_capture", default=None)
+
+
+@contextlib.contextmanager
+def capture_llm_usage():
+    calls: list[dict] = []
+    token = _usage_capture.set(calls)
+    try:
+        yield calls
+    finally:
+        _usage_capture.reset(token)
+
+
 def scoped(fn):
     """
     Wrap fn so that, when it runs in a ThreadPoolExecutor worker, its LLM calls
@@ -148,6 +163,17 @@ def _record_usage(path: str, payload: dict, body: dict, context: str, seconds: f
         cost = llm_cost_usd(model, prompt_tokens, cached_tokens, completion_tokens)
         if cost is None:
             logger.warning("LLM cost: no price for model %r in gpt_llm._PRICES — logged without cost", model)
+        captured = _usage_capture.get()
+        if captured is not None:
+            try:
+                answer = body["choices"][0]["message"]["content"]
+            except (KeyError, IndexError, TypeError):
+                answer = None
+            captured.append({
+                "model": model, "prompt_tokens": prompt_tokens, "cached_tokens": cached_tokens,
+                "completion_tokens": completion_tokens, "reasoning_tokens": reasoning_tokens,
+                "cost_usd": cost, "duration_ms": round(seconds * 1000), "output": answer,
+            })
         scope = _usage_scope.get()
         db = SessionLocal()
         try:
