@@ -47,7 +47,7 @@ _DATASET_NICHE = {"music": "Music & Dance", "dance": "Music & Dance", "beauty": 
 _DATASET_DELIVERABLE = {"reel": "Reel", "story": "Story", "static post": "Post", "post": "Post", "instagram live": "Live", "live": "Live"}
 
 # The three choices of Deal Tools > Exclusivity, spelled out for the LLM.
-_EXCLUSIVITY_TEXT = {
+EXCLUSIVITY_TEXT = {
     "None": "None (the creator may work with competing brands)",
     "Narrow": "Narrow - the creator may not promote a competing version of the brand's specific product",
     "Broad": "Broad - the creator may not promote any competing brand in the brand's whole product category",
@@ -268,7 +268,7 @@ def estimate_rate(
     partners = partner_creators_all(db, brand.id) if brand else []
     best = creator_best_posts(db, creator)
 
-    exclusivity_text = _EXCLUSIVITY_TEXT.get(exclusivity or "", "none specified")
+    exclusivity_text = EXCLUSIVITY_TEXT.get(exclusivity or "", "none specified")
     if exclusivity in ("Narrow", "Broad"):
         exclusivity_text += f", for {duration_months} months" if duration_months else ", duration not specified"
     prompt = fill_template(

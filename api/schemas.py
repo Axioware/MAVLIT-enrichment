@@ -346,13 +346,20 @@ def rate_estimate_to_response(estimate: RateEstimate) -> RateIntelligenceRespons
 #  Contract advice (pipeline/contract_advice.py -> api/advisory.py)
 
 class ContractAdviceRequest(BaseModel):
-    contract_text: str
+    contract_text: str = Field(min_length=1, max_length=20000)
+    # The Deal Tools terms to compare the contract with - all optional.
+    brand_name:       str | None = Field(default=None, max_length=200)
+    deliverable_type: str | None = None
+    exclusivity:      str | None = None     # None | Narrow | Broad
+    usage:            str | None = None
+    duration_months:  int | None = Field(default=None, ge=1, le=120)
 
 
 class ContractAdviceResponse(BaseModel):
     id: int
     looks_good: bool | None = None
     issues: list[str] = []
+    deal_comparison: list[str] = []   # how the contract compares with the Deal Tools terms (empty when none were set)
     summary: str | None = None
     created_at: str
 
@@ -362,6 +369,7 @@ def contract_review_to_response(review: ContractReview) -> ContractAdviceRespons
         id=review.id,
         looks_good=review.looks_good,
         issues=review.issues or [],
+        deal_comparison=review.deal_comparison or [],
         summary=review.summary,
         created_at=str(review.created_at) if review.created_at else "",
     )

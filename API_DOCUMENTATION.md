@@ -385,11 +385,11 @@ The following endpoints are authenticated and implemented for API consumers, but
 
 #### `POST /contract-advice`
 
-- **Purpose:** Review pasted contract text and save a plain-language review. This is not legal advice.
+- **Purpose:** Review pasted contract text for common creator red flags and compare it with the creator's Deal Tools terms; saves the review. This is not legal advice.
 - **Auth:** Required.
-- **Body:** `{ "contract_text": "full contract text..." }`.
-- **Response:** `200`, `{ "id": 3, "looks_good": false, "issues": ["..."], "summary": "...", "created_at": "..." }`.
-- **Errors:** `401` unauthenticated; `502` LLM failure; `422` malformed body.
+- **Body:** `{ "contract_text": "full contract text...", "brand_name": "Studio Fit", "deliverable_type": "Reel", "exclusivity": "Narrow", "usage": "Organic only", "duration_months": 3 }`. Only `contract_text` (1 to 20,000 characters) is required; the other fields are the Deal Tools terms the contract is compared with (`exclusivity` is `None`, `Narrow` or `Broad`; `duration_months` is 1 to 120).
+- **Response:** `200`, `{ "id": 3, "looks_good": false, "issues": ["..."], "deal_comparison": ["Exclusivity: the contract bars all fitness brands for 12 months, broader than the Narrow, 3-month term you chose."], "summary": "...", "created_at": "..." }`. `deal_comparison` is empty when no terms were sent.
+- **Errors:** `401` unauthenticated; `502` LLM failure; `422` malformed body (including an empty or over-long contract).
 
 ## Operations and enrichment API
 

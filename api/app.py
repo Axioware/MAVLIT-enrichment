@@ -464,6 +464,10 @@ def _run_migrations() -> None:
         "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS confidence TEXT",
         "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS details JSONB",
         "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS brand_name TEXT",
+        # Contract Advice compares the contract with the Deal Tools terms.
+        "ALTER TABLE contract_reviews ADD COLUMN IF NOT EXISTS brand_name TEXT",
+        "ALTER TABLE contract_reviews ADD COLUMN IF NOT EXISTS deal_context JSONB",
+        "ALTER TABLE contract_reviews ADD COLUMN IF NOT EXISTS deal_comparison JSONB",
         # The request log lives in rate_estimates itself (no separate table).
         "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS creator_handle TEXT",
         "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS model TEXT",
@@ -728,6 +732,9 @@ def _run_migrations() -> None:
         linkedin_prompt = db.query(Prompt).filter(Prompt.name == LINKEDIN_COMPANY_MATCH_PROMPT_NAME).first()
         if linkedin_prompt and "{experience}" not in (linkedin_prompt.content or ""):   # an older prompt without the work-experience input
             linkedin_prompt.content = LINKEDIN_COMPANY_MATCH_DEFAULT_PROMPT
+        contract_prompt = db.query(Prompt).filter(Prompt.name == CONTRACT_ADVICE_PROMPT_NAME).first()
+        if contract_prompt and "{exclusivity}" not in (contract_prompt.content or ""):   # the earlier prompt had no deal-terms comparison
+            contract_prompt.content = CONTRACT_ADVICE_DEFAULT_PROMPT
         rate_prompt = db.query(Prompt).filter(Prompt.name == RATE_INTEL_PROMPT_NAME).first()
         if rate_prompt and "{creator_highest_likes}" not in (rate_prompt.content or ""):   # an earlier prompt without the rate-data / best-post inputs
             rate_prompt.content = RATE_INTEL_DEFAULT_PROMPT

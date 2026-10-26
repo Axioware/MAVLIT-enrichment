@@ -964,6 +964,11 @@ class ContractReview(Base):
     issues        = Column(JSONB)
     summary       = Column(Text)
 
+    # The Deal Tools terms the contract was compared with (empty when the creator set none), and the result of that comparison.
+    brand_name      = Column(Text)
+    deal_context    = Column(JSONB)
+    deal_comparison = Column(JSONB)
+
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     creator = relationship("CreatorProfile", lazy="selectin", foreign_keys=[creator_profile_id])

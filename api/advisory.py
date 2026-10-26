@@ -81,7 +81,11 @@ def get_contract_advice(
     current_user: CreatorProfile = Depends(get_current_user),
 ):
     try:
-        review = review_contract(db, current_user, body.contract_text)
+        review = review_contract(
+            db, current_user, body.contract_text,
+            brand_name=body.brand_name, deliverable_type=body.deliverable_type, exclusivity=body.exclusivity,
+            usage=body.usage, duration_months=body.duration_months,
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     return contract_review_to_response(review)
