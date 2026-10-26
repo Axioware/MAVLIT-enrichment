@@ -25,7 +25,7 @@ from pathlib import Path
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from pipeline.db import BrandRaw, CreatorInstagramPost, CreatorProfile, Prompt, RateEstimate, RateIntelligenceLog
+from pipeline.db import BrandRaw, CreatorInstagramPost, CreatorProfile, Prompt, RateEstimate
 from pipeline.helpers.gpt_llm import call_gpt_json, capture_llm_usage, fill_template, llm_usage_scope
 from pipeline.helpers.prompts import RATE_INTEL_DEFAULT_PROMPT, RATE_INTEL_PROMPT_NAME
 from pipeline.pitching import _PARTNER_CREATORS_SQL, _brand_instagram_followers
@@ -215,24 +215,29 @@ def _resolve_brand(db: Session, brand_id: int | None, brand_name: str | None) ->
     return db.query(BrandRaw).filter(BrandRaw.name.ilike(name)).order_by(BrandRaw.id).first()   # None: a brand outside the database
 
 
-def _finish_log(db: Session, log: RateIntelligenceLog, calls: list[dict], estimate_id: int | None, status: str, error: str | None) -> None:
-    """Fill the log row with what the LLM call(s) used and write it. Never raises: logging must not break an estimate."""
+def _fill_llm_fields(estimate: RateEstimate, calls: list[dict]) -> None:
+    """What the LLM call(s) used: model, raw answer, tokens, cost, time."""
+    def total(key: str) -> int:
+        return sum(int(c.get(key) or 0) for c in calls)
+    costs = [c["cost_usd"] for c in calls if c.get("cost_usd") is not None]
+    estimate.model = calls[-1]["model"] if calls else None
+    estimate.output = "\n".join(str(c["output"]) for c in calls if c.get("output")) or None
+    estimate.input_tokens, estimate.cached_tokens = total("prompt_tokens"), total("cached_tokens")
+    estimate.output_tokens, estimate.reasoning_tokens = total("completion_tokens"), total("reasoning_tokens")
+    estimate.cost_usd = sum(costs) if costs else None
+    estimate.duration_ms = total("duration_ms") if calls else None
+
+
+def _save_failed(db: Session, estimate: RateEstimate, calls: list[dict], error: str) -> None:
+    """Keep a failed request as an error row (no rates). Never raises: logging must not hide the real error."""
     try:
-        def total(key: str) -> int:
-            return sum(int(c.get(key) or 0) for c in calls)
-        costs = [c["cost_usd"] for c in calls if c.get("cost_usd") is not None]
-        log.model = calls[-1]["model"] if calls else None
-        log.output = "\n".join(str(c["output"]) for c in calls if c.get("output")) or None
-        log.input_tokens, log.cached_tokens = total("prompt_tokens"), total("cached_tokens")
-        log.output_tokens, log.reasoning_tokens = total("completion_tokens"), total("reasoning_tokens")
-        log.cost_usd = sum(costs) if costs else None
-        log.duration_ms = total("duration_ms") if calls else None
-        log.status, log.error, log.estimate_id = status, error, estimate_id
-        db.add(log)
+        _fill_llm_fields(estimate, calls)
+        estimate.status, estimate.error = "error", error
+        db.add(estimate)
         db.commit()
     except Exception as exc:
         db.rollback()
-        logger.warning("Rate intelligence log could not be written - %s", exc)
+        logger.warning("Rate estimate: could not save the failed request - %s", exc)
 
 
 def estimate_rate(
@@ -249,7 +254,8 @@ def estimate_rate(
 ) -> RateEstimate:
     """
     Raises ValueError if neither a brand id nor a brand name is given, or brand_id doesn't exist. Raises
-    RuntimeError if the LLM call comes back empty - nothing is persisted in that case.
+    RuntimeError if the LLM call comes back empty - the failed request is kept as an error row (status "error",
+    no rates) in rate_estimates, with its prompt and token usage.
     """
     brand = _resolve_brand(db, brand_id, brand_name)
     name = (brand.name if brand and brand.name else (brand_name or "").strip()) or "this brand"
@@ -282,19 +288,20 @@ def estimate_rate(
         rate_row=row_text,
         rate_ladder=ladder_text,
     )
-    log = RateIntelligenceLog(
+    estimate = RateEstimate(
         creator_profile_id=creator.id, creator_handle=(creator.instagram_handle or creator.creator_handle or None),
         brand_raw_id=brand.id if brand else None, brand_name=name, platform=platform,
-        deliverable_type=deliverable_type, exclusivity=exclusivity, usage=usage, duration_months=duration_months, prompt=prompt,
+        deliverable_type=deliverable_type, exclusivity=exclusivity, usage=usage, duration_months=duration_months,
+        prompt=prompt, status="ok",
     )
     try:
         with llm_usage_scope(creator.id, "rate_estimate"), capture_llm_usage() as calls:
             result = call_gpt_json(prompt, context=f"rate estimate for creator_id={creator.id} brand={name!r}")
-    except Exception as exc:   # OpenAI unavailable: logged, then raised as before
-        _finish_log(db, log, [], None, "error", f"{type(exc).__name__}: {exc}")
+    except Exception as exc:   # OpenAI unavailable: kept as an error row, then raised as before
+        _save_failed(db, estimate, [], f"{type(exc).__name__}: {exc}")
         raise
     if not isinstance(result, dict) or not result:
-        _finish_log(db, log, calls, None, "error", "The LLM returned no usable JSON")
+        _save_failed(db, estimate, calls, "The LLM returned no usable JSON")
         raise RuntimeError("Rate estimation failed - LLM returned no content")
 
     def whole(key: str) -> int | None:
@@ -310,38 +317,26 @@ def estimate_rate(
     confidence = str(result.get("confidence") or "").strip().lower()
     adjustments = [a for a in (result.get("adjustments") or []) if isinstance(a, dict) and a.get("effect")] if isinstance(result.get("adjustments"), list) else []
 
-    estimate = RateEstimate(
-        creator_profile_id=creator.id,
-        brand_raw_id=brand.id if brand else None,
-        brand_name=name,
-        platform=platform,
-        deliverable_type=deliverable_type,
-        exclusivity=exclusivity,
-        usage=usage,
-        duration_months=duration_months,
-        rate_min=low,
-        rate_typical=typical,
-        rate_max=high,
-        currency=result.get("currency") or "USD",
-        confidence=confidence if confidence in ("low", "medium", "high") else None,
-        reasoning=result.get("reasoning"),
-        details={
-            "basis": result.get("basis"),
-            "adjustments": [{"factor": str(a.get("factor") or ""), "effect": str(a["effect"])} for a in adjustments],
-            "creator_niche": niche, "follower_bucket": bucket, "creator_followers": followers,
-            "creator_highest_views": best["views"], "creator_highest_likes": best["likes"],
-            "data_row": rate_row(niche, bucket, deliverable),
-            "brand_followers": _brand_instagram_followers(db, brand.id) if brand else None,
-            "partner_creators": [
-                {"username": c["username"], "followers": c.get("followers"), "niche": c.get("niche"), "confidence": c.get("sponsorship_confidence"),
-                 "post_views": c.get("views"), "post_likes": c.get("likes_count")}
-                for c in partners
-            ],
-        },
-    )
+    _fill_llm_fields(estimate, calls)
+    estimate.rate_min, estimate.rate_typical, estimate.rate_max = low, typical, high
+    estimate.currency = result.get("currency") or "USD"
+    estimate.confidence = confidence if confidence in ("low", "medium", "high") else None
+    estimate.reasoning = result.get("reasoning")
+    estimate.details = {
+        "basis": result.get("basis"),
+        "adjustments": [{"factor": str(a.get("factor") or ""), "effect": str(a["effect"])} for a in adjustments],
+        "creator_niche": niche, "follower_bucket": bucket, "creator_followers": followers,
+        "creator_highest_views": best["views"], "creator_highest_likes": best["likes"],
+        "data_row": rate_row(niche, bucket, deliverable),
+        "brand_followers": _brand_instagram_followers(db, brand.id) if brand else None,
+        "partner_creators": [
+            {"username": c["username"], "followers": c.get("followers"), "niche": c.get("niche"), "confidence": c.get("sponsorship_confidence"),
+             "post_views": c.get("views"), "post_likes": c.get("likes_count")}
+            for c in partners
+        ],
+    }
     db.add(estimate)
     db.commit()
     db.refresh(estimate)
-    _finish_log(db, log, calls, estimate.id, "ok", None)
     logger.info("Rate estimate: creator_id=%d brand=%r id=%d", creator.id, name, estimate.id)
     return estimate

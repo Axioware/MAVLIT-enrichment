@@ -913,6 +913,9 @@ class RateEstimate(Base):
 
     id                  = Column(Integer, primary_key=True)
     creator_profile_id  = Column(Integer, ForeignKey("creator_profiles.id"), nullable=False, index=True)
+    # The Instagram handle the profile had when the request ran. One MAVLIT user can change the handle and test other
+    # accounts, so the user id alone does not say which profile was run.
+    creator_handle      = Column(Text, index=True)
     brand_raw_id        = Column(Integer, ForeignKey("brands_raw.id"), index=True)   # NULL for a brand the creator typed that is not in brands_raw
     brand_name          = Column(Text)
 
@@ -929,6 +932,19 @@ class RateEstimate(Base):
     confidence   = Column(Text)   # low | medium | high
     reasoning    = Column(Text)
     details      = Column(JSONB)  # basis, adjustments and the data the estimate was built from
+
+    # The LLM request behind the estimate (the log of Deal Tools > Rate Intelligence), written for failed requests too.
+    model            = Column(Text)
+    prompt           = Column(Text)   # the input: the full prompt the LLM received
+    output           = Column(Text)   # the LLM's raw answer
+    input_tokens     = Column(Integer)
+    cached_tokens    = Column(Integer)
+    output_tokens    = Column(Integer)
+    reasoning_tokens = Column(Integer)   # part of output_tokens
+    cost_usd         = Column(Numeric(12, 6))
+    duration_ms      = Column(Integer)
+    status           = Column(Text, nullable=False, server_default="ok")   # ok | error (an error row has no rates)
+    error            = Column(Text)
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
@@ -1053,47 +1069,6 @@ class TestCreatorBrandPartnershipPost(Base):
 
     brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
     content_creator_re = relationship("ContentCreatorRE", lazy="selectin", foreign_keys=[content_creator_re_id])
-
-
-class RateIntelligenceLog(Base):
-    """
-    One row per Rate Intelligence request (Deal Tools): who asked, for which brand and deal terms, the exact prompt
-    sent to the LLM, its raw answer, the tokens and cost, and whether it worked. Written by pipeline/rate_intelligence.py
-    for failures as well as successes (a failed request has no estimate_id).
-    """
-    __tablename__ = "rate_intelligence_logs"
-
-    id                 = Column(Integer, primary_key=True)
-    created_at         = Column(TIMESTAMP(timezone=True), server_default=func.now(), index=True)
-    creator_profile_id = Column(Integer, ForeignKey("creator_profiles.id", ondelete="SET NULL"), index=True)
-    # The Instagram handle the profile had when the request ran. One MAVLIT user can change the handle and test other
-    # accounts, so the user id alone does not say which profile was run.
-    creator_handle     = Column(Text, index=True)
-    brand_raw_id       = Column(Integer, ForeignKey("brands_raw.id", ondelete="SET NULL"), index=True)   # NULL for a brand outside brands_raw
-    brand_name         = Column(Text)
-
-    platform         = Column(Text)
-    deliverable_type = Column(Text)
-    exclusivity      = Column(Text)
-    usage            = Column(Text)
-    duration_months  = Column(Integer)
-
-    model             = Column(Text)
-    prompt            = Column(Text)    # the input: the full prompt the LLM received
-    output            = Column(Text)    # the LLM's raw answer
-    input_tokens      = Column(Integer)
-    cached_tokens     = Column(Integer)
-    output_tokens     = Column(Integer)
-    reasoning_tokens  = Column(Integer)   # part of output_tokens
-    cost_usd          = Column(Numeric(12, 6))
-    duration_ms       = Column(Integer)
-
-    status      = Column(Text, nullable=False, server_default="ok")   # ok | error
-    error       = Column(Text)
-    estimate_id = Column(Integer, ForeignKey("rate_estimates.id", ondelete="SET NULL"))
-
-    creator = relationship("CreatorProfile", lazy="selectin", foreign_keys=[creator_profile_id])
-    brand   = relationship("BrandRaw",       lazy="selectin", foreign_keys=[brand_raw_id])
 
 
 class Prompt(Base):

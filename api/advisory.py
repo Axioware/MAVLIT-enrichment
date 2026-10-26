@@ -59,7 +59,7 @@ def get_latest_rate_intelligence(
         count for Narrow / Broad exclusivity);
       - with no inputs: the creator's newest estimate of all, whose inputs the page restores.
     """
-    query = db.query(RateEstimate).filter(RateEstimate.creator_profile_id == current_user.id)
+    query = db.query(RateEstimate).filter(RateEstimate.creator_profile_id == current_user.id, RateEstimate.status == "ok")
     if deliverable_type and (brand_id is not None or (brand_name or "").strip()):
         if brand_id is not None:
             query = query.filter(RateEstimate.brand_raw_id == brand_id)

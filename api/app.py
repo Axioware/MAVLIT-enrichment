@@ -72,7 +72,6 @@ from pipeline.db import (
     Pitch,
     Prompt,
     RateEstimate,
-    RateIntelligenceLog,
     SavedBrand,
     SessionLocal,
     TestBrandsWithInstagramPosts,
@@ -465,7 +464,20 @@ def _run_migrations() -> None:
         "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS confidence TEXT",
         "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS details JSONB",
         "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS brand_name TEXT",
-        "ALTER TABLE rate_intelligence_logs ADD COLUMN IF NOT EXISTS creator_handle TEXT",   # only matters for a table created before this column
+        # The request log lives in rate_estimates itself (no separate table).
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS creator_handle TEXT",
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS model TEXT",
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS prompt TEXT",
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS output TEXT",
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS input_tokens INTEGER",
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS cached_tokens INTEGER",
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS output_tokens INTEGER",
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS reasoning_tokens INTEGER",
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(12, 6)",
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS duration_ms INTEGER",
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ok'",
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS error TEXT",
+        "DROP TABLE IF EXISTS rate_intelligence_logs",   # an earlier version kept the log in its own table
         "ALTER TABLE rate_estimates ALTER COLUMN brand_raw_id DROP NOT NULL",
         # The audience age range is no longer its own field: the age is written in the audience description
         # (existing profiles had their age copied into it before these columns were dropped).
@@ -940,37 +952,6 @@ class LlmUsageAdmin(ModelView, model=LlmUsage):
     page_size  = 25
 
 
-class RateIntelligenceLogAdmin(ModelView, model=RateIntelligenceLog):
-    """
-    Rate Intelligence log (written by pipeline/rate_intelligence.py): one read-only row per request - the MAVLIT user, the
-    brand and deal terms, the exact prompt (input), the LLM's raw answer (output), the tokens, the cost and the status.
-    """
-    name         = "Rate Intelligence Log"
-    name_plural  = "Rate Intelligence Log"
-    category     = "Test"
-    icon         = "fa-solid fa-scale-balanced"
-    column_list  = [RateIntelligenceLog.created_at, RateIntelligenceLog.creator_profile_id, RateIntelligenceLog.creator_handle, RateIntelligenceLog.brand_name,
-                    RateIntelligenceLog.deliverable_type, RateIntelligenceLog.exclusivity, RateIntelligenceLog.usage,
-                    RateIntelligenceLog.input_tokens, RateIntelligenceLog.output_tokens, RateIntelligenceLog.cost_usd,
-                    RateIntelligenceLog.status]
-    column_labels = {RateIntelligenceLog.creator_profile_id: "MAVLIT user id", RateIntelligenceLog.creator_handle: "Instagram handle",
-                     RateIntelligenceLog.cost_usd: "Cost (USD)",
-                     RateIntelligenceLog.input_tokens: "Input tokens", RateIntelligenceLog.output_tokens: "Output tokens"}
-    column_searchable_list = [RateIntelligenceLog.creator_handle, RateIntelligenceLog.brand_name, RateIntelligenceLog.deliverable_type, RateIntelligenceLog.status]
-    column_sortable_list   = [c.name for c in RateIntelligenceLog.__table__.columns if c.name not in ("prompt", "output")]
-    column_default_sort    = [(RateIntelligenceLog.created_at, True)]
-    column_filters = [
-        OperationColumnFilter(RateIntelligenceLog.creator_profile_id),
-        AllUniqueStringValuesFilter(RateIntelligenceLog.status),
-        OperationColumnFilter(RateIntelligenceLog.cost_usd),
-        OperationColumnFilter(RateIntelligenceLog.created_at),
-    ]
-    can_create = False
-    can_edit   = False
-    can_delete = False
-    page_size  = 25
-
-
 class CreatorLlmCostAdmin(ModelView, model=CreatorLlmCost):
     """
     LLM cost per MAVLIT user: one row per creator with calls, total cost and the
@@ -1236,17 +1217,35 @@ class PitchAdmin(ModelView, model=Pitch):
 
 
 class RateEstimateAdmin(ModelView, model=RateEstimate):
+    """
+    Rate Intelligence estimates AND their log: one row per request from Deal Tools - who (MAVLIT user id + the Instagram
+    handle at that moment), which brand and deal terms, when, the estimate, and the LLM request behind it (model, tokens,
+    cost, status). Open a row to read the full prompt (input) and the LLM's raw answer (output). Failed requests are
+    rows with status "error" and no rates.
+    """
     name         = "Rate Estimate"
     name_plural  = "Rate Estimates"
     icon         = "fa-solid fa-money-bill-trend-up"
-    column_list  = "__all__"
-    column_labels = {RateEstimate.creator: "Creator", RateEstimate.brand_raw: "Brand"}
+    column_list  = [RateEstimate.id, RateEstimate.created_at, RateEstimate.creator, RateEstimate.creator_handle, RateEstimate.brand_name,
+                    RateEstimate.deliverable_type, RateEstimate.exclusivity, RateEstimate.usage, RateEstimate.duration_months,
+                    RateEstimate.rate_min, RateEstimate.rate_typical, RateEstimate.rate_max, RateEstimate.confidence,
+                    RateEstimate.input_tokens, RateEstimate.output_tokens, RateEstimate.cost_usd, RateEstimate.status]
+    column_labels = {RateEstimate.creator: "Creator", RateEstimate.brand_raw: "Brand", RateEstimate.creator_handle: "Instagram handle",
+                     RateEstimate.cost_usd: "Cost (USD)", RateEstimate.input_tokens: "Input tokens",
+                     RateEstimate.output_tokens: "Output tokens", RateEstimate.duration_ms: "Duration (ms)"}
     column_searchable_list = [
-        "brand_raw.name", "creator.email", "creator.full_name",
-        RateEstimate.platform, RateEstimate.deliverable_type,
+        "brand_raw.name", "creator.email", "creator.full_name", RateEstimate.creator_handle, RateEstimate.brand_name,
+        RateEstimate.platform, RateEstimate.deliverable_type, RateEstimate.status,
     ]
-    column_sortable_list = [c.name for c in RateEstimate.__table__.columns]
+    column_sortable_list = [c.name for c in RateEstimate.__table__.columns if c.name not in ("prompt", "output", "details")]
     column_default_sort  = [(RateEstimate.id, True)]
+    column_filters = [
+        OperationColumnFilter(RateEstimate.creator_profile_id),
+        AllUniqueStringValuesFilter(RateEstimate.status),
+        AllUniqueStringValuesFilter(RateEstimate.deliverable_type),
+        OperationColumnFilter(RateEstimate.cost_usd),
+        OperationColumnFilter(RateEstimate.created_at),
+    ]
     page_size = 15
 
 
@@ -1415,7 +1414,6 @@ admin.add_view(FacebookBrandedContentCheckAdmin)
 admin.add_view(CreatorNicheAdmin)
 admin.add_view(CreatorInstagramPostAdmin)
 admin.add_view(LlmUsageAdmin)
-admin.add_view(RateIntelligenceLogAdmin)
 admin.add_view(CreatorLlmCostAdmin)
 admin.add_view(InstagramUserAdmin)
 admin.add_view(ContentCreatorREAdmin)
