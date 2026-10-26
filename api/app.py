@@ -9,7 +9,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Req
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
 from sqladmin.filters import AllUniqueStringValuesFilter, OperationColumnFilter
@@ -459,8 +459,12 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_gender TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_description TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_description TEXT",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_age_min INTEGER",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_age_max INTEGER",
+        # The audience age range is no longer its own field: the age is written in the audience description
+        # (existing profiles had their age copied into it before these columns were dropped).
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS instagram_audience_age_min",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS instagram_audience_age_max",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS youtube_audience_age_min",
+        "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS youtube_audience_age_max",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_channel_name TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_subscribers INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_primary_niche TEXT",
@@ -473,8 +477,6 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_description_error TEXT",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS youtube_audience_gender_male_pct",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS youtube_audience_gender_female_pct",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_age_min INTEGER",
-        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_age_max INTEGER",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS location_city",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS location_country",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS bio_tagline",
@@ -1771,8 +1773,6 @@ class CreatorProfileRequest(BaseModel):
     instagram_description: str | None = None
     instagram_description_mode: str | None = None
     instagram_audience_gender: Literal["male", "female", "both"] | None = None
-    instagram_audience_age_min: int | None = Field(default=None, ge=13, le=100)
-    instagram_audience_age_max: int | None = Field(default=None, ge=13, le=100)
     instagram_audience_description: str | None = Field(default=None, max_length=1500)
     youtube_channel_name: str | None = None
     youtube_subscribers: int | None = None
@@ -1782,17 +1782,7 @@ class CreatorProfileRequest(BaseModel):
     youtube_description: str | None = None
     youtube_description_mode: str | None = None
     youtube_audience_gender: Literal["male", "female", "both"] | None = None
-    youtube_audience_age_min: int | None = Field(default=None, ge=13, le=100)
-    youtube_audience_age_max: int | None = Field(default=None, ge=13, le=100)
     youtube_audience_description: str | None = Field(default=None, max_length=1500)
-
-    @model_validator(mode="after")
-    def _age_range_is_ordered(self):
-        for platform in ("instagram", "youtube"):
-            low, high = getattr(self, f"{platform}_audience_age_min"), getattr(self, f"{platform}_audience_age_max")
-            if low is not None and high is not None and low > high:
-                raise ValueError(f"{platform} audience age: minimum ({low}) cannot be above maximum ({high})")
-        return self
 
 
 class CreatorDescriptionRequest(BaseModel):
@@ -1983,8 +1973,8 @@ def _run_creator_description_job(
         if not row or getattr(row, job_field) != job_id:
             return
         setattr(row, description_field, result["description"])
-        # Audience gender / age range generated together with the description.
-        for key in ("audience_gender", "audience_age_min", "audience_age_max", "audience_description"):
+        # Audience gender / description (the description states the age range) generated together with the description.
+        for key in ("audience_gender", "audience_description"):
             if result.get(key) is not None:
                 setattr(row, f"{platform}_{key}", result[key])
         # The follower count Apify read from the profile replaces the typed one.

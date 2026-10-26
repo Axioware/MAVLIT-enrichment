@@ -135,8 +135,6 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
     "instagram_description": "Practical strength training at home",
     "instagram_description_mode": "manual",
     "instagram_audience_gender": "female",
-    "instagram_audience_age_min": 18,
-    "instagram_audience_age_max": 34,
     "instagram_audience_description": "Mostly women 18-34 interested in home workouts",
     "youtube_channel_name": null,
     "youtube_subscribers": null,
@@ -146,8 +144,6 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
     "youtube_description": null,
     "youtube_description_mode": null,
     "youtube_audience_gender": null,
-    "youtube_audience_age_min": null,
-    "youtube_audience_age_max": null,
     "youtube_audience_description": null
   }
   ```

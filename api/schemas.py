@@ -37,8 +37,6 @@ class CreatorProfileResponse(BaseModel):
     instagram_description_job_id: str | None = None
     instagram_description_error: str | None = None
     instagram_audience_gender: str | None = None   # "male" | "female" | "both"
-    instagram_audience_age_min: int | None = None
-    instagram_audience_age_max: int | None = None
     instagram_audience_description: str | None = None
     youtube_channel_name: str | None = None
     youtube_subscribers: int | None = None
@@ -51,8 +49,6 @@ class CreatorProfileResponse(BaseModel):
     youtube_description_job_id: str | None = None
     youtube_description_error: str | None = None
     youtube_audience_gender: str | None = None
-    youtube_audience_age_min: int | None = None
-    youtube_audience_age_max: int | None = None
     youtube_audience_description: str | None = None
 
     creator_tier: str | None = None
@@ -105,8 +101,6 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         instagram_description_job_id=row.instagram_description_job_id,
         instagram_description_error=row.instagram_description_error,
         instagram_audience_gender=row.instagram_audience_gender,
-        instagram_audience_age_min=row.instagram_audience_age_min,
-        instagram_audience_age_max=row.instagram_audience_age_max,
         instagram_audience_description=row.instagram_audience_description,
         youtube_channel_name=row.youtube_channel_name,
         youtube_subscribers=row.youtube_subscribers,
@@ -119,8 +113,6 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         youtube_description_job_id=row.youtube_description_job_id,
         youtube_description_error=row.youtube_description_error,
         youtube_audience_gender=row.youtube_audience_gender,
-        youtube_audience_age_min=row.youtube_audience_age_min,
-        youtube_audience_age_max=row.youtube_audience_age_max,
         youtube_audience_description=row.youtube_audience_description,
         creator_tier=row.creator_tier,
         content_tags=_as_list(row.content_tags),

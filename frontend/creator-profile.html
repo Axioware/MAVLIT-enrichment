@@ -402,13 +402,9 @@
               <option value="both">Both</option>
             </select>
           </div>
-          <div class="field">
-            <label for="instagram_audience_age_range">Audience age range</label>
-            <input id="instagram_audience_age_range" name="instagram_audience_age_range" type="text" inputmode="numeric" autocomplete="off" maxlength="9" pattern="\s*[0-9]{2,3}\s*[\-–—]\s*[0-9]{2,3}\s*" title="Enter the age range like 18-34" placeholder="18-34" />
-          </div>
           <div class="field full">
             <label for="instagram_audience_description">Audience description</label>
-            <textarea id="instagram_audience_description" name="instagram_audience_description" maxlength="1500" placeholder="Who is your audience and why do they follow you? (MAVLIT fills this in when it generates your description.)"></textarea>
+            <textarea id="instagram_audience_description" name="instagram_audience_description" maxlength="1500" placeholder="Who is your audience, how old are they (for example aged 18-34) and why do they follow you? (MAVLIT fills this in when it generates your description.)"></textarea>
           </div>
           <div class="field full">
             <p class="niche-hint">Audience demographics<br>Use your latest platform analytics. Choose the gender most of your audience is, or "Both" if it is mixed.</p>
@@ -666,7 +662,6 @@
     setInput('instagram_primary_niche', profile.instagram_primary_niche); setListInput('instagram_sub_niches', profile.instagram_sub_niches);
     setListInput('instagram_excluded_categories', profile.instagram_excluded_categories); setInput('instagram_description', profile.instagram_description);
     setInput('instagram_audience_gender', profile.instagram_audience_gender);
-    setInput('instagram_audience_age_range', formatAgeRange(profile.instagram_audience_age_min, profile.instagram_audience_age_max));
     setInput('instagram_audience_description', profile.instagram_audience_description);
     ['instagram'].forEach(function(platform) {
       if (profile[platform + '_description_mode']) setRadio(platform + '_description_mode', profile[platform + '_description_mode']);
@@ -868,7 +863,7 @@
     menu.classList.add('open');
   }
 
-  // MAVLIT also estimates the audience gender and age range together with the
+  // MAVLIT also estimates the audience gender and description (which states the age range) together with the
   // generated description. Fill those boxes from the finished job, but only the
   // ones the user left empty - anything they typed themselves wins.
   function applyGeneratedAudience(platform, profile, body) {
@@ -885,13 +880,6 @@
     if (textInput && audienceText && !textInput.value.trim()) {
       textInput.value = audienceText;
       if (body) body[textId] = audienceText;
-    }
-    // The two generated ages share one "18-34" box.
-    var ageInput = document.getElementById(platform + '_audience_age_range');
-    var lo = profile[platform + '_audience_age_min'], hi = profile[platform + '_audience_age_max'];
-    if (ageInput && !ageInput.value && lo !== null && lo !== undefined && hi !== null && hi !== undefined) {
-      ageInput.value = formatAgeRange(lo, hi);
-      if (body) { body[platform + '_audience_age_min'] = Number(lo); body[platform + '_audience_age_max'] = Number(hi); }
     }
   }
 
@@ -918,15 +906,6 @@
       subInput.value = subs.join(', ');
       if (body) body[platform + '_sub_niches'] = subs;
     }
-  }
-
-  // "18-34" <-> min / max. Accepts a hyphen or an en/em dash and spaces.
-  function formatAgeRange(min, max) {
-    return (min === null || min === undefined || max === null || max === undefined) ? '' : min + '-' + max;
-  }
-  function parseAgeRange(text) {
-    var m = /^\s*(\d{1,3})\s*[-–—]\s*(\d{1,3})\s*$/.exec(text || '');
-    return m ? { min: Number(m[1]), max: Number(m[2]) } : null;
   }
 
   function pollDescriptionGeneration(platform, jobId, body) {
@@ -1036,10 +1015,6 @@
     var percent = function(name) { var result = number(name); return result === null ? null : result / 100; };
     var list = function(name) { return listOrNull(form.elements[name].value); };
     var primary = platforms[0];
-    // One "18-34" box per platform -> {min, max} (both null when empty or not a valid range).
-    var ageRange = function(platform) {
-      return parseAgeRange(value(platform + '_audience_age_range')) || { min: null, max: null };
-    };
     var mode = function(name) { var radio = document.querySelector('input[name="' + name + '"]:checked'); return radio ? radio.value : null; };
 
     return {
@@ -1056,7 +1031,6 @@
       instagram_excluded_categories: list('instagram_excluded_categories'), instagram_description: value('instagram_description'),
       instagram_description_mode: mode('instagram_description_mode'),
       instagram_audience_gender: value('instagram_audience_gender'),
-      instagram_audience_age_min: ageRange('instagram').min, instagram_audience_age_max: ageRange('instagram').max,
       instagram_audience_description: value('instagram_audience_description'),
     };
   }
@@ -1081,19 +1055,6 @@
     if (!body.instagram_description) {
       throw new Error('Please add a short creator description before saving.');
     }
-    ['instagram'].forEach(function(p) {
-      var text = (document.getElementById(p + '_audience_age_range').value || '').trim();
-      var lo = body[p + '_audience_age_min'], hi = body[p + '_audience_age_max'];
-      if (text && lo === null) {
-        throw new Error('Enter the ' + p + ' audience age range like 18-34.');
-      }
-      if (lo !== null && (lo < 13 || hi > 100)) {
-        throw new Error('The ' + p + ' audience age range must be between 13 and 100.');
-      }
-      if (lo !== null && lo > hi) {
-        throw new Error('The ' + p + ' audience minimum age cannot be above the maximum age.');
-      }
-    });
     if (selected.indexOf('instagram') !== -1 && (!body.instagram_handle || ((!body.instagram_followers || body.instagram_followers <= 0) && !igGenerates))) {
       throw new Error('Please complete the Instagram username and followers before saving.');
     }

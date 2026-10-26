@@ -10,6 +10,7 @@ audience_from_result for its channel.
 """
 
 import logging
+import re
 
 from sqlalchemy.orm import Session
 
@@ -130,23 +131,35 @@ def _audience_age(value) -> int | None:
     return age if 13 <= age <= 100 else None
 
 
+_AGE_IN_TEXT = re.compile(r"\b(?:1[3-9]|[2-9]\d)\s*(?:-|–|—|to|\+)|\b\d0s\b|\b(?:aged?|ages|aged between|years? old|year-olds?)\b", re.IGNORECASE)
+
+
+def mentions_age(text_: str | None) -> bool:
+    """True when the text already states an age or age range ("aged 18-34", "25–40", "ages 18+", "30 year olds")."""
+    return bool(text_ and _AGE_IN_TEXT.search(text_))
+
+
 def audience_from_result(result: dict) -> dict:
     """
-    The audience part of the description LLM's JSON: {"audience_gender":
-    "male"|"female"|"both"|None, "audience_age_min": int|None, "audience_age_max":
-    int|None, "audience_description": str|None}. Missing or unusable values become None (the description is still
+    The audience part of the description LLM's JSON: {"audience_gender": "male"|"female"|"both"|None,
+    "audience_description": str|None}. The audience AGE is written inside the audience description (the prompt
+    asks for it); a stored prompt copy that still returns "audience_age_min"/"audience_age_max" has them added to
+    a description that does not state an age. Missing or unusable values become None (the description is still
     used) - e.g. when the prompt copy in /admin predates the audience fields.
     """
     gender = str(result.get("audience_gender") or "").strip().lower()
     gender = gender if gender in ("male", "female", "both") else None
+    text_ = result.get("audience_description")
+    audience_text = " ".join(text_.split())[:1000] if isinstance(text_, str) and text_.strip() else None
     low, high = _audience_age(result.get("audience_age_min")), _audience_age(result.get("audience_age_max"))
     if low is not None and high is not None and low > high:
         low, high = high, low
-    if gender is None and low is None and high is None:
+    if audience_text and not mentions_age(audience_text) and (low is not None or high is not None):
+        age = f"{low}-{high}" if low is not None and high is not None else (f"{low}+" if low is not None else f"up to {high}")
+        audience_text = f"{audience_text.rstrip('. ')}. Audience aged {age}."[:1000]
+    if gender is None and audience_text is None:
         logger.info("Description LLM returned no audience estimate (prompt copy without the audience fields?)")
-    text_ = result.get("audience_description")
-    audience_text = " ".join(text_.split())[:1000] if isinstance(text_, str) and text_.strip() else None
-    return {"audience_gender": gender, "audience_age_min": low, "audience_age_max": high, "audience_description": audience_text}
+    return {"audience_gender": gender, "audience_description": audience_text}
 
 
 def save_creator_posts(db: Session, creator_id: int, handle: str, items: list[dict]) -> int:

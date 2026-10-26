@@ -1067,22 +1067,21 @@ CREATOR_NICHE_DESCRIPTION_PROMPT_NAME = "creator_niche_description"
 # Added to the end of the creator_niche_description prompt by the description
 # generators when the copy stored in the prompts table (which overrides the code
 # default) has no audience fields yet - so one LLM call still returns the audience
-# gender and age range, whatever the stored copy says. Keep the wording in step with
+# gender and description (which states the age range), whatever the stored copy says. Keep the wording in step with
 # CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT.
 CREATOR_AUDIENCE_NOTE = """\
 
 ADDITIONAL REQUIRED OUTPUT - AUDIENCE ESTIMATE
-Besides the description and tags, estimate who this creator's AUDIENCE is, as a best estimate from the bio and content (no analytics are available), and add these three keys to the same JSON object:
+Besides the description and tags, estimate who this creator's AUDIENCE is, as a best estimate from the bio and content (no analytics are available), and add this key to the same JSON object:
 - "audience_gender": the gender most of the audience is - exactly "male", "female" or "both". Base it on who the content is made for and who it would attract (topics, tone, products, how the creator addresses the audience), not on the creator's own gender alone. Use "both" when the evidence is mixed or thin.
-- "audience_age_min" and "audience_age_max": the age range most of the audience falls in, as whole numbers between 13 and 100 (for example 18 and 34). Keep it realistic and reasonably tight (usually 10 to 20 years wide); the minimum must not be above the maximum.
-Do not mention demographics in the description or tags. Example of the full JSON: {"description": "...", "tags": ["...", "..."], "audience_gender": "female", "audience_age_min": 18, "audience_age_max": 34}
+Do not mention demographics in the description or tags. Example of the full JSON: {"description": "...", "tags": ["...", "..."], "audience_gender": "female"}
 """
 
 # Same idea, for a stored prompt copy with no "audience_description" yet.
 CREATOR_AUDIENCE_DESCRIPTION_NOTE = """\
 
 ADDITIONAL REQUIRED OUTPUT - AUDIENCE DESCRIPTION
-Also write "audience_description": 1 to 2 sentences (maximum 40 words, third person) describing who this creator's AUDIENCE is - who they are, what they are interested in and why they follow the creator - as a best estimate from the bio, the captions and the creator's follower count: {followers} (the size hints at the kind of audience, for example a niche community or a broad one; do not quote the number). Unlike the description and tags, it may mention the audience's gender and age. Add it to the same JSON object.
+Also write "audience_description": 1 to 2 sentences (maximum 40 words, third person) describing who this creator's AUDIENCE is - who they are, what they are interested in and why they follow the creator - as a best estimate from the bio, the captions and the creator's follower count: {followers} (the size hints at the kind of audience, for example a niche community or a broad one; do not quote the number). Unlike the description and tags, it may mention the audience's gender, and it MUST state the age range most of the audience falls in, written like "aged 18-34" (whole numbers between 13 and 100; realistic and reasonably tight, usually 10 to 20 years wide). Add it to the same JSON object.
 """
 
 # Same idea as CREATOR_AUDIENCE_NOTE, for a stored prompt copy with no "sub_niches" yet:
@@ -1118,8 +1117,7 @@ Your task:
 1. Determine what this creator primarily creates content about (description and tags).
 2. Estimate who the creator's AUDIENCE is - a best estimate from the bio and content, since no analytics are available:
    - audience_gender: the gender most of the audience is - "male", "female" or "both" (mixed, or you cannot tell). Base it on who the content is made for and who it would attract (topics, tone, products, how the creator addresses the audience), not on the creator's own gender alone. Use "both" when the evidence is mixed or thin.
-   - audience_age_min and audience_age_max: the age range most of the audience falls in, as whole numbers between 13 and 100 (for example 18 and 34). Keep it realistic and reasonably tight (usually 10 to 20 years wide); the minimum must not be above the maximum.
-   - audience_description: 1 to 2 sentences (maximum 40 words, third person) describing who the audience is - who they are, what they are interested in and why they follow the creator. Base it on the bio, the captions and the follower count (the size hints at the kind of audience, for example a niche community or a broad one) - but do not quote the follower number. It may mention the audience's gender and age.
+   - audience_description: 1 to 2 sentences (maximum 40 words, third person) describing who the audience is - who they are, what they are interested in and why they follow the creator. Base it on the bio, the captions and the follower count (the size hints at the kind of audience, for example a niche community or a broad one) - but do not quote the follower number. It may mention the audience's gender, and it MUST state the age range most of the audience falls in, written like "aged 18-34" (whole numbers between 13 and 100; realistic and reasonably tight, usually 10 to 20 years wide).
 3. Pick the creator's SUB-NICHES: 3 to 4 more specific topics inside their niche, based on the bio and captions. Choose ONLY from the sub-niche options above and copy each one exactly as written. If the options are "none", return an empty list.
 
 Return ONLY valid JSON.
@@ -1149,19 +1147,17 @@ Return:
 "description": "short creator summary",
 "tags": ["tag1", "tag2", "tag3"],
 "audience_gender": "male|female|both",
-"audience_age_min": 18,
-"audience_age_max": 34,
-"audience_description": "short description of who the audience is",
+"audience_description": "short description of who the audience is, including their age range (for example aged 18-34)",
 "sub_niches": ["option 1", "option 2", "option 3"]
 }}
 
 Examples:
 
 Fitness creator:
-{{"description": "Fitness creator focused on strength training, gym workouts, muscle building, and performance-focused health content.", "tags": ["strength training", "gym workouts", "muscle building", "sports nutrition", "fitness motivation"], "audience_gender": "male", "audience_age_min": 18, "audience_age_max": 34, "audience_description": "Mostly young men who train in the gym and follow for lifting technique, programming ideas and supplement advice.", "sub_niches": ["strength training", "muscle building", "sports nutrition"]}}
+{{"description": "Fitness creator focused on strength training, gym workouts, muscle building, and performance-focused health content.", "tags": ["strength training", "gym workouts", "muscle building", "sports nutrition", "fitness motivation"], "audience_gender": "male", "audience_description": "Mostly young men aged 18-34 who train in the gym and follow for lifting technique, programming ideas and supplement advice.", "sub_niches": ["strength training", "muscle building", "sports nutrition"]}}
 
 Beauty creator:
-{{"description": "Beauty creator sharing skincare routines, makeup tutorials, cosmetic reviews, and self-care content.", "tags": ["skincare", "makeup", "beauty reviews", "cosmetics", "self care"], "audience_gender": "female", "audience_age_min": 18, "audience_age_max": 34, "audience_description": "Mostly young women interested in affordable skincare and makeup looks, following for tutorials and product recommendations.", "sub_niches": ["skincare", "makeup tutorials", "cosmetics"]}}
+{{"description": "Beauty creator sharing skincare routines, makeup tutorials, cosmetic reviews, and self-care content.", "tags": ["skincare", "makeup", "beauty reviews", "cosmetics", "self care"], "audience_gender": "female", "audience_description": "Mostly young women aged 18-34 interested in affordable skincare and makeup looks, following for tutorials and product recommendations.", "sub_niches": ["skincare", "makeup tutorials", "cosmetics"]}}
 """
 
 
