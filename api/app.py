@@ -2400,7 +2400,7 @@ class BrandPartnershipPostsResponse(BaseModel):
 
 
 _PARTNERSHIP_MIN_CONFIDENCE = 90           # test_creator_brand_partnership_posts (reverse engineering)
-_INSTAGRAM_PARTNERSHIP_MIN_CONFIDENCE = 98 # instagram_posts (direct brand scrape)
+_INSTAGRAM_PARTNERSHIP_MIN_CONFIDENCE = 90 # instagram_posts (direct brand scrape): same bar as the reverse-engineering posts, the pitch and rate intelligence
 
 
 def _post_date(timestamp: str | None) -> str | None:
@@ -2431,7 +2431,7 @@ def get_brand_partnership_posts(
     """
     A matched brand's confirmed creator partnership posts, newest first:
       - instagram_posts (direct brand-scrape flow): sponsorship confidence
-        >= 98, paid_partnership true, and at least one creator in
+        >= 90, paid_partnership true, and at least one creator in
         tagged_users / coauthor_producers / mentions / sponsors
       - test_creator_brand_partnership_posts (reverse-engineering flow):
         sponsorship confidence >= 90
