@@ -290,8 +290,9 @@ class DashboardResponse(BaseModel):
 #  Rate intelligence (pipeline/rate_intelligence.py -> api/advisory.py)
 
 class RateIntelligenceRequest(BaseModel):
-    brand_id: int
-    platform: str
+    brand_id: int | None = None       # a brand from MAVLIT's database, else send brand_name
+    brand_name: str | None = None
+    platform: str = "Instagram"
     deliverable_type: str
     exclusivity: str | None = None
     usage: str | None = None
@@ -300,20 +301,32 @@ class RateIntelligenceRequest(BaseModel):
 
 class RateIntelligenceResponse(BaseModel):
     id: int
-    rate_min:  int | None = None
-    rate_max:  int | None = None
-    currency:  str | None = None
-    reasoning: str | None = None
+    brand_name:   str | None = None
+    rate_min:     int | None = None
+    rate_typical: int | None = None
+    rate_max:     int | None = None
+    currency:     str | None = None
+    confidence:   str | None = None   # low | medium | high
+    reasoning:    str | None = None
+    basis:        str | None = None
+    adjustments:  list[dict] = []     # [{"factor", "effect"}]
+    details:      dict = {}           # the data the estimate was built from (bucket, data row, partner creators)
     created_at: str
 
 
 def rate_estimate_to_response(estimate: RateEstimate) -> RateIntelligenceResponse:
     return RateIntelligenceResponse(
         id=estimate.id,
+        brand_name=estimate.brand_name,
         rate_min=estimate.rate_min,
+        rate_typical=estimate.rate_typical,
         rate_max=estimate.rate_max,
         currency=estimate.currency,
+        confidence=estimate.confidence,
         reasoning=estimate.reasoning,
+        basis=(estimate.details or {}).get("basis"),
+        adjustments=(estimate.details or {}).get("adjustments") or [],
+        details=estimate.details or {},
         created_at=str(estimate.created_at) if estimate.created_at else "",
     )
 

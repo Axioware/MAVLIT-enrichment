@@ -27,6 +27,7 @@ def get_rate_intelligence(
         estimate = estimate_rate(
             db, current_user,
             brand_id=body.brand_id,
+            brand_name=body.brand_name,
             platform=body.platform,
             deliverable_type=body.deliverable_type,
             exclusivity=body.exclusivity,

@@ -459,6 +459,13 @@ def _run_migrations() -> None:
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_gender TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_audience_description TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS youtube_audience_description TEXT",
+        # Rate intelligence now rests on the rate data (pipeline/rate_intelligence.py): a typical rate, a confidence, the
+        # details it was built from, and brands that are not in brands_raw.
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS rate_typical INTEGER",
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS confidence TEXT",
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS details JSONB",
+        "ALTER TABLE rate_estimates ADD COLUMN IF NOT EXISTS brand_name TEXT",
+        "ALTER TABLE rate_estimates ALTER COLUMN brand_raw_id DROP NOT NULL",
         # The audience age range is no longer its own field: the age is written in the audience description
         # (existing profiles had their age copied into it before these columns were dropped).
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS instagram_audience_age_min",
@@ -708,6 +715,9 @@ def _run_migrations() -> None:
         linkedin_prompt = db.query(Prompt).filter(Prompt.name == LINKEDIN_COMPANY_MATCH_PROMPT_NAME).first()
         if linkedin_prompt and "{experience}" not in (linkedin_prompt.content or ""):   # an older prompt without the work-experience input
             linkedin_prompt.content = LINKEDIN_COMPANY_MATCH_DEFAULT_PROMPT
+        rate_prompt = db.query(Prompt).filter(Prompt.name == RATE_INTEL_PROMPT_NAME).first()
+        if rate_prompt and "{creator_highest_likes}" not in (rate_prompt.content or ""):   # an earlier prompt without the rate-data / best-post inputs
+            rate_prompt.content = RATE_INTEL_DEFAULT_PROMPT
         db.commit()
 
 

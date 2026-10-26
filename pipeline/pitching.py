@@ -51,12 +51,13 @@ WITH brand AS (
 ),
 hi AS (
   SELECT p.post_url, p.timestamp, p.caption, p.sponsorship_confidence,
-         p.tagged_users, p.mentions, p.coauthor_producers, p.sponsors
+         p.tagged_users, p.mentions, p.coauthor_producers, p.sponsors,
+         p.likes_count, coalesce(p.video_view_count, p.video_play_count) AS views
   FROM instagram_posts p
   WHERE p.brand_raw_id = :bid AND p.post_id IS NOT NULL AND p.sponsorship_confidence >= :min_conf
 ),
 names AS (
-  SELECT hi.post_url, hi.timestamp, hi.caption, hi.sponsorship_confidence,
+  SELECT hi.post_url, hi.timestamp, hi.caption, hi.sponsorship_confidence, hi.likes_count, hi.views,
          lower(CASE WHEN jsonb_typeof(e) = 'string' THEN e #>> '{}' ELSE e ->> 'username' END) AS username
   FROM hi
   CROSS JOIN LATERAL (
@@ -65,13 +66,16 @@ names AS (
   ) x
 ),
 from_posts AS (
-  SELECT n.username, n.post_url, n.timestamp AS posted_at, n.caption, n.sponsorship_confidence
+  SELECT n.username, n.post_url, n.timestamp AS posted_at, n.caption, n.sponsorship_confidence, n.likes_count, n.views
   FROM names n, brand b
   WHERE n.username IS NOT NULL AND n.username <> '' AND n.username <> b.handle
 ),
 from_re AS (
   SELECT lower(btrim(t.creator_username)) AS username, t.post_url, t.post_timestamp AS posted_at,
-         t.caption, t.sponsorship_confidence
+         t.caption, t.sponsorship_confidence,
+         -- the same post as a per-post row of instagram_users (likes only: that table stores no views)
+         (SELECT u.likes_count FROM instagram_users u WHERE t.post_id IS NOT NULL AND u.post_id = t.post_id LIMIT 1) AS likes_count,
+         NULL::int AS views
   FROM test_creator_brand_partnership_posts t
   WHERE t.brand_raw_id = :bid AND t.sponsorship_confidence >= :min_conf
 ),
@@ -91,12 +95,12 @@ re_niche AS (
 )
 SELECT DISTINCT ON (pa.username)
        pa.username, pr.followers, coalesce(pr.niche, rn.niche) AS niche, pr.gender,
-       pa.post_url, pa.posted_at, pa.caption, pa.sponsorship_confidence
+       pa.post_url, pa.posted_at, pa.caption, pa.sponsorship_confidence, pa.likes_count, pa.views
 FROM partners pa
 LEFT JOIN profile pr ON pr.username = pa.username
 LEFT JOIN re_niche rn ON rn.username = pa.username
 WHERE coalesce(pr.niche, rn.niche) = ANY(:niches)
-ORDER BY pa.username, pa.sponsorship_confidence DESC NULLS LAST, pa.posted_at DESC NULLS LAST
+ORDER BY pa.username, pa.sponsorship_confidence DESC NULLS LAST, (pa.likes_count IS NULL), pa.posted_at DESC NULLS LAST
 """
 
 

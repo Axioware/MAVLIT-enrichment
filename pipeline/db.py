@@ -913,7 +913,8 @@ class RateEstimate(Base):
 
     id                  = Column(Integer, primary_key=True)
     creator_profile_id  = Column(Integer, ForeignKey("creator_profiles.id"), nullable=False, index=True)
-    brand_raw_id        = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
+    brand_raw_id        = Column(Integer, ForeignKey("brands_raw.id"), index=True)   # NULL for a brand the creator typed that is not in brands_raw
+    brand_name          = Column(Text)
 
     platform         = Column(Text, nullable=False)
     deliverable_type = Column(Text, nullable=False)
@@ -921,10 +922,13 @@ class RateEstimate(Base):
     usage            = Column(Text)
     duration_months  = Column(Integer)
 
-    rate_min  = Column(Integer)
-    rate_max  = Column(Integer)
-    currency  = Column(Text)
-    reasoning = Column(Text)
+    rate_min     = Column(Integer)
+    rate_typical = Column(Integer)
+    rate_max     = Column(Integer)
+    currency     = Column(Text)
+    confidence   = Column(Text)   # low | medium | high
+    reasoning    = Column(Text)
+    details      = Column(JSONB)  # basis, adjustments and the data the estimate was built from
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
