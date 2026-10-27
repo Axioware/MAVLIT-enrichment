@@ -2079,6 +2079,8 @@ RATE_INTEL_PROMPT_NAME = "rate_intelligence_estimate"
 RATE_INTEL_DEFAULT_PROMPT = """\
 You are a creator-economy rate consultant. A creator is negotiating one Instagram sponsorship deliverable with a brand and wants a fair market rate range, in USD, for ONE unit of that deliverable (one Reel, one Story, one post or one Live).
 
+HOW TO WRITE: you are speaking directly to the creator, the person reading this on MAVLIT. Every text field in your reply ("basis", each adjustment "effect" and "reasoning") is written to them in the second person: "you", "your followers", "your Reels", "your views". Never call them "the creator" or "they", and never write as if you were reporting to someone else. Plain, friendly, specific words; no jargon.
+
 THE CREATOR
 Instagram followers: {creator_followers}
 Niche: {creator_niche}
@@ -2118,7 +2120,7 @@ HOW TO ESTIMATE
 5. rate_min, rate_typical and rate_max must be realistic and ordered rate_min <= rate_typical <= rate_max.
 
 Reply ONLY with this JSON object, no extra text:
-{"rate_min": 0, "rate_typical": 0, "rate_max": 0, "currency": "USD", "confidence": "low|medium|high", "basis": "one sentence naming the data row and brand facts the estimate rests on", "adjustments": [{"factor": "exclusivity|usage|brand|views|data", "effect": "what it did to the rate and why"}], "reasoning": "2-4 plain sentences a creator can read: where the typical rate comes from and what could move it"}
+{"rate_min": 0, "rate_typical": 0, "rate_max": 0, "currency": "USD", "confidence": "low|medium|high", "basis": "one sentence, to the creator, naming the data row and brand facts the estimate rests on (for example: 'This is based on Beauty creators with 100k-300k followers like you...')", "adjustments": [{"factor": "exclusivity|usage|brand|views|data", "effect": "one or two sentences to the creator: what it did to your rate and why"}], "reasoning": "2-4 plain sentences addressed to the creator as 'you': where your typical rate comes from and what could move it"}
 rate_min, rate_typical and rate_max are plain integers (whole dollars, no commas or symbols).\
 """
 

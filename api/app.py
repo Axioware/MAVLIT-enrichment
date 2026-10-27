@@ -736,7 +736,7 @@ def _run_migrations() -> None:
         if contract_prompt and "{exclusivity}" not in (contract_prompt.content or ""):   # the earlier prompt had no deal-terms comparison
             contract_prompt.content = CONTRACT_ADVICE_DEFAULT_PROMPT
         rate_prompt = db.query(Prompt).filter(Prompt.name == RATE_INTEL_PROMPT_NAME).first()
-        if rate_prompt and not all(k in (rate_prompt.content or "") for k in ("{creator_highest_likes}", "{views_adjustment}")):   # an earlier prompt without the rate-data / best-post inputs
+        if rate_prompt and not all(k in (rate_prompt.content or "") for k in ("{creator_highest_likes}", "{views_adjustment}", "speaking directly to the creator")):   # an earlier prompt without the rate-data / best-post inputs
             rate_prompt.content = RATE_INTEL_DEFAULT_PROMPT
         db.commit()
 
