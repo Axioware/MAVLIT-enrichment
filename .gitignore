@@ -52,3 +52,4 @@ rate_csv
 
 # The rate data used by Rate Intelligence (pipeline/rate_intelligence.py) must be committed and deployed.
 !pipeline/data/rate_buckets_by_niche.csv
+!pipeline/data/rate_buckets_with_views_by_niche.csv

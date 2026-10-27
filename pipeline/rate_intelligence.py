@@ -12,9 +12,12 @@ What the LLM is given (prompt: rate_intelligence_estimate):
   - the creators the brand has paid (confirmed partnership posts, sponsorship confidence >= 90, from instagram_posts
     and test_creator_brand_partnership_posts) with their follower counts, niches and buckets, and the views and
     likes of that sponsored post;
-  - rate data from pipeline/data/rate_buckets_by_niche.csv (self-reported rate cards of ~1,500 Instagram creators):
-    the row for the creator's niche x follower bucket x deliverable (creators, price points, min, max, average,
-    median), the same niche and deliverable across all buckets, and the same row for each partner creator.
+  - rate data from pipeline/data/rate_buckets_with_views_by_niche.csv (self-reported rate cards of ~2,400 Instagram
+    creators): the row for the creator's niche x follower bucket x deliverable (creators, price points, min, max,
+    average, median, and the views of those creators), the same niche and deliverable across all buckets, and the
+    same row for each partner creator;
+  - the views check: a creator whose typical views (median of their last 20 posts) are well above their follower
+    bucket's, and close to the next bucket's, is priced from the next bucket (views_adjustment).
 """
 
 import csv
@@ -34,13 +37,21 @@ logger = logging.getLogger(__name__)
 
 MIN_PARTNERSHIP_CONFIDENCE = 90
 PARTNER_CREATORS_MAX = 10
-_DATA_FILE = Path(__file__).parent / "data" / "rate_buckets_by_niche.csv"
+_DATA_FILE = Path(__file__).parent / "data" / "rate_buckets_with_views_by_niche.csv"
 
 # The follower buckets of the rate data (lower end included), smallest first.
 FOLLOWER_BUCKETS = [
     (5_000, "5k-25k"), (25_000, "25k-50k"), (50_000, "50k-100k"),
     (100_000, "100k-300k"), (300_000, "300k-600k"), (600_000, "600k+"),
 ]
+# The views check (views_adjustment): the creator's typical views are the median views of their last
+# VIEWS_POSTS_WINDOW posts, needing at least MIN_POSTS_WITH_VIEWS posts that have views. The check only applies to
+# the deliverables below (Story and Live views are counted differently), and the creator moves to the next bucket's
+# price once they are at least NEXT_BUCKET_SHARE of the way from their bucket's median views to the next one's.
+VIEWS_POSTS_WINDOW = 20
+MIN_POSTS_WITH_VIEWS = 5
+VIEWS_DELIVERABLES = ("Reel", "Post")
+NEXT_BUCKET_SHARE = 0.5
 # Creator / brand niche (lower case) -> the niche label of the rate data.
 _DATASET_NICHE = {"music": "Music & Dance", "dance": "Music & Dance", "beauty": "Beauty", "fitness": "Health & Fitness", "health": "Health & Fitness"}
 # Deal Tools deliverable type (lower case) -> the deliverable label of the rate data.
@@ -63,6 +74,10 @@ def _get_rate_intel_prompt(db: Session) -> str:
     return row.content if row else RATE_INTEL_DEFAULT_PROMPT
 
 
+def _float(value: str | None) -> float | None:
+    return float(value) if value not in (None, "") else None
+
+
 @lru_cache(maxsize=1)
 def _rate_rows() -> tuple[dict, ...]:
     with open(_DATA_FILE, newline="", encoding="utf-8") as fh:
@@ -73,6 +88,9 @@ def _rate_rows() -> tuple[dict, ...]:
                 "creators": int(row["creators_in_bucket"]), "points": int(row["price_points"]),
                 "min": float(row["min_usd"]), "max": float(row["max_usd"]),
                 "avg": float(row["avg_usd"]), "median": float(row["median_usd"]),
+                "views_creators": int(row["views_creators"] or 0),
+                "views_min": _float(row["views_min"]), "views_max": _float(row["views_max"]),
+                "views_avg": _float(row["views_avg"]), "views_median": _float(row["views_median"]),
             })
     return tuple(rows)
 
@@ -111,8 +129,11 @@ def _money(value: float) -> str:
 
 
 def _row_text(row: dict, deliverable_label: str) -> str:
-    return (f"{row['creators']} creators, {row['points']} price points: min {_money(row['min'])}, median {_money(row['median'])}, "
-            f"average {_money(row['avg'])}, max {_money(row['max'])} per {deliverable_label}")
+    text_ = (f"{row['creators']} creators, {row['points']} price points: min {_money(row['min'])}, median {_money(row['median'])}, "
+             f"average {_money(row['avg'])}, max {_money(row['max'])} per {deliverable_label}")
+    if row.get("views_median"):
+        text_ += f"; their median average views per post is {row['views_median']:,.0f}"
+    return text_
 
 
 def _rate_data_text(niche: str | None, bucket: str | None, deliverable: str | None, followers: int | None) -> tuple[str, str]:
@@ -135,6 +156,71 @@ def _rate_data_text(niche: str | None, bucket: str | None, deliverable: str | No
     if not row:
         return f"No rate data for {niche}, {bucket}, {deliverable}.", ladder
     return f"{niche}, {bucket} followers, {deliverable}: {_row_text(row, deliverable)}", ladder
+
+
+def next_bucket(bucket: str | None) -> str | None:
+    names = [name for _, name in FOLLOWER_BUCKETS]
+    return names[names.index(bucket) + 1] if bucket in names[:-1] else None
+
+
+def creator_typical_views(db: Session, creator: CreatorProfile) -> tuple[int | None, int]:
+    """
+    (median views, posts counted): the median views of the creator's last VIEWS_POSTS_WINDOW saved Instagram posts
+    that have a view count. The median, not the average, so one viral post does not inflate it. None when fewer
+    than MIN_POSTS_WITH_VIEWS of those posts have views.
+    """
+    views_expr = func.coalesce(CreatorInstagramPost.video_view_count, CreatorInstagramPost.video_play_count)
+    latest = (db.query(views_expr).filter(CreatorInstagramPost.creator_profile_id == creator.id)
+              .order_by(CreatorInstagramPost.timestamp.desc().nullslast()).limit(VIEWS_POSTS_WINDOW).all())
+    views = sorted(v for (v,) in latest if v and v > 0)
+    if len(views) < MIN_POSTS_WITH_VIEWS:
+        return None, len(views)
+    mid = len(views) // 2
+    return int(views[mid] if len(views) % 2 else (views[mid - 1] + views[mid]) / 2), len(views)
+
+
+def views_adjustment(niche: str | None, bucket: str | None, deliverable: str | None, creator_views: int | None) -> dict:
+    """
+    Price a creator whose views beat their follower bucket from the next bucket. Returns {"applied", "reason", ...}.
+
+    The creator keeps their own bucket's price unless their views are above that bucket's median views AND at least
+    NEXT_BUCKET_SHARE of the way to the next bucket's median views. Then the anchor is the next bucket's median price
+    x (creator views / next bucket's median views): a little below the next bucket's price while the views are below
+    its median, never above it, never below the creator's own bucket's price, and never more than one bucket up.
+    """
+    def no(reason: str) -> dict:
+        return {"applied": False, "reason": reason}
+
+    if deliverable not in VIEWS_DELIVERABLES:
+        return no(f"the views check is only used for {' and '.join(VIEWS_DELIVERABLES)} rates")
+    if not creator_views:
+        return no(f"fewer than {MIN_POSTS_WITH_VIEWS} of the creator's last {VIEWS_POSTS_WINDOW} posts have a view count")
+    own, nxt_name = rate_row(niche, bucket, deliverable), next_bucket(bucket)
+    nxt = rate_row(niche, nxt_name, deliverable) if nxt_name else None
+    if not own or not own["views_median"]:
+        return no("no views data for the creator's follower bucket")
+    base = {"creator_views": creator_views, "bucket": bucket, "bucket_median_views": own["views_median"], "bucket_median_price": own["median"]}
+    if creator_views <= own["views_median"]:
+        return {**base, "applied": False, "reason": "the creator's views are not above their follower bucket's median"}
+    if not nxt or not nxt["views_median"] or nxt["views_median"] <= own["views_median"]:
+        return {**base, "applied": False, "reason": "there is no higher bucket with views data to compare against"}
+    share = (creator_views - own["views_median"]) / (nxt["views_median"] - own["views_median"])
+    base |= {"next_bucket": nxt_name, "next_bucket_median_views": nxt["views_median"], "next_bucket_median_price": nxt["median"], "share": round(share, 2)}
+    if share < NEXT_BUCKET_SHARE:
+        return {**base, "applied": False, "reason": f"the creator's views are above their bucket's median but only {share:.0%} of the way to the next bucket's"}
+    price = nxt["median"] * min(1.0, creator_views / nxt["views_median"])
+    return {**base, "applied": True, "adjusted_median_price": round(max(price, own["median"])),
+            "reason": f"the creator's views are {share:.0%} of the way from their bucket's median to the next bucket's"}
+
+
+def _views_text(adj: dict, creator_views: int | None, posts: int, deliverable: str | None) -> str:
+    if not adj.get("applied"):
+        return "Not applied: " + adj["reason"] + ". Use the creator's own bucket row."
+    return (f"APPLIED. The creator's typical views ({creator_views:,}, median of their last {posts} posts) are above the {adj['bucket']} median of "
+            f"{adj['bucket_median_views']:,.0f} and {adj['share']:.0%} of the way to the {adj['next_bucket']} median of {adj['next_bucket_median_views']:,.0f}. "
+            f"So centre the typical rate on {_money(adj['adjusted_median_price'])} per {deliverable} instead of the {adj['bucket']} median of "
+            f"{_money(adj['bucket_median_price'])}: that is the {adj['next_bucket']} median of {_money(adj['next_bucket_median_price'])} scaled by "
+            f"their views against that bucket's median views. Tell the creator this in a \"views\" adjustment.")
 
 
 def partner_creators_all(db: Session, brand_id: int) -> list[dict]:
@@ -267,6 +353,10 @@ def estimate_rate(
     row_text, ladder_text = _rate_data_text(niche, bucket, deliverable, followers)
     partners = partner_creators_all(db, brand.id) if brand else []
     best = creator_best_posts(db, creator)
+    typical_views, posts_counted = creator_typical_views(db, creator)
+    views_adj = views_adjustment(niche, bucket, deliverable, typical_views)
+    if views_adj["applied"]:
+        row_text += f" Views-adjusted median for this creator: {_money(views_adj['adjusted_median_price'])} (see the VIEWS CHECK)."
 
     exclusivity_text = EXCLUSIVITY_TEXT.get(exclusivity or "", "none specified")
     if exclusivity in ("Narrow", "Broad"):
@@ -278,13 +368,15 @@ def estimate_rate(
         creator_bucket=bucket or "below the smallest bucket (5k) or unknown",
         creator_highest_views=best["views_text"],
         creator_highest_likes=best["likes_text"],
+        creator_typical_views=(f"{typical_views:,} (median of their last {posts_counted} posts with views)" if typical_views else "not enough saved posts with views"),
+        views_adjustment=_views_text(views_adj, typical_views, posts_counted, deliverable),
         deliverable_type=deliverable_type,
         exclusivity=exclusivity_text,
         usage=usage or "none specified",
         brand_name=name,
         brand_followers=_brand_instagram_followers(db, brand.id) if brand else "unknown (the brand is not in MAVLIT's database)",
         partner_creators=_partner_text(partners, deliverable),
-        data_creators="about 1,500",
+        data_creators="about 2,400",
         rate_row=row_text,
         rate_ladder=ladder_text,
     )
@@ -317,6 +409,12 @@ def estimate_rate(
     confidence = str(result.get("confidence") or "").strip().lower()
     adjustments = [a for a in (result.get("adjustments") or []) if isinstance(a, dict) and a.get("effect")] if isinstance(result.get("adjustments"), list) else []
 
+    if views_adj["applied"] and not any(str(a.get("factor")).strip().lower() == "views" for a in adjustments):   # the LLM skipped it
+        adjustments.insert(0, {"factor": "views", "effect": (
+            f"Your typical views ({typical_views:,}) are above the {bucket} median of {views_adj['bucket_median_views']:,.0f} and "
+            f"{views_adj['share']:.0%} of the way to the {views_adj['next_bucket']} median of {views_adj['next_bucket_median_views']:,.0f}, "
+            f"so the rate is based on the {views_adj['next_bucket']} bucket, scaled to your views.")})
+
     _fill_llm_fields(estimate, calls)
     estimate.rate_min, estimate.rate_typical, estimate.rate_max = low, typical, high
     estimate.currency = result.get("currency") or "USD"
@@ -328,6 +426,7 @@ def estimate_rate(
         "creator_niche": niche, "follower_bucket": bucket, "creator_followers": followers,
         "creator_highest_views": best["views"], "creator_highest_likes": best["likes"],
         "data_row": rate_row(niche, bucket, deliverable),
+        "creator_typical_views": typical_views, "views_adjustment": views_adj,
         "brand_followers": _brand_instagram_followers(db, brand.id) if brand else None,
         "partner_creators": [
             {"username": c["username"], "followers": c.get("followers"), "niche": c.get("niche"), "confidence": c.get("sponsorship_confidence"),

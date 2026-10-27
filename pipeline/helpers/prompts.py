@@ -2085,6 +2085,7 @@ Niche: {creator_niche}
 Follower bucket in the rate data: {creator_bucket}
 Most views on one of their posts or reels: {creator_highest_views}
 Most likes on one of their posts: {creator_highest_likes}
+Typical views per post: {creator_typical_views}
 
 THE DEAL
 Platform: Instagram
@@ -2106,15 +2107,18 @@ These are self-reported rate-card prices from {data_creators} Instagram creators
 The same niche and deliverable across all follower buckets, for context:
 {rate_ladder}
 
+VIEWS CHECK (a creator whose views beat their follower bucket is priced from the next bucket)
+{views_adjustment}
+
 HOW TO ESTIMATE
-1. Anchor on the RATE DATA row for the creator's niche, follower bucket and deliverable. Use the median as the centre of the "typical" rate and the average as a secondary check (averages are pulled up by a few very high prices). Treat min and max as outer limits, not as the range to return.
+1. Anchor on the RATE DATA row for the creator's niche, follower bucket and deliverable. Use the median as the centre of the "typical" rate and the average as a secondary check (averages are pulled up by a few very high prices). Treat min and max as outer limits, not as the range to return. The typical rate must sit close to that median, not close to the average. If the VIEWS CHECK says APPLIED, the "Views-adjusted median" in the row above replaces the median as the centre: build the range around it, add an adjustment with the factor "views" explaining it in plain words, and do not move the rate again for the creator's best posts (that would count the views twice).
 2. Use the brand to place the rate inside the data: a large brand (many Instagram followers) that has paid creators of a similar size to this creator can pay towards the upper half; a small brand, or one that has only paid much smaller creators, towards the lower half. Compare this creator's best results (most views and likes on one post) with the views and likes of the sponsored posts the brand has paid for: if the creator's best posts reach clearly further than those sponsored posts, lean to the upper half; if they reach clearly less, lean lower. A best-ever post is a ceiling, not typical performance, so do not let one viral post alone move the rate much. "not recorded" means the number is unknown, not zero, and "hidden" means the creator hides that number on Instagram. Do not invent brand facts that are not listed above. If no partner creators are listed, say so and use the data row only.
 3. Adjust for the deal terms. Exclusivity is one of three choices: None, Narrow (the creator may not promote a competing version of the brand's specific product) or Broad (the creator may not promote any competing brand in the brand's whole category). As a guide: Narrow adds roughly 10-30%; Broad roughly 25-60%, more for longer terms; paid usage or whitelisting rights roughly 20-50% or more depending on length; "None" exclusivity and organic-only usage need no uplift. When a Narrow or Broad term has no stated duration, assume a typical 3-6 months and say so in the adjustment. Explain each adjustment you apply.
 4. If the data row is based on fewer than 5 price points, or the creator is below the smallest bucket, or the niche has no data, widen the range and set the confidence to "low", and say why.
 5. rate_min, rate_typical and rate_max must be realistic and ordered rate_min <= rate_typical <= rate_max.
 
 Reply ONLY with this JSON object, no extra text:
-{"rate_min": 0, "rate_typical": 0, "rate_max": 0, "currency": "USD", "confidence": "low|medium|high", "basis": "one sentence naming the data row and brand facts the estimate rests on", "adjustments": [{"factor": "exclusivity|usage|brand|data", "effect": "what it did to the rate and why"}], "reasoning": "2-4 plain sentences a creator can read: where the typical rate comes from and what could move it"}
+{"rate_min": 0, "rate_typical": 0, "rate_max": 0, "currency": "USD", "confidence": "low|medium|high", "basis": "one sentence naming the data row and brand facts the estimate rests on", "adjustments": [{"factor": "exclusivity|usage|brand|views|data", "effect": "what it did to the rate and why"}], "reasoning": "2-4 plain sentences a creator can read: where the typical rate comes from and what could move it"}
 rate_min, rate_typical and rate_max are plain integers (whole dollars, no commas or symbols).\
 """
 
