@@ -42,6 +42,7 @@ Prompts (editable via /admin > Prompts):
 """
 
 import logging
+import re
 import time
 
 from sqlalchemy import text
@@ -96,6 +97,10 @@ def _get_niche_prompt(db: Session) -> str:
 
 #  Collection helpers 
 
+# Instagram handles: letters, digits, dots, underscores (the Apify actor also accepts hyphens). No spaces.
+_VALID_HANDLE = re.compile(r"[A-Za-z0-9._-]+")
+
+
 def _collect_creators(post: InstagramPost) -> dict[str, str]:
     """
     Returns {username: user_type} for all users in the post's collaboration fields.
@@ -106,7 +111,9 @@ def _collect_creators(post: InstagramPost) -> dict[str, str]:
     brand_handle = (post.instagram_handle or "").lower().lstrip("@")
 
     def _is_brand(username: str) -> bool:
-        return username.lower() == brand_handle
+        # Also drops anything that is not a real Instagram handle (a display name such as "Pepper Keenan" found in a
+        # caption mention): Apify rejects its profile URL, so the post would fail and be retried on every run.
+        return username.lower() == brand_handle or not _VALID_HANDLE.fullmatch(username)
 
     # lowest priority first so higher priority overwrites
     for m in post.mentions or []:
