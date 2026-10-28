@@ -18,6 +18,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.sql import Select
 
 from api.advisory import router as advisory_router
+from api.early_access import router as early_access_router
 from api.auth import (
     get_completed_user,
     get_current_user,
@@ -55,6 +56,7 @@ from pipeline.db import (
     BrandRaw,
     ContentCreatorRE,
     ContractReview,
+    EarlyAccessSignup,
     CreatorBrandLlmRanking,
     CreatorBrandLlmV3Ranking,
     CreatorNiche,
@@ -762,6 +764,7 @@ app.include_router(own_brands_router)
 app.include_router(creator_posts_router)
 app.include_router(dashboard_api_router)
 app.include_router(advisory_router)
+app.include_router(early_access_router)
 
 # Lets a separate frontend app (different domain, see FRONTEND_ORIGINS in
 # config.py) call this API with credentials (cookies) from the browser.
@@ -1223,6 +1226,23 @@ class PitchAdmin(ModelView, model=Pitch):
     page_size = 15
 
 
+class EarlyAccessSignupAdmin(ModelView, model=EarlyAccessSignup):
+    """Sign-ups from the landing page's "Join the founding creators" form."""
+    name         = "Early Access Sign-up"
+    name_plural  = "Early Access Sign-ups"
+    icon         = "fa-solid fa-user-plus"
+    column_list  = [EarlyAccessSignup.id, EarlyAccessSignup.created_at, EarlyAccessSignup.email, EarlyAccessSignup.handle,
+                    EarlyAccessSignup.platform, EarlyAccessSignup.niche, EarlyAccessSignup.followers]
+    column_labels = {EarlyAccessSignup.created_at: "Signed up"}
+    column_searchable_list = [EarlyAccessSignup.email, EarlyAccessSignup.handle]
+    column_sortable_list = [c.name for c in EarlyAccessSignup.__table__.columns]
+    column_default_sort  = [(EarlyAccessSignup.id, True)]
+    column_filters = [AllUniqueStringValuesFilter(EarlyAccessSignup.platform), AllUniqueStringValuesFilter(EarlyAccessSignup.niche),
+                      AllUniqueStringValuesFilter(EarlyAccessSignup.followers), OperationColumnFilter(EarlyAccessSignup.created_at)]
+    can_create = False
+    page_size = 25
+
+
 class RateEstimateAdmin(ModelView, model=RateEstimate):
     """
     Rate Intelligence estimates AND their log: one row per request from Deal Tools - who (MAVLIT user id + the Instagram
@@ -1431,6 +1451,7 @@ admin.add_view(SavedBrandAdmin)
 admin.add_view(PitchAdmin)
 admin.add_view(OwnBrandJobAdmin)
 admin.add_view(RateEstimateAdmin)
+admin.add_view(EarlyAccessSignupAdmin)
 admin.add_view(ContractReviewAdmin)
 
 # 

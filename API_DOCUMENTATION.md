@@ -466,6 +466,14 @@ SQLAdmin is mounted at `/admin`. It exposes database model views. Its optional s
 
 All five pages also load `/posthog-init.js` for analytics. The API base is implicit because the pages use same-origin relative URLs.
 
+### Early access sign-up (landing page)
+
+#### `POST /early-access`
+- **Auth:** none (public; the landing page's "Join the founding creators" form calls it as `/api/mavlit/early-access`).
+- **Body:** `{ email, handle, platform: instagram|tiktok|youtube|substack|other, niche: music|health|food|beauty|fitness|other, followers: under10k|10k-50k|50k-200k|200k-500k|500k+, website: "" }`. `website` is a hidden honeypot field; a request that fills it is accepted but not saved.
+- **Behaviour:** the email is lower-cased and the handle loses a leading `@`. One row per email in `early_access_signups` (a repeat sign-up updates the row); the response is the same `{ "ok": true }` (201) for a new and a repeat email. Invalid values return 422; more than 10 sign-ups per IP per hour return 429 (in-memory counter, per process).
+- **Admin:** SQLAdmin > Early Access Sign-ups.
+
 ## External services
 
 Secrets and feature flags are configured in `config.py`. These services are called by backend pipeline code, not directly by the browser.
