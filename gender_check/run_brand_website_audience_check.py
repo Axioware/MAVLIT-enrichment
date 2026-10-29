@@ -55,19 +55,6 @@ _AUDIENCE_LINK_TERMS = (
     "junior", "age", "customer", "audience", "about", "our-story",
 )
 
-_UNANALYSED_FILTER = """
-        AND br.target_audience_gender IS NULL
-        AND br.target_audience_gender_confidence IS NULL
-        AND br.target_audience_min_age IS NULL
-        AND br.target_audience_max_age IS NULL
-        AND br.target_audience_age_confidence IS NULL
-        AND br.product_audience_gender IS NULL
-        AND br.product_audience_gender_confidence IS NULL
-        AND br.product_audience_min_age IS NULL
-        AND br.product_audience_max_age IS NULL
-        AND br.product_audience_age_confidence IS NULL
-        AND br.audience_analysis_explanation IS NULL"""
-
 # Candidate brands: refferls = false, geo_reach_score 0-40, at least 5
 # instagram_posts rows, and partnership evidence from EITHER source:
 #   - a test_creator_brand_partnership_posts row with sponsorship_confidence >= 90
@@ -86,7 +73,22 @@ _BRAND_QUERY_SQL = """
       br.website,
       br.description
     FROM brands_raw br
-    WHERE br.refferls = false{unanalysed_filter}
+    WHERE br.refferls = false
+      AND (
+        :force OR (
+          br.target_audience_gender IS NULL
+          AND br.target_audience_gender_confidence IS NULL
+          AND br.target_audience_min_age IS NULL
+          AND br.target_audience_max_age IS NULL
+          AND br.target_audience_age_confidence IS NULL
+          AND br.product_audience_gender IS NULL
+          AND br.product_audience_gender_confidence IS NULL
+          AND br.product_audience_min_age IS NULL
+          AND br.product_audience_max_age IS NULL
+          AND br.product_audience_age_confidence IS NULL
+          AND br.audience_analysis_explanation IS NULL
+        )
+      )
       AND br.geo_reach_score BETWEEN 0 AND 40
       AND (
         EXISTS (
@@ -105,22 +107,16 @@ _BRAND_QUERY_SQL = """
       ) >= 5
       AND br.has_official_website = true
       AND br.website IS NOT NULL
-      AND br.description IS NOT NULL{beach_filter}
+      AND br.description IS NOT NULL
+      AND (:beach_only = false OR br.beach_brands = true)
     ORDER BY brand_name
 """
 
 
-def _brand_query(force: bool, beach_only: bool):
-    """
-    Default: only brands with no audience results yet. force drops that
-    condition so already-analysed brands can be re-run. beach_only narrows
-    the set to brands_raw.beach_brands = true.
-    """
-    return text(
-        _BRAND_QUERY_SQL
-        .replace("{unanalysed_filter}", "" if force else _UNANALYSED_FILTER)
-        .replace("{beach_filter}", "\n      AND br.beach_brands = true" if beach_only else "")
-    )
+BRAND_QUERY = text(_BRAND_QUERY_SQL)
+# parameters: force (True drops the "no audience results yet" condition so analysed brands can be re-run),
+#             beach_only (True narrows the set to brands_raw.beach_brands = true)
+
 
 AUDIENCE_PROMPT = """
 You are analyzing a brand to determine its audience demographics.
@@ -593,7 +589,7 @@ def main() -> int:
     db = SessionLocal()
     try:
         _ensure_latest_product_columns(db)
-        brands = db.execute(_brand_query(args.force, args.beach_brands)).mappings().all()
+        brands = db.execute(BRAND_QUERY, {"force": bool(args.force), "beach_only": bool(args.beach_brands)}).mappings().all()
         if args.brand_ids:
             requested_ids = set(args.brand_ids)
             brands = [brand for brand in brands if brand["brand_raw_id"] in requested_ids]

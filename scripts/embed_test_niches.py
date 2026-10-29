@@ -63,19 +63,18 @@ def ensure_embedding_column(engine) -> None:
 
 
 def load_niches(engine, force: bool) -> list[dict[str, str]]:
-    predicate = "" if force else "AND embedding IS NULL"
-    query = text(f"""
+    query = text("""
         SELECT niche, description
         FROM test_niches
         WHERE niche IS NOT NULL
           AND TRIM(niche) <> ''
           AND description IS NOT NULL
           AND TRIM(description) <> ''
-          {predicate}
+          AND (:force OR embedding IS NULL)
         ORDER BY LOWER(niche)
     """)
     with engine.connect() as connection:
-        return [dict(row._mapping) for row in connection.execute(query)]
+        return [dict(row._mapping) for row in connection.execute(query, {"force": force})]
 
 
 def save_embeddings(engine, table: Table, rows: list[dict], vectors: list[list[float]]) -> None:

@@ -70,6 +70,7 @@ class FakeConn:
 
     def __init__(self, fail_on: str | None = None, fail_with: Exception | None = None):
         self.statements: list[str] = []
+        self.params: dict[int, dict] = {}   # bound parameters by statement index
         self._fail_on, self._fail_with = fail_on, fail_with
 
     def __enter__(self):
@@ -81,6 +82,8 @@ class FakeConn:
     def execute(self, statement, *args, **kwargs):
         sql = str(statement)
         self.statements.append(sql)
+        if args and isinstance(args[0], dict):
+            self.params[len(self.statements) - 1] = args[0]
         if self._fail_on and self._fail_on in sql:
             raise self._fail_with
         return _FakeResult()
@@ -366,11 +369,15 @@ class LockTimeout(unittest.TestCase):
         engine = FakeEngine()
         _run_all_steps(engine, 4321)
         self.assertGreaterEqual(len(engine.conns), 6)
+
+        def is_timeout(conn, index):
+            return "set_config('lock_timeout', :ms, true)" in conn.statements[index] and conn.params[index] == {"ms": "4321"}   # a bound value, transaction-local
+
         for conn in engine.conns:
-            self.assertEqual(conn.statements[0], "SET LOCAL lock_timeout = 4321")
+            self.assertTrue(is_timeout(conn, 0), conn.statements[0])
             for i, statement in enumerate(conn.statements[:-1]):
                 if statement == "COMMIT":   # a new transaction begins after a commit
-                    self.assertEqual(conn.statements[i + 1], "SET LOCAL lock_timeout = 4321")
+                    self.assertTrue(is_timeout(conn, i + 1), conn.statements[i + 1])
 
     def test_without_a_timeout_nothing_is_set(self):   # the API's startup: the old behaviour
         engine = FakeEngine()

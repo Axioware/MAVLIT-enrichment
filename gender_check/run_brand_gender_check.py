@@ -80,12 +80,12 @@ _BRAND_QUERY_SQL = """
       AND (
         br.has_official_website = false
         OR (br.has_official_website = true AND br.description IS NULL)
-      ){beach_filter}
+      )
+      AND (:beach_only = false OR br.beach_brands = true)
     ORDER BY reason, brand_name
 """
 
-BRAND_QUERY = text(_BRAND_QUERY_SQL.replace("{beach_filter}", ""))
-BEACH_BRAND_QUERY = text(_BRAND_QUERY_SQL.replace("{beach_filter}", "\n      AND br.beach_brands = true"))
+BRAND_QUERY = text(_BRAND_QUERY_SQL)   # parameters: beach_only (True narrows the set to brands_raw.beach_brands = true)
 
 
 logging.basicConfig(
@@ -282,7 +282,7 @@ def main() -> int:
     try:
         _ensure_gender_columns(db)
         prompt_template = _get_brand_audience_prompt(db)
-        brands = db.execute(BEACH_BRAND_QUERY if args.beach_brands else BRAND_QUERY).mappings().all()
+        brands = db.execute(BRAND_QUERY, {"beach_only": bool(args.beach_brands)}).mappings().all()
         if args.brand_ids:
             requested_ids = set(args.brand_ids)
             brands = [brand for brand in brands if brand["brand_raw_id"] in requested_ids]

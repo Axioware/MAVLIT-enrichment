@@ -89,6 +89,7 @@ from pipeline.enrichment_re.content_creator_re import add_content_creator_re
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.gpt_llm import llm_usage_scope
 from pipeline.helpers.passwords import hash_password
+from pipeline.helpers.db import escape_like
 from pipeline.matching.llm_ranking_v2 import rank_brands_with_llm
 from pipeline.matching.llm_ranking_v3 import MIN_MATCH_CONFIDENCE, rank_brands_with_llm_v3
 from pipeline.matching.match_text import generate_match_reasons
@@ -519,18 +520,18 @@ class InstagramCreatorCommenterAdmin(ModelView, model=InstagramCreatorCommenter)
         """
         creator_alias = aliased(InstagramUser)
         commenter_alias = aliased(InstagramUser)
-        pattern = f"%{term}%"
+        pattern = f"%{escape_like(term)}%"
         return (
             stmt
             .join(InstagramCreatorCommenter.brand_raw)
             .join(creator_alias, InstagramCreatorCommenter.creator_user_id == creator_alias.id)
             .join(commenter_alias, InstagramCreatorCommenter.commenter_user_id == commenter_alias.id)
             .filter(or_(
-                cast(BrandRaw.name, String).ilike(pattern),
-                cast(creator_alias.username, String).ilike(pattern),
-                cast(commenter_alias.username, String).ilike(pattern),
-                cast(InstagramCreatorCommenter.comment_text, String).ilike(pattern),
-                cast(InstagramCreatorCommenter.source_post_url, String).ilike(pattern),
+                cast(BrandRaw.name, String).ilike(pattern, escape="\\"),
+                cast(creator_alias.username, String).ilike(pattern, escape="\\"),
+                cast(commenter_alias.username, String).ilike(pattern, escape="\\"),
+                cast(InstagramCreatorCommenter.comment_text, String).ilike(pattern, escape="\\"),
+                cast(InstagramCreatorCommenter.source_post_url, String).ilike(pattern, escape="\\"),
             ))
         )
 
@@ -1299,9 +1300,9 @@ def list_brand_category_tags(niche: list[str] = Query(default=[])):
                 FROM brands_niches,
                      jsonb_array_elements_text(tags) AS tag
                 WHERE jsonb_typeof(tags) = 'array'
-                  AND niche ILIKE :pattern
+                  AND niche ILIKE :pattern ESCAPE '\\'
                   AND trim(tag) <> ''
-            """), {"pattern": f"%{name}%"}).fetchall()
+            """), {"pattern": f"%{escape_like(name)}%"}).fetchall()
             seen: dict[str, str] = {}
             for (tag,) in rows:
                 seen.setdefault(tag.casefold(), tag)

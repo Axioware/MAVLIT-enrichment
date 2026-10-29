@@ -29,6 +29,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from pipeline.db import BrandRaw, CreatorInstagramPost, CreatorProfile, Prompt, RateEstimate
+from pipeline.helpers.db import escape_like
 from pipeline.helpers.gpt_llm import call_gpt_json, capture_llm_usage, fill_template, llm_usage_scope
 from pipeline.helpers.prompts import RATE_INTEL_DEFAULT_PROMPT, RATE_INTEL_PROMPT_NAME
 from pipeline.pitching import _PARTNER_CREATORS_SQL, _brand_instagram_followers
@@ -63,11 +64,6 @@ EXCLUSIVITY_TEXT = {
     "Narrow": "Narrow - the creator may not promote a competing version of the brand's specific product",
     "Broad": "Broad - the creator may not promote any competing brand in the brand's whole product category",
 }
-
-# Same query as the pitch's partner creators, without the "same niche as the writer" filter: every creator with a
-# confirmed partnership post with the brand.
-_ALL_PARTNER_CREATORS_SQL = _PARTNER_CREATORS_SQL.replace("WHERE coalesce(pr.niche, rn.niche) = ANY(:niches)", "WHERE TRUE")
-
 
 def _get_rate_intel_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == RATE_INTEL_PROMPT_NAME).first()
@@ -225,7 +221,8 @@ def _views_text(adj: dict, creator_views: int | None, posts: int, deliverable: s
 
 def partner_creators_all(db: Session, brand_id: int) -> list[dict]:
     """Up to PARTNER_CREATORS_MAX creators with a confirmed (>= 90) partnership post with the brand, strongest first."""
-    rows = db.execute(text(_ALL_PARTNER_CREATORS_SQL), {"bid": brand_id, "min_conf": MIN_PARTNERSHIP_CONFIDENCE, "niches": []}).mappings().all()
+    # the pitch's query without its "same niche as the writer" filter: every creator with a confirmed partnership post with the brand
+    rows = db.execute(text(_PARTNER_CREATORS_SQL), {"bid": brand_id, "min_conf": MIN_PARTNERSHIP_CONFIDENCE, "niches": [], "restrict_niches": False}).mappings().all()
     ranked = sorted((dict(r) for r in rows), key=lambda r: str(r["posted_at"] or ""), reverse=True)
     ranked.sort(key=lambda r: r["sponsorship_confidence"] or 0, reverse=True)
     return ranked[:PARTNER_CREATORS_MAX]
@@ -298,7 +295,7 @@ def _resolve_brand(db: Session, brand_id: int | None, brand_name: str | None) ->
     name = (brand_name or "").strip()
     if not name:
         raise ValueError("brand_id or brand_name is required")
-    return db.query(BrandRaw).filter(BrandRaw.name.ilike(name)).order_by(BrandRaw.id).first()   # None: a brand outside the database
+    return db.query(BrandRaw).filter(BrandRaw.name.ilike(escape_like(name), escape="\\")).order_by(BrandRaw.id).first()   # None: a brand outside the database
 
 
 def _fill_llm_fields(estimate: RateEstimate, calls: list[dict]) -> None:

@@ -99,7 +99,7 @@ SELECT DISTINCT ON (pa.username)
 FROM partners pa
 LEFT JOIN profile pr ON pr.username = pa.username
 LEFT JOIN re_niche rn ON rn.username = pa.username
-WHERE coalesce(pr.niche, rn.niche) = ANY(:niches)
+WHERE (:restrict_niches = false OR coalesce(pr.niche, rn.niche) = ANY(:niches))
 ORDER BY pa.username, pa.sponsorship_confidence DESC NULLS LAST, (pa.likes_count IS NULL), pa.posted_at DESC NULLS LAST
 """
 
@@ -121,7 +121,7 @@ def partner_creators(db: Session, brand_id: int, creator: CreatorProfile) -> lis
         return []
     rows = db.execute(
         text(_PARTNER_CREATORS_SQL),
-        {"bid": brand_id, "min_conf": _MIN_PARTNERSHIP_CONFIDENCE, "niches": niches},
+        {"bid": brand_id, "min_conf": _MIN_PARTNERSHIP_CONFIDENCE, "niches": niches, "restrict_niches": True},
     ).mappings().all()
     ranked = sorted((dict(r) for r in rows), key=lambda r: str(r["posted_at"] or ""), reverse=True)   # newest first
     ranked.sort(key=lambda r: r["sponsorship_confidence"] or 0, reverse=True)                        # then strongest first

@@ -7,6 +7,14 @@ from sqlalchemy.sql.elements import ColumnElement
 logger = logging.getLogger(__name__)
 
 
+def escape_like(value: str) -> str:
+    """
+    Make `value` match literally inside a LIKE / ILIKE pattern: % and _ lose their wildcard meaning. Pair it with
+    escape="\\" on the ilike() call (or ESCAPE '\\' in raw SQL); the pattern itself is still sent as a bound parameter.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def upsert_rows(
     db: Session,
     model,

@@ -127,7 +127,7 @@ def run_migrations(engine: Engine | None = None, lock_timeout_ms: int | None = N
 def _set_lock_timeout(conn, lock_timeout_ms: int | None) -> None:
     """First statement of a migration transaction (conn can be a Connection or a Session): SET LOCAL lasts until it ends."""
     if lock_timeout_ms:
-        conn.execute(text(f"SET LOCAL lock_timeout = {int(lock_timeout_ms)}"))
+        conn.execute(text("SELECT set_config('lock_timeout', :ms, true)"), {"ms": str(int(lock_timeout_ms))})   # true = this transaction only, like SET LOCAL
 
 
 _TIMESTAMPTZ_CASTS = {   # column type -> expression that converts its values to timestamptz without losing them
@@ -176,6 +176,9 @@ def _convert_youtube_last_sponsorship(conn) -> None:
         raise
 
 
+_VIEW_PRIVILEGES = frozenset({"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"})
+
+
 class _ViewAcl:
     """
     Carries a view's grants across DROP VIEW / CREATE VIEW (a dropped view loses them). Whatever roles could use the view before
@@ -194,6 +197,8 @@ class _ViewAcl:
 
     def restore(self, conn) -> None:
         for grantee, privilege in self.entries:
+            if privilege not in _VIEW_PRIVILEGES:   # catalog values, but never interpolate an unexpected word into a GRANT
+                raise MigrationError(f"unexpected privilege {privilege!r} on view {self.view}")
             target = grantee if grantee == "PUBLIC" else db_grants.quote(grantee)
             conn.execute(text(f"GRANT {privilege} ON TABLE {db_grants.quote(self.view)} TO {target}"))
 

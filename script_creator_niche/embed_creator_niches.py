@@ -80,19 +80,18 @@ def _format_tags(tags: object) -> str:
 
 
 def load_creator_niches(engine, force: bool) -> list[dict[str, object]]:
-    predicate = "" if force else "AND embedding IS NULL"
-    query = text(f"""
+    query = text("""
         SELECT id, username, niche, description, tags
         FROM creator_niches
         WHERE niche IS NOT NULL
           AND TRIM(niche) <> ''
           AND description IS NOT NULL
           AND TRIM(description) <> ''
-          {predicate}
+          AND (:force OR embedding IS NULL)
         ORDER BY id
     """)
     with engine.connect() as connection:
-        return [dict(row._mapping) for row in connection.execute(query)]
+        return [dict(row._mapping) for row in connection.execute(query, {"force": force})]
 
 
 def save_embeddings(engine, table: Table, rows: list[dict], vectors: list[list[float]]) -> None:
