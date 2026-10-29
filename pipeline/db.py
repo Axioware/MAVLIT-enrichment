@@ -888,6 +888,32 @@ class SavedBrand(Base):
     brand_raw = relationship("BrandRaw",       lazy="selectin", foreign_keys=[brand_raw_id])
 
 
+class ContactReveal(Base):
+    """
+    A brand whose contacts were shown to a creator on a given UTC day. The daily cap on contact reveals (CONTACT_REVEALS_PER_DAY,
+    api/contact_access.py) counts these rows, so it holds across restarts and processes.
+    """
+    __tablename__ = "contact_reveals"
+
+    creator_profile_id = Column(Integer, ForeignKey("creator_profiles.id", ondelete="CASCADE"), primary_key=True)
+    brand_raw_id        = Column(Integer, ForeignKey("brands_raw.id", ondelete="CASCADE"), primary_key=True)
+    revealed_on         = Column(Date, primary_key=True)
+    created_at           = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class LoginFailure(Base):
+    """
+    One failed login, for the lockout in api/login_limits.py. The email is stored only as a SHA-256 of its lower-cased form and the
+    client IP as text; rows are deleted when that email logs in successfully and after a day.
+    """
+    __tablename__ = "login_failures"
+
+    id         = Column(Integer, primary_key=True)
+    email_hash = Column(Text, nullable=False, index=True)
+    ip         = Column(Text, nullable=False, index=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
 class EarlyAccessSignup(Base):
     """A sign-up from the landing page's "Join the founding creators" form. One row per email (a repeat sign-up updates it)."""
     __tablename__ = "early_access_signups"

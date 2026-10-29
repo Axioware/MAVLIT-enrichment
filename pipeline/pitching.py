@@ -185,6 +185,7 @@ def _build_pitch_prompt(
     past_brand_partnership: str | None,
     content_link: str | None,
     post_details: dict | None = None,
+    include_contact: bool = True,
 ) -> dict:
     """
     The filled-in pitch prompt plus the brand/contact it was built for:
@@ -212,7 +213,7 @@ def _build_pitch_prompt(
         )
         brand_niche = brand.niche or "unknown"
         brand_description = brand.description or "none provided"
-        contact = _top_contact(db, brand_id)
+        contact = _top_contact(db, brand_id) if include_contact else None   # the API leaves it out for a brand the creator may not see contacts of
         contact_name = contact["name"] if contact else "unknown"
         contact_title = contact["title"] if contact else "unknown"
         brand_target_audience, brand_target_age = _brand_audience_text(brand)
@@ -304,6 +305,7 @@ def generate_pitch(
     product_reference: str | None,
     past_brand_partnership: str | None,
     content_link: str | None,
+    include_contact: bool = True,
 ) -> Pitch:
     """
     Raises ValueError if brand_id doesn't exist. Raises RuntimeError if the
@@ -313,7 +315,7 @@ def generate_pitch(
     fields = dict(story=story, product_reference=product_reference,
                   past_brand_partnership=past_brand_partnership, content_link=content_link)
     built = _build_pitch_prompt(db, creator, is_custom=is_custom, brand_id=brand_id,
-                                custom_brand_name=custom_brand_name, **fields)
+                                custom_brand_name=custom_brand_name, include_contact=include_contact, **fields)
     db.commit()   # end the read transaction first: no idle-in-transaction session while the LLM runs
     with llm_usage_scope(creator.id, "pitch"):
         pitch_text = call_gpt_text(built["prompt"], context=f"pitch for creator_id={creator.id} brand={built['brand_name']}")
@@ -333,6 +335,7 @@ def stream_pitch(
     product_reference: str | None,
     past_brand_partnership: str | None,
     content_link: str | None,
+    include_contact: bool = True,
 ):
     """
     Same as generate_pitch, but yields the email piece by piece while the LLM writes it (so the
@@ -349,7 +352,7 @@ def stream_pitch(
         post_details = resolve_post_details(db, creator, past_brand_partnership, content_link)
     yield "status", "Writing your pitch…"
     built = _build_pitch_prompt(db, creator, is_custom=is_custom, brand_id=brand_id,
-                                custom_brand_name=custom_brand_name, post_details=post_details, **fields)
+                                custom_brand_name=custom_brand_name, post_details=post_details, include_contact=include_contact, **fields)
     parts: list[str] = []
     db.commit()   # the stream can run for a minute or more: do not keep a transaction open meanwhile
     for piece in stream_gpt_text(

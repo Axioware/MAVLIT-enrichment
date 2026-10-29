@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from api.client_ip import client_ip
 from pipeline.db import EarlyAccessSignup, get_db
 
 # Public (no login): the landing page's "Join the founding creators" form.
@@ -44,8 +45,7 @@ class EarlyAccessRequest(BaseModel):
 
 
 def _too_many(request: Request) -> bool:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    ip = forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    ip = client_ip(request)   # not X-Forwarded-For: a client can write anything into it
     now, window = time.monotonic(), _recent[ip]
     while window and now - window[0] > _RATE_WINDOW_SECONDS:
         window.popleft()

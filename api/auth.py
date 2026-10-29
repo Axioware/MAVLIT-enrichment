@@ -6,10 +6,12 @@ from jose import JWTError, jwt
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from api import login_limits
+from api.client_ip import client_ip
 from api.schemas import CreatorProfileResponse, profile_to_response
 from config import IS_PRODUCTION, JWT_SECRET
 from pipeline.db import CreatorProfile, get_db
-from pipeline.helpers.passwords import verify_password
+from pipeline.helpers.passwords import hash_password, verify_password
 
 logger = logging.getLogger(__name__)
 
@@ -148,19 +150,40 @@ def get_completed_user(current_user: CreatorProfile = Depends(get_current_user))
 
 #  Routes
 
+_dummy_hash: str | None = None
+
+
+def _dummy_password_hash() -> str:
+    """A real bcrypt hash of a throwaway value, so an unknown email costs the same time as a wrong password."""
+    global _dummy_hash
+    if _dummy_hash is None:
+        _dummy_hash = hash_password("not-a-real-password")
+    return _dummy_hash
+
+
 @router.post("/login", response_model=CreatorProfileResponse)
-def login(body: LoginRequest, response: Response, db: Session = Depends(get_db)):
+def login(body: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     email = body.email.strip().lower()
+    ip = client_ip(request)
+
+    wait = login_limits.locked_for_seconds(db, email, ip)
+    if wait:   # locked: the password is not even checked
+        minutes = max(1, -(-wait // 60))
+        raise HTTPException(status_code=429, detail=f"Too many failed sign-in attempts. Try again in {minutes} minute{'s' if minutes != 1 else ''}.",
+                            headers={"Retry-After": str(wait)})
 
     user = db.query(CreatorProfile).filter(CreatorProfile.email == email).first()
-    print('email, user', email, user)
-    # Generic error either way — don't reveal whether the email exists.
-    if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
+    # Generic error either way — don't reveal whether the email exists. An unknown email still runs one bcrypt check, so the time is the same.
+    stored_hash = user.password_hash if user and user.password_hash else None
+    password_ok = verify_password(body.password, stored_hash or _dummy_password_hash())
+    if not (user and stored_hash and password_ok):
+        login_limits.record_failure(db, email, ip)
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if not user.is_active:
         raise HTTPException(status_code=403, detail="This account has been deactivated")
 
+    login_limits.clear_failures(db, email)
     token = _make_jwt(user.id, user.email)
     response.set_cookie(
         "access_token", token,

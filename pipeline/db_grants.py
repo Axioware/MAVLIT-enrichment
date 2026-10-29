@@ -55,6 +55,7 @@ CODE = {
     "brands_raw": "SIU",                          # seed, enrichment, own-brand job
     "content_creator_re": "SIU",                  # /content-creator-re/bulk-add
     "contract_reviews": "SI",                     # contract_advice
+    "contact_reveals": "SI",                      # api/contact_access.py: the daily cap on contact reveals
     "creator_brand_llm_rankings": "SID",          # v2 ranking refresh = delete + insert
     "creator_brand_llm_v3_rankings": "SID",       # v3 ranking refresh = delete + insert
     "creator_instagram_posts": "SIUD",            # /creator-profile/me/posts
@@ -63,6 +64,7 @@ CODE = {
     "early_access_signups": "SIU",                # POST /early-access (upsert)
     "facebook_branded_content_checks": "",        # CLI only
     "initial_brand_score": "SIU",                 # /score/brands, own-brand job
+    "login_failures": "SID",                      # api/login_limits.py: failed-login lockout (rows removed on success and after a day)
     "instagram_creator_commenters": "S",          # read by the matching; writes are CLI-only
     "instagram_posts": "SIU",                     # own-brand job, sponsorship scoring
     "instagram_users": "SIU",                     # own-brand job
@@ -90,14 +92,16 @@ ADMIN = {
     "brands_raw": (True, True, True),
     "content_creator_re": (True, True, True),
     "contract_reviews": (True, True, True),
+    "contact_reveals": None,
     "creator_brand_llm_rankings": None,
     "creator_brand_llm_v3_rankings": None,
     "creator_instagram_posts": (False, False, True),
     "creator_niches": (True, True, True),
-    "creator_profiles": (True, True, True),
+    "creator_profiles": (True, True, False),   # admin can create and edit, not delete (api/app.py CreatorProfileAdmin)
     "early_access_signups": (False, True, True),
     "facebook_branded_content_checks": (True, True, True),
     "initial_brand_score": (True, True, True),
+    "login_failures": None,
     "instagram_creator_commenters": (True, True, True),
     "instagram_posts": (True, True, True),
     "instagram_users": (True, True, True),

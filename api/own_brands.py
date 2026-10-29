@@ -80,8 +80,6 @@ def get_own_brand_job(
     current_user: CreatorProfile = Depends(get_current_user),
 ):
     job = db.get(OwnBrandJob, job_id)
-    if job is None:
+    if job is None or job.creator_profile_id != current_user.id:   # a foreign job id gets the same answer as a missing one
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.creator_profile_id != current_user.id:
-        raise HTTPException(status_code=403, detail="You do not own this job")
     return _to_response(db, refresh_stale(db, job))

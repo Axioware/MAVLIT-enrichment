@@ -11,15 +11,16 @@ applied to production: run everything on a staging copy first.
 |---|---|
 | database `mavlit_enrichment_test` | CONNECT |
 | schema `public` | USAGE (nothing else) |
-| 30 model tables | exactly the letters below, after `REVOKE ALL` |
+| 32 model tables | exactly the letters below, after `REVOKE ALL` |
 | view `creator_llm_cost` | SELECT |
 | the sequences owned by those tables (22 in production) | USAGE only |
 
 | Privileges | Tables |
 |---|---|
-| SELECT, INSERT | `apify_usage`, `llm_usage` |
-| SELECT, INSERT, DELETE | `creator_brand_llm_rankings`, `creator_brand_llm_v3_rankings` |
-| SELECT, INSERT, UPDATE, DELETE | the other 26 |
+| SELECT, INSERT | `apify_usage`, `llm_usage`, `contact_reveals` (the daily cap on brand-contact reveals) |
+| SELECT, INSERT, DELETE | `creator_brand_llm_rankings`, `creator_brand_llm_v3_rankings`, `login_failures` (failed-login lockout) |
+| SELECT, INSERT, UPDATE | `creator_profiles` (the admin view can create and edit but no longer delete) |
+| SELECT, INSERT, UPDATE, DELETE | the other 24 |
 
 Never granted: ownership, superuser, CREATE, TRUNCATE, REFERENCES, TRIGGER, and every object not listed (the 57 `bak_*` copies,
 `llm_model_test_rankings`, `v3cmp_*`, anything else). INSERT always comes with SELECT (`INSERT ... RETURNING`). No

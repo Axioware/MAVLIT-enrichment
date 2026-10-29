@@ -715,6 +715,7 @@ class BrandContactAdmin(ModelView, model=BrandContact):
     icon         = "fa-solid fa-address-card"
     column_list  = "__all__"
     column_labels = {BrandContact.brand_raw: "Brand"}
+    can_export = False    # would export every contact's email
     column_searchable_list = [BrandContact.full_name, BrandContact.title, BrandContact.email]
     column_sortable_list = [c.name for c in BrandContact.__table__.columns]
     column_default_sort = [(BrandContact.id, True)]
@@ -753,6 +754,9 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
     # a valid list", input_value={}). Excluding them from the form removes
     # the only way admin-create was producing that bad value.
     column_exclude_list = [CreatorProfile.embedding, CreatorProfile.password_hash]
+    column_details_exclude_list = [CreatorProfile.embedding, CreatorProfile.password_hash]   # the detail page lists every column unless told otherwise
+    can_export = False    # would export every creator's email
+    can_delete = False
     column_searchable_list = [CreatorProfile.email, CreatorProfile.full_name, CreatorProfile.creator_handle, CreatorProfile.content_niche]
     column_sortable_list    = [c.name for c in CreatorProfile.__table__.columns if c.name not in ("embedding", "password_hash")]
     column_default_sort    = [(CreatorProfile.id, True)]

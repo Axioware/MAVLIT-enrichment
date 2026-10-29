@@ -8,6 +8,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
+from api.contact_access import allow_contacts
 from api.schemas import (
     ManualPitchRequest,
     PitchListResponse,
@@ -48,9 +49,11 @@ def create_pitch(
     elif body.brand_id is None:
         raise HTTPException(status_code=400, detail="brand_id is required for a non-custom pitch")
 
+    include_contact = allow_contacts(db, current_user.id, body.brand_id)   # False (no contact in the pitch) for a brand the creator may not see; 429 over the daily cap
     try:
         pitch = generate_pitch(
             db, current_user,
+            include_contact=include_contact,
             is_custom=body.is_custom,
             brand_id=body.brand_id,
             custom_brand_name=body.custom_brand_name,
@@ -96,6 +99,7 @@ def stream_pitch_endpoint(
         raise HTTPException(status_code=400, detail="brand_id is required for a non-custom pitch")
     elif not db.query(BrandRaw.id).filter(BrandRaw.id == body.brand_id).first():
         raise HTTPException(status_code=404, detail=f"brand_id={body.brand_id} not found")
+    include_contact = allow_contacts(db, current_user.id, body.brand_id)   # commits; 429 over the daily cap, before the stream starts
     db.commit()   # the request session only validated; end its transaction so it is not open for the whole stream
     creator_id = current_user.id
     followups: list[str] = []   # filled once the pitch is saved; run after the response has been sent
@@ -111,6 +115,7 @@ def stream_pitch_endpoint(
             try:
                 for kind, value in stream_pitch(
                     stream_db, creator,
+                    include_contact=include_contact,
                     is_custom=body.is_custom,
                     brand_id=body.brand_id,
                     custom_brand_name=body.custom_brand_name,
@@ -192,8 +197,8 @@ def update_pitch(
     pitch = db.query(Pitch).filter(Pitch.id == pitch_id).first()
     if not pitch:
         raise HTTPException(status_code=404, detail="Pitch not found")
-    if pitch.creator_profile_id != current_user.id:
-        raise HTTPException(status_code=403, detail="You do not own this pitch")
+    if pitch.creator_profile_id != current_user.id:   # the same answer as for a missing id: the ids of other creators' pitches are not revealed
+        raise HTTPException(status_code=404, detail="Pitch not found")
     if not body.model_fields_set:
         raise HTTPException(status_code=400, detail="At least one field is required")
     if body.pitch_text is not None:
@@ -235,7 +240,7 @@ def delete_pitch(
     if not pitch:
         raise HTTPException(status_code=404, detail="Pitch not found")
     if pitch.creator_profile_id != current_user.id:
-        raise HTTPException(status_code=403, detail="You do not own this pitch")
+        raise HTTPException(status_code=404, detail="Pitch not found")
     db.delete(pitch)
     db.commit()
     return {"id": pitch_id, "deleted": True}

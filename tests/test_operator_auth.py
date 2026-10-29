@@ -194,7 +194,9 @@ class OperatorEndpoints(unittest.TestCase):
         self.addCleanup(self.api_app.app.dependency_overrides.pop, get_db, None)
 
         with mock.patch.object(config, "ADMIN_PASSKEY", None), \
-             mock.patch("api.auth.verify_password", return_value=False):
+             mock.patch("api.auth.verify_password", return_value=False), \
+             mock.patch("api.auth.login_limits.locked_for_seconds", return_value=0), \
+             mock.patch("api.auth.login_limits.record_failure"):   # the lockout store is tested in tests/test_access_control.py
             response = self.client.post(
                 "/auth/login",
                 json={"email": "a@b.co", "password": "x"},
