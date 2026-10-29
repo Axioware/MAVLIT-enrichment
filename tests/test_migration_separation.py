@@ -248,9 +248,10 @@ class MigrationTargetResolution(unittest.TestCase):
                 via_variable = migration_settings.resolve_migration_target(environ={"MIGRATION_ENV_FILE": explicit})
                 self.assertIn("explicit_db", via_variable.url)
             with mock.patch.object(migration_settings, "DEFAULT_ENV_FILE", Path(d) / "absent.env"):
-                fallback = migration_settings.resolve_migration_target(environ={})
-        self.assertIsNone(fallback.url)
-        self.assertIn("DATABASE_URL", fallback.source)
+                with self.assertRaises(MigrationConfigError) as ctx:   # no fallback to the runtime DATABASE_URL
+                    migration_settings.resolve_migration_target(environ={"DATABASE_URL": "postgresql://app:app-secret@h/db"})
+        self.assertIn("No migration database is configured", str(ctx.exception))
+        self.assertNotIn("app-secret", str(ctx.exception))
 
     def test_urls_are_validated_without_echoing_them(self):
         bad = {
@@ -319,13 +320,32 @@ class MigrationCommand(unittest.TestCase):
         self.assertEqual(timeout, 1234)
         self.assertIsNone(grant_role, "no grants unless --grant-role / MIGRATION_GRANT_ROLE is given")
 
-    def test_without_a_migration_url_it_falls_back_to_the_runtime_engine(self):
-        with mock.patch.object(migration_settings, "DEFAULT_ENV_FILE", ROOT / "does-not-exist.env"), \
-                mock.patch.dict(os.environ, {}, clear=False), mock.patch.object(migrations, "_apply_migrations") as apply_mock:
-            os.environ.pop("MIGRATION_DATABASE_URL", None)
-            os.environ.pop("MIGRATION_ENV_FILE", None)
-            self.assertEqual(migrate.main([]), 0)
-        self.assertIs(apply_mock.call_args.args[0], runtime_engine)
+    def test_without_a_migration_url_it_exits_2_and_never_uses_the_runtime_url(self):
+        runtime_url = "postgresql+psycopg2://mavlit_app:runtime-secret-pw@runtime-host:5432/app_db"
+        for argv in ([], ["--dry-run"]):
+            with self.subTest(argv), mock.patch.object(migration_settings, "DEFAULT_ENV_FILE", ROOT / "does-not-exist.env"), \
+                    mock.patch.dict(os.environ, {"DATABASE_URL": runtime_url}, clear=False), \
+                    mock.patch.object(migrations, "_apply_migrations") as apply_mock, mock.patch.object(migrate, "build_engine") as build_mock, \
+                    self.assertLogs("pipeline.migrate", level="ERROR") as logs:
+                os.environ.pop("MIGRATION_DATABASE_URL", None)
+                os.environ.pop("MIGRATION_ENV_FILE", None)
+                self.assertEqual(migrate.main(argv), migrate.EXIT_CONFIG)
+            apply_mock.assert_not_called()
+            build_mock.assert_not_called()
+            text = "\n".join(logs.output)
+            self.assertIn("No migration database is configured", text)
+            self.assertIn("MIGRATION_DATABASE_URL", text)
+            for secret in ("runtime-secret-pw", "runtime-host", "mavlit_app", "app_db"):
+                self.assertNotIn(secret, text)
+
+    @unittest.skipIf((ROOT / ".env.migrate").exists(), "this checkout has a .env.migrate, which is a configured migration URL")
+    def test_the_subprocess_prints_no_credential_and_exits_2_without_a_migration_url(self):
+        result = _python("import sys; from pipeline import migrate; sys.exit(migrate.main([]))",
+                         DATABASE_URL="postgresql+psycopg2://mavlit_app:runtime-secret-pw@runtime-host:5432/app_db")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        for stream in (result.stdout, result.stderr):
+            self.assertNotIn("runtime-secret-pw", stream)
+            self.assertNotIn("runtime-host", stream)
 
     def test_the_dedicated_engine_is_disposed_on_every_path(self):
         cases = [
@@ -359,9 +379,9 @@ class MigrationCommand(unittest.TestCase):
         self.assertNotIn("hunter2", "\n".join(logs.output))
 
     def test_the_command_does_not_depend_on_run_migrations_or_load_the_api(self):
-        result = _python("import sys, pipeline.migrate as m; print('api.app' in sys.modules, 'fastapi' in sys.modules, m.main(['--dry-run']))", RUN_MIGRATIONS="banana")
+        result = _python("import sys, pipeline.migrate as m; print('api.app' in sys.modules, 'fastapi' in sys.modules, m.main(['--dry-run']))", RUN_MIGRATIONS="banana", MIGRATION_DATABASE_URL=MIGRATION_URL)
         self.assertEqual(result.stdout.strip(), "False False 0", result.stderr)
-        self.assertEqual(_python("import sys; from pipeline import migrate; sys.exit(migrate.main(['--dry-run']))", RUN_MIGRATIONS="banana").returncode, 0)
+        self.assertEqual(_python("import sys; from pipeline import migrate; sys.exit(migrate.main(['--dry-run']))", RUN_MIGRATIONS="banana", MIGRATION_DATABASE_URL=MIGRATION_URL).returncode, 0)
 
 
 class LockTimeout(unittest.TestCase):

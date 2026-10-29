@@ -5,6 +5,7 @@ import sys
 from sqlalchemy import text
 
 from pipeline.db import Base, BatchSessionLocal, engine
+from pipeline.owner_guard import require_owner_role
 from pipeline.seed import run_seed
 
 logging.basicConfig(
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_tables():
+    require_owner_role(engine, "main.py (ensure_tables)")
     Base.metadata.create_all(bind=engine)
     with engine.connect() as conn:
         migrations = [

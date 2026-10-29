@@ -9,7 +9,8 @@ Where the migration URL comes from, first match wins:
   1. --env-file PATH, or the MIGRATION_ENV_FILE variable: a dedicated file that defines MIGRATION_DATABASE_URL.
   2. the MIGRATION_DATABASE_URL variable of the migration process itself (exported by a deploy step).
   3. the default file .env.migrate in the project root, when it exists.
-  4. none of these: the runtime DATABASE_URL (local development; a restricted production role will lack the rights).
+  4. none of these: an error (exit code 2). The runtime DATABASE_URL is deliberately NOT used as a fallback: in production it is the
+     restricted application role, which cannot run DDL. For local development export MIGRATION_DATABASE_URL yourself.
 
 A file is read without touching os.environ, and must be readable only by its owner (chmod 600) and owned by that user
 or by root. The URL is checked before anything connects to a database. Nothing here ever includes a URL or a password
@@ -46,7 +47,7 @@ class MigrationConfigError(RuntimeError):
 
 @dataclass(frozen=True)
 class MigrationTarget:
-    url: str | None   # None = use the runtime engine (DATABASE_URL)
+    url: str
     source: str       # a description for logs: a variable name or a file path, never a secret
     file_values: dict | None = None   # the other settings of the migration env file (e.g. MIGRATION_GRANT_ROLE), if one was used
 
@@ -99,7 +100,11 @@ def resolve_migration_target(env_file: str | None = None, environ: dict | None =
     elif DEFAULT_ENV_FILE.exists():
         values, source = _read_file(DEFAULT_ENV_FILE), f"the migration env file {DEFAULT_ENV_FILE}"
     else:
-        return MigrationTarget(url=None, source="the runtime DATABASE_URL (no migration URL is configured)")
+        raise MigrationConfigError(
+            f"No migration database is configured. Set {URL_VARIABLE} for this process, pass --env-file PATH (or set {ENV_FILE_VARIABLE}), "
+            f"or create {DEFAULT_ENV_FILE.name} (root-only, chmod 600; see .env.migrate.example). The runtime DATABASE_URL is deliberately "
+            "not used: it is the restricted application role and cannot change the schema."
+        )
     raw = values[URL_VARIABLE].strip() if values is not None else environ[URL_VARIABLE].strip()
     validate_url(raw, where=f"{URL_VARIABLE} in {source}")
     return MigrationTarget(url=raw, source=source, file_values=values)

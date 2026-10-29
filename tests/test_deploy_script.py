@@ -121,7 +121,7 @@ class DeployScript(unittest.TestCase):
 
     def test_the_opt_in_health_probe_reads_the_database_by_default(self):
         text = DEPLOY.read_text()
-        self.assertIn("DEPLOY_HEALTH_URL:-http://127.0.0.1:8000/brand-niches", text)   # /health never touches the database
+        self.assertIn("http://127.0.0.1:8000/brand-niches http://127.0.0.1:8000/health/db", text)   # /health never touches the database
 
     def test_the_flag_must_be_0_or_1(self):
         result = self.run_deploy(DEPLOY_RUN_MIGRATIONS="2")

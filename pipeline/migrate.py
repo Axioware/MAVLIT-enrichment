@@ -8,8 +8,8 @@ Run the database migrations on their own:
     python -m pipeline.migrate --env-file /root/.mavlit-migrate.env --lock-timeout-ms 5000
 
 Which database: the migration-only settings of pipeline/migration_settings.py (a root-only env file, or the
-MIGRATION_DATABASE_URL variable of this process), falling back to DATABASE_URL for local development. The API never
-reads those settings. RUN_MIGRATIONS only controls the API's startup and has no effect here.
+MIGRATION_DATABASE_URL variable of this process). Without one it stops with exit code 2: it never falls back to the
+runtime DATABASE_URL, which is the restricted application role. The API never reads those settings. RUN_MIGRATIONS only controls the API's startup and has no effect here.
 
 Exit codes: 0 done, 1 failed, 2 bad configuration, 3 a lock could not be acquired in time (the step was rolled back;
 run it again). Neither a URL nor a password is ever printed. Importing this module starts nothing and connects to nothing.
@@ -20,7 +20,6 @@ import logging
 import os
 import sys
 
-from pipeline.db import engine as runtime_engine
 from pipeline.db_grants import GrantAuditError
 from pipeline.migration_settings import (
     MigrationConfigError,
@@ -65,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     secrets = (target.url, os.environ.get("DATABASE_URL"))
     engine = None
     try:
-        engine = runtime_engine if target.url is None else build_engine(target.url)
+        engine = build_engine(target.url)
         run_migrations(engine, lock_timeout_ms, grant_role)
     except MigrationConfigError as exc:
         logger.error("Migration configuration error: %s", exc)
@@ -82,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("%s", redact(_format_traceback(exc), *secrets))
         return EXIT_FAILED
     finally:
-        if engine is not None and engine is not runtime_engine:   # the dedicated migration engine, not the shared runtime one
+        if engine is not None:
             engine.dispose()
     logger.info("Migrations finished")
     return EXIT_OK

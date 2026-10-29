@@ -6,9 +6,14 @@ Run with:
 
 import logging
 import os
+import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import Column, MetaData, Table, Text, create_engine, text
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from pipeline.owner_guard import require_owner_role  # noqa: E402
 
 load_dotenv()
 
@@ -109,6 +114,7 @@ def populate_test_niches() -> tuple[int, int]:
         for niche in CANONICAL_NICHES
     ]
 
+    require_owner_role(engine, "populate_test_niches.py")
     with engine.begin() as connection:
         connection.execute(text("TRUNCATE TABLE test_niches"))
         connection.execute(test_niches.insert(), rows)
@@ -139,6 +145,7 @@ def populate_test_niches() -> tuple[int, int]:
 
 
 if __name__ == "__main__":
+    require_owner_role(engine, "populate_test_niches.py")
     metadata.create_all(bind=engine)
     total_count, described_count = populate_test_niches()
     print(f"test_niches: {total_count} niche row(s).")

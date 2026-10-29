@@ -81,6 +81,7 @@ from pipeline.helpers.db import upsert_rows
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import BRAND_CHECK_DEFAULT_PROMPT, BRAND_CHECK_PROMPT_NAME
 from pipeline.helpers.social import normalize_handle
+from pipeline.owner_guard import require_owner_role
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,7 @@ def _ensure_partnership_evidence_table() -> None:
     Keep the scratch evidence table available for standalone script runs
     too. The FastAPI app also creates it on startup via Base.metadata.
     """
+    require_owner_role(engine, "content_creator_re (partnership evidence table)")
     Base.metadata.create_all(bind=engine, tables=[TestCreatorBrandPartnershipPost.__table__])
     with engine.connect() as conn:
         conn.execute(text("""

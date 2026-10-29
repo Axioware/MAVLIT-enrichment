@@ -22,6 +22,7 @@ from pipeline.db import (
     TestCreatorBrandPartnershipPost,
 )
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.owner_guard import require_owner_role
 from pipeline.helpers.prompts import (
     BRAND_AUDIENCE_ANALYSIS_DEFAULT_PROMPT,
     BRAND_AUDIENCE_ANALYSIS_PROMPT_NAME,
@@ -226,6 +227,7 @@ def _default_target_gender(metrics: dict) -> dict:
 
 
 def _ensure_gender_columns(db) -> None:
+    require_owner_role(db, "run_brand_gender_check (brands_raw columns)")
     db.execute(text("""
         ALTER TABLE brands_raw
             DROP COLUMN IF EXISTS male_pct,

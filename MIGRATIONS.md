@@ -24,8 +24,9 @@ The command refuses a migration env file that group/others can read, or that ano
 (PostgreSQL, names a database) before any connection, and none of our error messages ever contain a URL or password.
 
 Where the migration URL comes from, first match wins: `--env-file PATH` (or `MIGRATION_ENV_FILE`) → the
-`MIGRATION_DATABASE_URL` variable of the migration process → `<project>/.env.migrate` if it exists → `DATABASE_URL`
-(local development only; a restricted role cannot change the schema).
+`MIGRATION_DATABASE_URL` variable of the migration process → `<project>/.env.migrate` if it exists. If none of these is
+configured the command stops with exit code 2: it never falls back to the runtime `DATABASE_URL` (a restricted role cannot change
+the schema). For local development export `MIGRATION_DATABASE_URL` yourself.
 
 ## Running them
 

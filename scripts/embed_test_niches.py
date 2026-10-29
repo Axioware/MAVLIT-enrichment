@@ -17,6 +17,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 from config import DATABASE_URL
 from pipeline.helpers.gpt_llm import embed_text_batch
+from pipeline.owner_guard import require_owner_role
 
 
 DEFAULT_BATCH_SIZE = 100
@@ -55,6 +56,7 @@ def build_table() -> Table:
 
 
 def ensure_embedding_column(engine) -> None:
+    require_owner_role(engine, "embed_test_niches.py")
     with engine.begin() as connection:
         connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         connection.execute(text(

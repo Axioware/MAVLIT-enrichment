@@ -73,6 +73,29 @@ re-applied by the migration step, from the explicit list:
 `python -m pipeline.db_grants --print-audit | psql -f -` prints the read-only audit query: run it any time to see the role's effective access
 (an empty result, or only the TEMPORARY warning, means exactly the plan).
 
+## Batch runners and schema scripts run as the owner
+Once the API's `DATABASE_URL` is `mavlit_app`, anything that changes the schema or empties a table cannot use `.env`. Those scripts need the table
+owner (`mavlit_user`): `main.py`, `run_reverse_engineering.py` / `run_end_to_end_pipeline.py` / `content_creator_re.py` (their partnership-evidence
+table setup), `gender_check/run_brand_gender_check.py`, `gender_check/run_brand_website_audience_check.py`, `scripts/populate_test_niches.py`
+(TRUNCATE), `scripts/embed_test_niches.py` and `script_creator_niche/embed_creator_niches.py`. They now check `current_user` first and stop with
+a clear message when it is the runtime role (`MAVLIT_RUNTIME_ROLE`, default `mavlit_app`; `pipeline/owner_guard.py`); as the owner nothing changes.
+
+Give them their own root-only env file, separate from `.env`, from `.env.migrate` and from the service's environment:
+
+    # /root/.mavlit-batch.env   (chown root:root, chmod 600; never in git, never in the API's EnvironmentFile)
+    DATABASE_URL=postgresql+psycopg2://mavlit_user:<owner password>@localhost:5432/<db>
+
+    set -a; . /root/.mavlit-batch.env; set +a      # exported variables beat .env (dotenv does not override)
+    python run_reverse_engineering.py ...
+
+`python -m pipeline.migrate` does not read this file: it needs `MIGRATION_DATABASE_URL` (see MIGRATIONS.md) and exits with code 2 when none is
+configured; it never falls back to `DATABASE_URL`, which is the restricted role.
+
+Deploys: `.github/workflows/deploy.yml` runs `DEPLOY_RUN_MIGRATIONS=1 bash scripts/deploy.sh` (pull -> requirements -> migrate -> restart -> health).
+A failed migration stops the deploy before the restart. The health check needs `GET /brand-niches` and `GET /health/db` (a read of
+`creator_profiles` and `brands_raw` as the API's own role) to answer 200, so a missing grant keeps the deploy from being marked complete.
+Set `RUN_MIGRATIONS=0` in the API's `.env` BEFORE switching its `DATABASE_URL` to `mavlit_app` (unset means "on", and the startup migration would fail).
+
 ## Staging procedure
 Use a restored copy of the database, never production. Substitute the staging database name for `<db>`.
 ```bash

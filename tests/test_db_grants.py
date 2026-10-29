@@ -174,7 +174,8 @@ class MigrationIntegration(unittest.TestCase):
         self.assertEqual([c.args[2] for c in run_mock.call_args_list], ["mavlit_app", None])
 
     def test_dry_run_reports_the_role_without_connecting(self):
-        with mock.patch.object(migrate, "run_migrations") as run_mock, self.assertLogs("pipeline.migrate", level="INFO") as logs:
+        with mock.patch.object(migrate, "run_migrations") as run_mock, mock.patch.dict(os.environ, {"MIGRATION_DATABASE_URL": "postgresql://u:p@h/db"}), \
+                self.assertLogs("pipeline.migrate", level="INFO") as logs:
             self.assertEqual(migrate.main(["--dry-run", "--grant-role", "mavlit_app"]), 0)
         run_mock.assert_not_called()
         self.assertIn("re-grant the runtime role mavlit_app", "\n".join(logs.output))

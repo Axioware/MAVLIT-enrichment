@@ -35,6 +35,7 @@ from pipeline.enrichment.geo_reach.geo_reach import (
     _registrable_domain,
 )
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.owner_guard import require_owner_role
 
 MAX_INSTAGRAM_POSTS_FOR_LLM = 10
 LLM_MODEL = "gpt-6-luna"
@@ -474,6 +475,7 @@ def _has_confident_estimates(metrics: dict) -> bool:
 
 
 def _ensure_latest_product_columns(db) -> None:
+    require_owner_role(db, "run_brand_website_audience_check (brands_raw columns)")
     db.execute(text("""
         ALTER TABLE brands_raw
             ADD COLUMN IF NOT EXISTS latest_product TEXT,

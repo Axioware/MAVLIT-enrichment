@@ -20,4 +20,6 @@ jobs:
           install -m 700 -d ~/.ssh
           echo "$SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
-          ssh -i ~/.ssh/id_deploy root@"$HOST" 'bash /opt/MAVLIT-enrichment/scripts/deploy.sh'
+          # DEPLOY_RUN_MIGRATIONS=1: pull -> requirements -> `python -m pipeline.migrate` -> restart -> health check. A failed migration exits
+          # non-zero BEFORE the restart (the old API keeps running) and fails this step.
+          ssh -i ~/.ssh/id_deploy root@"$HOST" 'DEPLOY_RUN_MIGRATIONS=1 bash /opt/MAVLIT-enrichment/scripts/deploy.sh'

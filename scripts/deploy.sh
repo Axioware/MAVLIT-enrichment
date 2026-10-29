@@ -13,8 +13,9 @@
 # or the health check failed last time - the whole sequence runs again at the same commit. A failed migration stops
 # the script BEFORE the restart (the old API keeps running) and exits non-zero. Not atomic: see MIGRATIONS.md.
 #
-# The health probe of the opt-in path is GET /brand-niches, not /health: /health never touches the database, so it would stay green
-# with a broken runtime role (missing grant, wrong URL). /brand-niches is public and reads content_creator_re.
+# The health probe of the opt-in path is GET /brand-niches plus GET /health/db, not /health: /health never touches the database, so it
+# would stay green with a broken runtime role (missing grant, wrong URL). /brand-niches reads content_creator_re; /health/db reads
+# creator_profiles and brands_raw. DEPLOY_HEALTH_URL may hold several URLs separated by spaces; all must return 200.
 #
 # Test/override variables (defaults are the production values): MAVLIT_APP_DIR, MAVLIT_SERVICE, MAVLIT_BRANCH,
 # SYSTEMCTL, JOURNALCTL, PYTHON_BIN, PIP_BIN, LOCK_FILE, DEPLOY_STATE_DIR, DEPLOY_HEALTH_URL, DEPLOY_HEALTH_CMD,
@@ -115,8 +116,11 @@ health_ok() {
     if [ -n "${DEPLOY_HEALTH_CMD:-}" ]; then
         bash -c "$DEPLOY_HEALTH_CMD"
     else
-        "$PYTHON_BIN" -c 'import sys, urllib.request; sys.exit(0 if urllib.request.urlopen(sys.argv[1], timeout=5).status == 200 else 1)' \
-            "${DEPLOY_HEALTH_URL:-http://127.0.0.1:8000/brand-niches}"
+        # every URL must answer 200: /brand-niches reads content_creator_re, /health/db reads creator_profiles and brands_raw with the
+        # API's own database role, so a missing grant or a wrong URL keeps the deploy from being marked complete
+        # shellcheck disable=SC2086
+        "$PYTHON_BIN" -c 'import sys, urllib.request; sys.exit(0 if all(urllib.request.urlopen(u, timeout=5).status == 200 for u in sys.argv[1:]) else 1)' \
+            ${DEPLOY_HEALTH_URL:-http://127.0.0.1:8000/brand-niches http://127.0.0.1:8000/health/db}
     fi
 }
 attempt=0

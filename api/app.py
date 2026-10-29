@@ -16,7 +16,7 @@ from sqladmin.filters import AllUniqueStringValuesFilter, OperationColumnFilter
 from sqlalchemy import String, cast, or_, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy.sql import Select
 
 from api.advisory import router as advisory_router
@@ -79,6 +79,7 @@ from pipeline.db import (
     SavedBrand,
     BatchSessionLocal,
     SessionLocal,
+    get_db,
     TestBrandsWithInstagramPosts,
     TestCreatorBrandPartnershipPost,
     TestNiche,
@@ -1089,6 +1090,17 @@ class BulkAddCreatorsResponse(BaseModel):
 
 @app.get("/health")
 def health():
+    return {"status": "ok"}
+
+
+@app.get("/health/db")
+def health_db(db: Session = Depends(get_db)):
+    """
+    Readiness: a cheap read of two tables through the API's own database role, so a missing grant or a wrong DATABASE_URL shows up
+    right after a deploy (deploy.sh probes it). Returns no data; a failure is the generic 503 / 500 of the database error handler.
+    """
+    db.execute(text("SELECT 1 FROM creator_profiles LIMIT 1"))
+    db.execute(text("SELECT 1 FROM brands_raw LIMIT 1"))
     return {"status": "ok"}
 
 
