@@ -264,7 +264,7 @@ def drain_pending_step(label: str, fn, db, batch_limit: int, **kwargs) -> None:
 
 def drain_instagram_users(label: str, db, batch_limit: int = 5) -> None:
     """Drain pending instagram_posts rows using instagram_users.py's normal filter."""
-    drain_pending_step(label, enrich_instagram_users, db, batch_limit=batch_limit)
+    drain_pending_step(label, enrich_instagram_users, db, batch_limit=batch_limit, ensure_schema=True)
 
 
 def pending_brand_signal_ids(db, limit: int) -> list[int]:

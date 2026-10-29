@@ -127,9 +127,8 @@ def record_apify_scrape(platform: str, handle: str, posts_requested: int, posts_
     if scope is None:
         return
     try:
-        from pipeline.db import ApifyUsage, SessionLocal, engine   # lazy, as in _record_usage
+        from pipeline.db import ApifyUsage, SessionLocal   # lazy, as in _record_usage
 
-        ApifyUsage.__table__.create(bind=engine, checkfirst=True)
         with SessionLocal() as db:
             db.add(ApifyUsage(
                 creator_profile_id=scope[0], feature=scope[1], platform=platform, handle=handle,
@@ -137,22 +136,24 @@ def record_apify_scrape(platform: str, handle: str, posts_requested: int, posts_
             ))
             db.commit()
     except Exception as exc:
-        logger.warning("Apify usage: could not record scrape for %s — %s", handle, exc)
+        _warn_tracking_failure("apify_usage", f"Apify usage: could not record scrape for {handle}", exc)
 
 
-_usage_table_ready = False
+def _warn_tracking_failure(table: str, what: str, exc: Exception) -> None:
+    """
+    Usage tracking never raises (it must not break an LLM or scrape call), and it never changes the schema: when
+    its table is missing the tables come from the migrations, so say so clearly instead of creating it here.
+    """
+    if "does not exist" in str(exc) and table in str(exc):
+        logger.error("%s - the %s table does not exist; run the migrations first: python -m pipeline.migrate", what, table)
+    else:
+        logger.warning("%s — %s", what, exc)
 
 
 def _record_usage(path: str, payload: dict, body: dict, context: str, seconds: float) -> None:
     """Log one successful call to llm_usage. Never raises — tracking must not break an LLM call."""
-    global _usage_table_ready
     try:
-        from pipeline.db import LlmUsage, SessionLocal, engine   # lazy: pipeline.db must not load at import time
-
-        if not _usage_table_ready:
-            # Scripts can run before the API's create_all has made the table.
-            LlmUsage.__table__.create(bind=engine, checkfirst=True)
-            _usage_table_ready = True
+        from pipeline.db import LlmUsage, SessionLocal   # lazy: pipeline.db must not load at import time
 
         usage = body.get("usage") or {}
         model = str(payload.get("model") or body.get("model") or "unknown")
@@ -194,7 +195,7 @@ def _record_usage(path: str, payload: dict, body: dict, context: str, seconds: f
         finally:
             db.close()
     except Exception as exc:
-        logger.warning("LLM cost: could not record usage%s — %s", f" ({context})" if context else "", exc)
+        _warn_tracking_failure("llm_usage", f"LLM cost: could not record usage{f' ({context})' if context else ''}", exc)
 
 # ---------------------------------------------------------------------------
 # OpenAI unavailable (credits / quota / rate limit / outage)

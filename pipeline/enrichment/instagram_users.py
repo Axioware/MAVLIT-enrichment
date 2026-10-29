@@ -549,6 +549,36 @@ def _link_existing_commenters_from_creator_snapshot(
 
 #  Main enrichment function 
 
+_post_collaborators_checked = False
+
+
+def _has_post_collaborators_column(db: Session) -> bool:
+    return db.execute(text(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = 'instagram_users' AND column_name = 'post_collaborators'"
+    )).first() is not None
+
+
+def _require_post_collaborators_column(db: Session) -> None:
+    """Read-only check (no DDL): fail with a clear message when the migrations have not added the column."""
+    global _post_collaborators_checked
+    if _post_collaborators_checked:
+        return
+    if not _has_post_collaborators_column(db):
+        raise RuntimeError(
+            "instagram_users.post_collaborators does not exist - run the migrations first: python -m pipeline.migrate"
+        )
+    _post_collaborators_checked = True
+
+
+def _ensure_post_collaborators_column(db: Session) -> None:
+    """CLI only: add the column when it is missing (DDL, needs the table owner), and only then."""
+    if _has_post_collaborators_column(db):
+        return
+    db.execute(text("ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS post_collaborators TEXT"))
+    db.commit()
+
+
 def enrich_instagram_users(
     db: Session,
     limit: int = 5,
@@ -556,6 +586,7 @@ def enrich_instagram_users(
     brand_raw_id: int | None = None,
     beach_brands_only: bool = False,
     scrape_commenters: bool | None = None,
+    ensure_schema: bool = False,
 ) -> int:
     """
     Process up to `limit` instagram_posts with sponsorship_confidence >= 90
@@ -581,14 +612,19 @@ def enrich_instagram_users(
     (e.g. limit=1 in a loop) advance through that brand's pending posts one
     at a time rather than reprocessing the same already-done row forever.
     Ignored if row_id is given.
+
+    The post_collaborators column comes from the migrations (pipeline/migrations.py). By default this raises
+    RuntimeError when it is missing instead of changing the schema (the API runs this inside background jobs).
+    Standalone CLI runs against a database that may predate the migrations pass ensure_schema=True to add it.
     """
     if not APIFY_TOKEN:
         logger.warning("APIFY_TOKEN not set — skipping Instagram user enrichment")
         return 0
 
-    # Standalone runs may predate the API's startup migration for this column.
-    db.execute(text("ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS post_collaborators TEXT"))
-    db.commit()
+    if ensure_schema:
+        _ensure_post_collaborators_column(db)
+    else:
+        _require_post_collaborators_column(db)
 
     query = db.query(InstagramPost).filter(InstagramPost.sponsorship_confidence >= _MIN_SPONSORSHIP_CONFIDENCE)
     if row_id is not None:

@@ -393,7 +393,7 @@ The following endpoints are authenticated and implemented for API consumers, but
 
 ## Operations and enrichment API
 
-These endpoints are backend/operator workflows. No current frontend page calls them except `/seed` and its status endpoint from `frontend/index.html`.
+These endpoints are backend/operator workflows. **All of them, and their status routes, require operator access:** `Authorization: Bearer <ADMIN_PASSKEY>` (the same shared secret as the `/admin` login password; see `api/operator.py`). A missing, blank, malformed or wrong credential gets `401` with `WWW-Authenticate: Bearer`; when `ADMIN_PASSKEY` is not configured they return `403` for everyone. A logged-in creator session is not an operator credential. `frontend/index.html` (`/seed` and its status) and `frontend/add-creators.html` (`bulk-add`) ask for the key once per browser tab and keep it in `sessionStorage`. Example: `curl -X POST https://<host>/score/brands -H "Authorization: Bearer $ADMIN_PASSKEY" -H "Content-Type: application/json" -d '{"limit": 10}'`. Use an ASCII passkey (HTTP header values are ASCII).
 
 ### `GET /health`
 
@@ -534,7 +534,7 @@ External calls can be triggered indirectly by `/seed`, `/enrich/signals`, `/scor
 - **Potential duplicate:** `/matches/me/refresh` and `GET /matches/me` currently compute the same live result. Keep both only if the explicit refresh contract is planned.
 - **Compatibility routes:** `/dashboard` duplicates `/`; `/login` is a permanent-style compatibility redirect to `/signin`.
 - **Niche source:** `/brand-niches` reads only distinct non-empty values from `content_creator_re.niche`; the profile page still hardcodes its primary-niche options and should consume this endpoint when that UI is updated.
-- **Unauthenticated operator routes:** `/seed`, `/enrich/signals`, `/score/brands`, and `/content-creator-re/bulk-add` have no auth dependency. Put them behind an operator auth boundary before exposing the service outside a trusted network.
+- **Operator routes:** `/seed`, `/enrich/signals`, `/score/brands`, `/content-creator-re/bulk-add` and the three status routes require `Authorization: Bearer <ADMIN_PASSKEY>` and fail closed when no passkey is configured. `/admin` fails closed the same way (`ADMIN_ALLOW_UNAUTHENTICATED=1` opens it for local development only, never in production). One shared secret, no per-person accounts or audit trail, no rate limit or lockout on repeated wrong guesses.
 - **In-memory jobs:** Polling IDs stop working after process restart and can diverge across multiple Uvicorn workers. Use a durable job store or enforce one worker if these workflows become production-critical.
 - **Missing pagination/history:** Pitches have no pagination, and rate estimates/contract reviews have no history endpoints.
 - **Status is open-ended:** Pitch status is free text in the database; clients should not assume only `proposal_sent` exists.

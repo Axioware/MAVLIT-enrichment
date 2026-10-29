@@ -300,6 +300,16 @@
 </main>
 
 <script>
+  // This action needs the operator key (ADMIN_PASSKEY). It is kept in this tab's sessionStorage only and sent as a Bearer token.
+  function operatorHeaders() {
+    let key = sessionStorage.getItem('mavlitOperatorKey');
+    if (!key) {
+      key = window.prompt('Operator key (ADMIN_PASSKEY)');
+      if (key) sessionStorage.setItem('mavlitOperatorKey', key);
+    }
+    return key ? { Authorization: 'Bearer ' + key } : {};
+  }
+
   function submitCreators() {
     const raw = document.getElementById('urls').value;
     const urls = raw.split('\n').map(s => s.trim()).filter(Boolean);
@@ -315,10 +325,11 @@
 
     fetch('/content-creator-re/bulk-add', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...operatorHeaders() },
       body: JSON.stringify({ urls, niche }),
     })
       .then(r => {
+        if (r.status === 401 || r.status === 403) sessionStorage.removeItem('mavlitOperatorKey');   // ask again next time
         if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Request failed'); });
         return r.json();
       })

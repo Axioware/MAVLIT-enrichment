@@ -223,7 +223,7 @@ def run_instagram_users_per_brand(label: str, db, brand_ids: set[int], batch_lim
         while True:
             batch_num += 1
             try:
-                processed = enrich_instagram_users(db, brand_raw_id=bid, limit=batch_limit)
+                processed = enrich_instagram_users(db, brand_raw_id=bid, limit=batch_limit, ensure_schema=True)
             except LLMUnavailableError:
                 raise
             except Exception:
