@@ -38,10 +38,11 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from sqlalchemy import func, text
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, OPENAI_KEY
-from pipeline.db import BrandRaw, CreatorProfile, InstagramPost, OwnBrandJob, Prompt, SessionLocal, normalize_niche
+from pipeline.db import BrandRaw, CreatorProfile, InstagramPost, OwnBrandJob, Prompt, BatchSessionLocal, SessionLocal, normalize_niche
 from pipeline.helpers.gpt_llm import LLMUnavailableError, call_gpt_json, fill_template, llm_usage_scope, record_apify_scrape
 from pipeline.helpers.normalize import normalize
 from pipeline.helpers.prompts import BRAND_FROM_INSTAGRAM_DEFAULT_PROMPT, BRAND_FROM_INSTAGRAM_PROMPT_NAME
@@ -358,6 +359,7 @@ def run_own_brand_job(job_id: str) -> None:
                 followers=f"{info['followers']:,}" if isinstance(info["followers"], int) else "unknown",
                 posts=_posts_text(info["posts"]),
             )
+            db.commit()   # end the read transaction (saved posts, prompt) before the slow LLM call: no idle-in-transaction session meanwhile
             with llm_usage_scope(creator_id, "own_brand"):
                 result = call_gpt_json(prompt, context=f"own brand @{handle}")
             if not isinstance(result, dict) or not result:
@@ -485,13 +487,33 @@ def _followup_steps():
     ]
 
 
+BATCH_BUSY_MESSAGE = "Another job is running, retry shortly."
+
+
 def run_followup(job_id: str) -> None:
+    """
+    Background: the follow-up pipeline (see _run_followup). When the batch pool has no free connection within its 10 s
+    pool_timeout the job is marked failed with a clear message and can be claimed again by the next pitch. Never raises.
+    """
+    try:
+        _run_followup(job_id)
+    except PoolTimeoutError:
+        logger.error("Own brand follow-up %s: no batch connection free", job_id)
+        with SessionLocal() as db:   # the batch pool is exhausted: use the API pool for this one short write
+            job = db.get(OwnBrandJob, job_id)
+            if job is not None:
+                job.followup_status, job.followup_started_at = "failed", None
+                job.followup_log = [{"step": "all", "error": BATCH_BUSY_MESSAGE}]
+                db.commit()
+
+
+def _run_followup(job_id: str) -> None:
     """
     Background: run the rest of the pipeline on the brand, in order, skipping the steps that are already done.
     A step that fails or is skipped by its own run conditions is logged in followup_log and the next one still
     runs, except when OpenAI is unavailable (the run stops). Never raises.
     """
-    with SessionLocal() as db:
+    with BatchSessionLocal() as db:   # the steps keep a transaction open across Apify/LLM calls: long idle limit
         job = db.get(OwnBrandJob, job_id)
         if job is None:
             return

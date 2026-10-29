@@ -49,7 +49,7 @@ load_dotenv()
 from sqlalchemy import exists, func
 from sqlalchemy.orm import Session
 
-from pipeline.db import ContentCreatorRE, SessionLocal, TestCreatorBrandPartnershipPost
+from pipeline.db import ContentCreatorRE, BatchSessionLocal, TestCreatorBrandPartnershipPost
 from pipeline.enrichment_re.content_creator_re import enrich_content_creator_re
 
 logger = logging.getLogger(__name__)
@@ -146,7 +146,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Only list the eligible creators; scrape nothing.")
     args = parser.parse_args()
 
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         if args.dry_run:
             creators = eligible_creators(db, days=args.days, niche=args.niche, limit=args.limit)

@@ -1,3 +1,5 @@
+import os
+
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     TIMESTAMP,
@@ -24,7 +26,43 @@ SOURCE_CONFIDENCE = {
 
 from config import DATABASE_URL
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=10, max_overflow=5, pool_recycle=1800)
+def _ms_env(name: str, default: int) -> int:
+    """Millisecond setting from the environment; 0 disables it. A non-numeric or negative value raises ValueError."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    value = int(raw)
+    if value < 0:
+        raise ValueError(f"{name} must be >= 0 (0 disables the timeout), got {value}")
+    return value
+
+
+def _connect_args(statement_ms: int, lock_ms: int, idle_tx_ms: int, connect_timeout: int) -> dict:
+    """libpq connect args: connect timeout in seconds plus session-level server timeouts in milliseconds (0 = off)."""
+    return {
+        "connect_timeout": connect_timeout,
+        "options": f"-c statement_timeout={statement_ms} -c lock_timeout={lock_ms} -c idle_in_transaction_session_timeout={idle_tx_ms}",
+    }
+
+
+# Connection cap of this process = pool_size + max_overflow (API default 15); a request that cannot get one fails after 10 s instead of 30.
+# Batch runners that need little can lower DB_POOL_SIZE / DB_MAX_OVERFLOW so several can run at once within the server's max_connections.
+# Server-side timeouts of the API engine (ms, 0 = off): a runaway query is cancelled and an abandoned transaction is closed. Long background
+# jobs inside the API process use batch_engine below; a CLI that needs longer sets DB_STATEMENT_TIMEOUT_MS etc. for that run.
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=int(os.getenv("DB_POOL_SIZE", 10)),
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", 5)),
+    pool_timeout=10,
+    pool_recycle=1800,
+    connect_args=_connect_args(
+        _ms_env("DB_STATEMENT_TIMEOUT_MS", 15_000),
+        _ms_env("DB_LOCK_TIMEOUT_MS", 5_000),
+        _ms_env("DB_IDLE_TX_TIMEOUT_MS", 60_000),
+        _ms_env("DB_CONNECT_TIMEOUT", 5),
+    ),
+)
 # expire_on_commit=False — otherwise every attribute read on an ORM object
 # after a commit() (common in the enrichment loops: query once, then
 # commit per-item inside the loop) silently issues a fresh SELECT and
@@ -32,6 +70,19 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=10, max_overf
 # call (Apify/HTTP/LLM). If that call hangs, the freshly-opened transaction
 # sits idle on that connection for the duration.
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, expire_on_commit=False)
+
+# Long background jobs of the API (seed, enrichment, scoring, AI ranking, description generation): their own small pool with fixed long
+# timeouts so they are not cut off by the API's short limits. Adds 2 connections to the process total (API 15 + 2 = 17).
+batch_engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=2,
+    max_overflow=0,
+    pool_timeout=10,
+    pool_recycle=1800,
+    connect_args=_connect_args(30 * 60 * 1000, 10_000, 5 * 60 * 1000, 5),
+)
+BatchSessionLocal = sessionmaker(bind=batch_engine, autocommit=False, autoflush=False, expire_on_commit=False)
 
 
 class Base(DeclarativeBase):

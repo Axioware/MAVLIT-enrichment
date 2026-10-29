@@ -7,13 +7,15 @@ from datetime import datetime, timezone
 import wtforms
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
 from sqladmin.filters import AllUniqueStringValuesFilter, OperationColumnFilter
 from sqlalchemy import String, cast, or_, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql import Select
 
@@ -75,6 +77,7 @@ from pipeline.db import (
     Prompt,
     RateEstimate,
     SavedBrand,
+    BatchSessionLocal,
     SessionLocal,
     TestBrandsWithInstagramPosts,
     TestCreatorBrandPartnershipPost,
@@ -120,6 +123,26 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+_QUERY_CANCELED = "57014"   # statement_timeout (or a cancel)
+_LOCK_NOT_AVAILABLE = "55P03"   # lock_timeout
+
+
+@app.exception_handler(DBAPIError)
+async def _database_error(request: Request, exc: DBAPIError):
+    """A cancelled or lock-blocked query is a retryable 503; any other database error a generic 500. Never the SQL text."""
+    logger.error("Database error on %s %s: %s", request.method, request.url.path, type(exc).__name__, exc_info=exc)
+    if getattr(exc.orig, "pgcode", None) in (_QUERY_CANCELED, _LOCK_NOT_AVAILABLE):
+        return JSONResponse(status_code=503, content={"detail": "Database busy, retry"}, headers={"Retry-After": "5"})
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
+@app.exception_handler(PoolTimeoutError)
+async def _pool_exhausted(request: Request, exc: PoolTimeoutError):
+    """No pooled connection became free within pool_timeout: retryable, not a server fault."""
+    logger.error("Connection pool exhausted on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=503, content={"detail": "Server busy, retry shortly"}, headers={"Retry-After": "5"})
+
 
 app.include_router(auth_router)
 app.include_router(brands_router)
@@ -226,9 +249,10 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
     icon         = "fa-brands fa-instagram"
     column_list  = "__all__"
     column_labels          = {InstagramPost.brand_raw: "Brand"}
-    column_searchable_list = [InstagramPost.instagram_handle, InstagramPost.caption, InstagramPost.post_id]
+    column_searchable_list = [InstagramPost.instagram_handle, InstagramPost.post_id]
     column_sortable_list   = [c.name for c in InstagramPost.__table__.columns]
     column_default_sort    = [(InstagramPost.id, True)]
+    can_export = False   # unbounded export of a large table
     page_size = 15
 
 
@@ -370,7 +394,7 @@ class CreatorInstagramPostAdmin(ModelView, model=CreatorInstagramPost):
     icon         = "fa-brands fa-instagram"
     column_list  = "__all__"
     column_labels = {CreatorInstagramPost.creator_profile_id: "MAVLIT user id", CreatorInstagramPost.creator: "Creator"}
-    column_searchable_list = [CreatorInstagramPost.instagram_handle, CreatorInstagramPost.caption, CreatorInstagramPost.post_url]
+    column_searchable_list = [CreatorInstagramPost.instagram_handle, CreatorInstagramPost.post_url]
     column_sortable_list   = [c.name for c in CreatorInstagramPost.__table__.columns]
     column_default_sort    = [(CreatorInstagramPost.fetched_at, True)]
     column_filters = [OperationColumnFilter(CreatorInstagramPost.creator_profile_id)]
@@ -399,6 +423,7 @@ class CreatorNicheAdmin(ModelView, model=CreatorNiche):
 
 
 class InstagramUserAdmin(ModelView, model=InstagramUser):
+    can_export = False   # unbounded export of a large table
     name         = "Instagram User"
     name_plural  = "Instagram Users"
     icon         = "fa-solid fa-user-circle"
@@ -647,7 +672,8 @@ class ContractReviewAdmin(ModelView, model=ContractReview):
     icon         = "fa-solid fa-file-contract"
     column_list  = "__all__"
     column_labels = {ContractReview.creator: "Creator"}
-    column_searchable_list = ["creator.email", "creator.full_name", ContractReview.summary, ContractReview.contract_text]
+    column_searchable_list = ["creator.email", "creator.full_name", ContractReview.summary]
+    can_export = False   # contract texts
     column_sortable_list = [c.name for c in ContractReview.__table__.columns]
     column_default_sort  = [(ContractReview.id, True)]
     page_size = 15
@@ -856,8 +882,30 @@ class EnrichRequest(BaseModel):
 _jobs: dict[str, dict] = {}
 
 
+BATCH_BUSY_MESSAGE = "Another job is running, retry shortly."   # the batch pool (2 connections) had none free within pool_timeout
+
+
+def _fail_row_via_api_pool(creator_id: int, status_field: str, error_field: str, message: str, job_field: str | None = None, job_id: str | None = None) -> None:
+    """Record a failure when the batch pool had no connection (so the job's own session cannot be used): a short session on the API pool."""
+    with SessionLocal() as db:
+        row = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
+        if row and (job_field is None or getattr(row, job_field) == job_id):
+            setattr(row, status_field, "failed")
+            setattr(row, error_field, message)
+            db.commit()
+
+
+def _safe_error(exc: Exception) -> str:
+    """Text that may be stored or returned to clients: never raw database error text (it carries SQL and parameters)."""
+    if isinstance(exc, PoolTimeoutError):
+        return BATCH_BUSY_MESSAGE
+    if isinstance(exc, DBAPIError) and getattr(exc.orig, "pgcode", None) == _QUERY_CANCELED:
+        return "database timeout"
+    return type(exc).__name__
+
+
 def _run_seed_job(job_id: str, body: SeedRequest) -> None:
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         inserted = run_seed(
             niche=body.niche,
@@ -871,13 +919,13 @@ def _run_seed_job(job_id: str, body: SeedRequest) -> None:
         )
         _jobs[job_id].update({"status": "done", "inserted": inserted})
     except Exception as exc:
-        _jobs[job_id].update({"status": "error", "error": str(exc)})
+        _jobs[job_id].update({"status": "error", "error": _safe_error(exc)})
     finally:
         db.close()
 
 
 def _run_enrich_job(job_id: str, body: EnrichRequest) -> None:
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         results = run_signal_enrichment(
             db,
@@ -887,7 +935,7 @@ def _run_enrich_job(job_id: str, body: EnrichRequest) -> None:
         )
         _jobs[job_id].update({"status": "done", "results": results})
     except Exception as exc:
-        _jobs[job_id].update({"status": "error", "error": str(exc)})
+        _jobs[job_id].update({"status": "error", "error": _safe_error(exc)})
     finally:
         db.close()
 
@@ -1141,12 +1189,12 @@ class ScoreStatusResponse(BaseModel):
 
 
 def _run_scoring_job(job_id: str, limit: int) -> None:
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         scored = run_brand_scoring(db, limit=limit)
         _jobs[job_id].update({"status": "done", "scored": scored})
     except Exception as exc:
-        _jobs[job_id].update({"status": "error", "error": str(exc)})
+        _jobs[job_id].update({"status": "error", "error": _safe_error(exc)})
     finally:
         db.close()
 
@@ -1382,7 +1430,7 @@ def _run_creator_description_job(
     niche: str,
     job_id: str,
 ) -> None:
-    db = SessionLocal()
+    db = BatchSessionLocal()
     status_field = f"{platform}_description_status"
     job_field = f"{platform}_description_job_id"
     description_field = f"{platform}_description"
@@ -1425,13 +1473,16 @@ def _run_creator_description_job(
         setattr(row, status_field, "completed")
         setattr(row, error_field, None)
         db.commit()
+    except PoolTimeoutError:
+        logger.error("Creator %s description job: no batch connection free for creator_id=%d", platform, creator_id)
+        _fail_row_via_api_pool(creator_id, status_field, error_field, BATCH_BUSY_MESSAGE, job_field, job_id)
     except Exception as exc:
         db.rollback()
         logger.exception("Creator %s description job failed for creator_id=%d", platform, creator_id)
         row = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
         if row and getattr(row, job_field) == job_id:
             setattr(row, status_field, "failed")
-            setattr(row, error_field, str(exc))
+            setattr(row, error_field, _safe_error(exc))
             db.commit()
     finally:
         db.close()
@@ -1512,7 +1563,7 @@ def _run_ai_ranking_job(creator_id: int, version: str) -> None:
     status_field = f"{config['prefix']}_ranking_status"
     error_field = f"{config['prefix']}_ranking_error"
     ranked_at_field = f"{config['prefix']}_ranked_at"
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         row = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
         if not row:
@@ -1533,13 +1584,16 @@ def _run_ai_ranking_job(creator_id: int, version: str) -> None:
         setattr(row, status_field, "completed")
         setattr(row, ranked_at_field, datetime.now(timezone.utc))
         db.commit()
+    except PoolTimeoutError:
+        logger.error("AI ranking %s: no batch connection free for creator_id=%d", version, creator_id)
+        _fail_row_via_api_pool(creator_id, status_field, error_field, BATCH_BUSY_MESSAGE)
     except Exception as exc:
         db.rollback()
         logger.exception("AI ranking %s background job failed for creator_id=%d", version, creator_id)
         row = db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
         if row:
             setattr(row, status_field, "failed")
-            setattr(row, error_field, str(exc))
+            setattr(row, error_field, _safe_error(exc))
             db.commit()
     finally:
         db.close()

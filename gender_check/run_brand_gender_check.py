@@ -18,7 +18,7 @@ from pipeline.db import (
     BrandRaw,
     InstagramPost,
     Prompt,
-    SessionLocal,
+    BatchSessionLocal,
     TestCreatorBrandPartnershipPost,
 )
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
@@ -278,7 +278,7 @@ def main() -> int:
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be at least 1")
 
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         _ensure_gender_columns(db)
         prompt_template = _get_brand_audience_prompt(db)

@@ -44,7 +44,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from config import OPENAI_KEY
-from pipeline.db import InstagramPost, InstagramUser, SessionLocal
+from pipeline.db import InstagramPost, InstagramUser, BatchSessionLocal
 from pipeline.enrichment_re.discover_collaborator_creators import (
     BRAND_NICHE,
     NICHE_PROMPT,
@@ -228,7 +228,7 @@ def main() -> int:
         args.user_type = user_type
 
     filters = {"niche": args.niche, "gender": args.gender, "user_type": args.user_type}
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         if args.limit is not None:
             summary = run(db, args.limit, dry_run=args.dry_run, **filters)

@@ -28,7 +28,7 @@ load_dotenv()
 from sqlalchemy.orm import Session
 
 from config import OPENAI_KEY
-from pipeline.db import SessionLocal, TestCreatorBrandPartnershipPost
+from pipeline.db import BatchSessionLocal, TestCreatorBrandPartnershipPost
 from pipeline.enrichment_re.content_creator_re import _ensure_partnership_evidence_table
 from pipeline.helpers.gpt_llm import call_gpt_json
 
@@ -304,7 +304,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         updated = score_post_sponsorship(db, limit=args.limit, brand_raw_id=args.brand_raw_id)
         print(f"score_post_sponsorship: updated={updated}")

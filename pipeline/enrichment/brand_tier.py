@@ -52,7 +52,7 @@ from sqlalchemy.orm import Session
 from config import OPENAI_KEY
 from sqlalchemy import or_
 
-from pipeline.db import BrandRaw, SessionLocal, TestCreatorBrandPartnershipPost
+from pipeline.db import BrandRaw, BatchSessionLocal, TestCreatorBrandPartnershipPost
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 
 logger = logging.getLogger(__name__)
@@ -270,7 +270,7 @@ def main() -> None:
     parser.add_argument("--brand-id", type=int, default=None, dest="brand_raw_id", help="Limit to one brands_raw.id.")
     args = parser.parse_args()
 
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         updated = score_brand_tier(db, limit=args.limit, brand_raw_id=args.brand_raw_id)
         print(f"brand_tier: updated={updated}")

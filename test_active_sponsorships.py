@@ -37,7 +37,7 @@ from pipeline.db import (
     BrandRaw,
     InstagramPost,
     InstagramUser,
-    SessionLocal,
+    BatchSessionLocal,
     TestBrandsWithInstagramPosts,
     engine,
 )
@@ -84,7 +84,7 @@ def _active_sponsoring_creator_count(db, brand_id: int) -> int:
 
 
 def build_table() -> int:
-    db = SessionLocal()
+    db = BatchSessionLocal()
     total_rows = 0
     try:
         brands = _brands_with_instagram_posts(db)

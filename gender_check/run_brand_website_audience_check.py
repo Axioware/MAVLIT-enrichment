@@ -25,7 +25,7 @@ from sqlalchemy import text
 from pipeline.db import (
     BrandRaw,
     InstagramPost,
-    SessionLocal,
+    BatchSessionLocal,
     TestCreatorBrandPartnershipPost,
 )
 from pipeline.enrichment.geo_reach.geo_reach import (
@@ -586,7 +586,7 @@ def main() -> int:
     if args.force and not args.brand_ids:
         parser.error("--force requires --brand-id (it re-analyses brands that already have results)")
 
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         _ensure_latest_product_columns(db)
         brands = db.execute(BRAND_QUERY, {"force": bool(args.force), "beach_only": bool(args.beach_brands)}).mappings().all()

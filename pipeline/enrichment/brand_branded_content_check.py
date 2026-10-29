@@ -40,7 +40,7 @@ from pipeline.db import (
     Base,
     BrandRaw,
     FacebookBrandedContentCheck,
-    SessionLocal,
+    BatchSessionLocal,
     TestCreatorBrandPartnershipPost,
     engine,
 )
@@ -137,7 +137,7 @@ def main() -> None:
     parser.add_argument("--headed", action="store_true", help="Show the browser window.")
     parser.add_argument("--dry-run", action="store_true", help="List what would be checked, change nothing.")
     args = parser.parse_args()
-    with SessionLocal() as db:
+    with BatchSessionLocal() as db:
         run(db, limit=args.limit, recheck=args.recheck, brand_id=args.brand_id, headed=args.headed, dry_run=args.dry_run)
 
 

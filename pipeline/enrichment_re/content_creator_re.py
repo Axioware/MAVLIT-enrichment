@@ -60,6 +60,7 @@ from pipeline.db import (
     ContentCreatorRE,
     InstagramUser,
     Prompt,
+    BatchSessionLocal,
     SessionLocal,
     TestCreatorBrandPartnershipPost,
     engine,
@@ -688,7 +689,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         processed, brand_ids = enrich_content_creator_re(
             db, limit=args.limit, creator_ids=args.creator_ids, niche=args.niche,

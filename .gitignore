@@ -1,6 +1,8 @@
-# Environment
+# Environment: every real env file stays out of git; only the two templates are tracked
 .env
-.env.migrate
+.env.*
+!.env.example
+!.env.migrate.example
 
 # Python
 __pycache__/
@@ -47,6 +49,9 @@ logs/
 production_dump/
 *.dump
 *.sql.gz
+**/*.dump
+**/*.sql.gz
+**/*.pgdump
 brands_without_both_verified_contact.csv
 rate_csv
 *.csv

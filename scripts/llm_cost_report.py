@@ -89,7 +89,7 @@ def main() -> int:
         datetime.fromisoformat(args.since).replace(tzinfo=timezone.utc)
         if args.since else datetime.now(timezone.utc) - timedelta(days=args.days)
     )
-    engine = create_engine(DATABASE_URL)
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=1, max_overflow=0)
     with engine.connect() as conn:
         exists = conn.execute(text("SELECT to_regclass('public.llm_usage')")).scalar()
         if not exists:

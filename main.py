@@ -4,7 +4,7 @@ import sys
 
 from sqlalchemy import text
 
-from pipeline.db import Base, SessionLocal, engine
+from pipeline.db import Base, BatchSessionLocal, engine
 from pipeline.seed import run_seed
 
 logging.basicConfig(
@@ -43,7 +43,7 @@ def main():
 
     ensure_tables()
 
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         inserted = run_seed(
             niche=args.niche,

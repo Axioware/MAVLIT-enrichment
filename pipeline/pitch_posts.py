@@ -80,6 +80,7 @@ def _scrape_posts(db: Session, creator: CreatorProfile, urls: dict[str, str]) ->
     """
     if not urls or not APIFY_TOKEN:
         return {}
+    db.commit()   # end the read transaction first: an Apify run can take minutes
     try:
         items = run_apify_actor(
             _ACTOR_ID,

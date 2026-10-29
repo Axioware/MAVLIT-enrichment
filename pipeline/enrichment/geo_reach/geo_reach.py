@@ -104,7 +104,7 @@ from pipeline.db import (
     BrandRaw,
     ContentCreatorRE,
     InstagramPost,
-    SessionLocal,
+    BatchSessionLocal,
     TestCreatorBrandPartnershipPost,
 )
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
@@ -865,7 +865,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         updated = enrich_geo_reach(
             db, limit=args.limit, brand_id=args.brand_id, niche=args.niche, creator_niche=args.creator_niche,

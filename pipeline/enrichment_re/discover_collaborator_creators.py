@@ -87,7 +87,7 @@ from pipeline.db import (
     FacebookBrandedContentCheck,
     InstagramPost,
     InstagramUser,
-    SessionLocal,
+    BatchSessionLocal,
     TestCreatorBrandPartnershipPost,
     engine,
 )
@@ -617,7 +617,7 @@ def main() -> int:
             parser.error("--user-type must be one of: " + ", ".join(_USER_TYPES))
         args.user_type = user_type
 
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         if args.limit is not None:
             summary = run(db, args.limit, dry_run=args.dry_run,

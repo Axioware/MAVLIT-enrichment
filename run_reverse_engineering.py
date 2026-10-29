@@ -58,7 +58,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from pipeline.db import BrandRaw, SessionLocal
+from pipeline.db import BrandRaw, BatchSessionLocal
 from pipeline.helpers.gpt_llm import LLMUnavailableError
 from pipeline.enrichment.initial_brand_scoring import run_brand_scoring
 from pipeline.enrichment.instagram_posts import enrich_instagram_posts
@@ -243,7 +243,7 @@ def run_instagram_users_per_brand(label: str, db, brand_ids: set[int], batch_lim
 
 
 def main() -> None:
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         brand_ids = run_content_creator_re_fully(db, batch_limit=1)
         if not brand_ids:

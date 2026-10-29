@@ -1,0 +1,11 @@
+# Used by the gitleaks CI step (.github/workflows/secret-scan.yml) and the pre-commit hook (.pre-commit-config.yaml).
+title = "MAVLIT gitleaks rules"
+
+[extend]
+useDefault = true   # gitleaks' built-in rules
+
+[[rules]]
+id = "apify-api-token"
+description = "Apify API token"
+regex = '''apify_api_[A-Za-z0-9]{20,}'''
+keywords = ["apify_api_"]

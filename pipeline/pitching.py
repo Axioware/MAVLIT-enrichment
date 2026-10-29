@@ -314,6 +314,7 @@ def generate_pitch(
                   past_brand_partnership=past_brand_partnership, content_link=content_link)
     built = _build_pitch_prompt(db, creator, is_custom=is_custom, brand_id=brand_id,
                                 custom_brand_name=custom_brand_name, **fields)
+    db.commit()   # end the read transaction first: no idle-in-transaction session while the LLM runs
     with llm_usage_scope(creator.id, "pitch"):
         pitch_text = call_gpt_text(built["prompt"], context=f"pitch for creator_id={creator.id} brand={built['brand_name']}")
     if not pitch_text:
@@ -350,6 +351,7 @@ def stream_pitch(
     built = _build_pitch_prompt(db, creator, is_custom=is_custom, brand_id=brand_id,
                                 custom_brand_name=custom_brand_name, post_details=post_details, **fields)
     parts: list[str] = []
+    db.commit()   # the stream can run for a minute or more: do not keep a transaction open meanwhile
     for piece in stream_gpt_text(
         built["prompt"], context=f"pitch for creator_id={creator.id} brand={built['brand_name']}",
         scope=(creator.id, "pitch"),

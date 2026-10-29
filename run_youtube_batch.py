@@ -41,7 +41,7 @@ load_dotenv()
 
 from sqlalchemy import text
 
-from pipeline.db import BrandRaw, SessionLocal
+from pipeline.db import BrandRaw, BatchSessionLocal
 
 # Imported as a module (not "from ... import enrich_youtube_sponsorships")
 # because quota_fully_exhausted mutates at runtime — a plain `from`-import
@@ -74,7 +74,7 @@ _QUERY = """
 
 
 def main() -> None:
-    db = SessionLocal()
+    db = BatchSessionLocal()
     brands = [(r[0], r[1]) for r in db.execute(text(_QUERY)).all()]
     logger.info("Resolved %d brand(s) to process", len(brands))
 

@@ -36,7 +36,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from pipeline.db import BrandProfile, SessionLocal
+from pipeline.db import BrandProfile, BatchSessionLocal
 from pipeline.enrichment.brand_signals import compute_sponsorship_activity
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s")
@@ -54,7 +54,7 @@ def _recompute_profiles(db) -> int:
 
 
 def main() -> None:
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         recomputed_count = _recompute_profiles(db)
         logger.info("Weekly meta ads refresh: recomputed sponsorship activity for %d brand profiles", recomputed_count)

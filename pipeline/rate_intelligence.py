@@ -383,6 +383,7 @@ def estimate_rate(
         deliverable_type=deliverable_type, exclusivity=exclusivity, usage=usage, duration_months=duration_months,
         prompt=prompt, status="ok",
     )
+    db.commit()   # last step before the call, nothing is read in between: no idle-in-transaction session while the LLM runs
     try:
         with llm_usage_scope(creator.id, "rate_estimate"), capture_llm_usage() as calls:
             result = call_gpt_json(prompt, context=f"rate estimate for creator_id={creator.id} brand={name!r}")

@@ -88,7 +88,7 @@ def generate_csv() -> tuple[int, int]:
     if not query_vector:
         raise RuntimeError("Failed to embed the MAVLIT test user profile")
 
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=1, max_overflow=0)
     try:
         with engine.connect() as connection:
             creator_count = int(

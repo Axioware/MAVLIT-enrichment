@@ -66,7 +66,7 @@ from pipeline.db import (
     BrandProfile,
     BrandRaw,
     InitialBrandScore,
-    SessionLocal,
+    BatchSessionLocal,
 )
 
 # Imported as a module (not "from ... import enrich_youtube_sponsorships")
@@ -369,7 +369,7 @@ def drain_brand_signals(label: str, db, batch_limit: int = 500) -> None:
 
 
 def main(niche: str | None = None, limit: int | None = None) -> None:
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         if niche:
             scoped_limit = limit or 50

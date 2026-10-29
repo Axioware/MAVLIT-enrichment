@@ -74,7 +74,7 @@ def generate_csv() -> tuple[int, int]:
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL is not set")
 
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=1, max_overflow=0)
     try:
         with engine.connect() as connection:
             niche_count = int(connection.execute(COUNT_QUERY).scalar_one())

@@ -56,6 +56,7 @@ def review_contract(
     """
     values = _deal_values(brand_name, deliverable_type, exclusivity, usage, duration_months)
     prompt = fill_template(_get_contract_advice_prompt(db), contract_text=contract_text, **values)
+    db.commit()   # end the read transaction first: no idle-in-transaction session while the LLM runs
     with llm_usage_scope(creator.id, "contract_advice"):
         result = call_gpt_json(prompt, context=f"contract advice for creator_id={creator.id}")
     if not isinstance(result, dict) or not result:

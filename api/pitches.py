@@ -1,8 +1,10 @@
 import json
+import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
@@ -19,6 +21,7 @@ from pipeline.helpers.gpt_llm import LLMUnavailableError
 from pipeline.own_brand import claim_followup, run_followup
 from pipeline.pitching import generate_pitch, stream_pitch
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pitches", tags=["pitches"])
 
 _ALLOWED_STATUSES = {"generated", "sent", "negotiating", "closed_won", "closed_lost", "declined"}
@@ -93,6 +96,7 @@ def stream_pitch_endpoint(
         raise HTTPException(status_code=400, detail="brand_id is required for a non-custom pitch")
     elif not db.query(BrandRaw.id).filter(BrandRaw.id == body.brand_id).first():
         raise HTTPException(status_code=404, detail=f"brand_id={body.brand_id} not found")
+    db.commit()   # the request session only validated; end its transaction so it is not open for the whole stream
     creator_id = current_user.id
     followups: list[str] = []   # filled once the pitch is saved; run after the response has been sent
 
@@ -126,6 +130,10 @@ def stream_pitch_endpoint(
                         yield _sse({"type": "done", "pitch": json.loads(pitch_to_response(value).model_dump_json())})
             except (LLMUnavailableError, RuntimeError, ValueError) as exc:
                 yield _sse({"type": "error", "detail": str(exc)})
+            except DBAPIError:
+                # the response has already started, so no 503: report it in-stream without the SQL text
+                logger.exception("Pitch stream database error for creator_id=%s", creator_id)
+                yield _sse({"type": "error", "detail": "Database busy, retry"})
 
     return StreamingResponse(
         events(),

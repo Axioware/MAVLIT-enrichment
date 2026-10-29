@@ -1,0 +1,6 @@
+# Install once:  pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks   # scans the staged changes with .gitleaks.toml

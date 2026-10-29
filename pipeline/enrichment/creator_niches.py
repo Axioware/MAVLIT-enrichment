@@ -19,7 +19,7 @@ load_dotenv()
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from pipeline.db import CreatorNiche, InstagramUser, Prompt, SessionLocal
+from pipeline.db import CreatorNiche, InstagramUser, Prompt, BatchSessionLocal
 from pipeline.helpers.gpt_llm import LLMUnavailableError, call_gpt_json, fill_template
 from pipeline.helpers.prompts import (
     CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT,
@@ -212,7 +212,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.batch_size < 1 or args.retries < 1:
         parser.error("--batch-size and --retries must be positive")
-    db = SessionLocal()
+    db = BatchSessionLocal()
     try:
         created = run_creator_niches(
             db,

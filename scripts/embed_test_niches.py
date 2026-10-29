@@ -96,7 +96,7 @@ def run(force: bool, batch_size: int) -> int:
         logger.error("DATABASE_URL is not set")
         return 1
 
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=1, max_overflow=0)
     table = build_table()
     try:
         ensure_embedding_column(engine)
