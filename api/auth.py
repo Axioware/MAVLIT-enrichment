@@ -20,7 +20,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _ALGORITHM  = "HS256"
-_TOKEN_DAYS = 7
+
+
+def token_lifetime() -> timedelta:
+    """How long a login lasts (config.ACCESS_TOKEN_DAYS): used for both the JWT exp and the cookie max_age, so they cannot drift apart."""
+    return timedelta(days=config.ACCESS_TOKEN_DAYS)
 
 MIN_PASSWORD_LENGTH = 12
 
@@ -37,7 +41,7 @@ def _cookie_attributes() -> dict:
 
 
 def _set_login_cookie(response: Response, token: str) -> None:
-    response.set_cookie("access_token", token, max_age=60 * 60 * 24 * _TOKEN_DAYS, **_cookie_attributes())
+    response.set_cookie("access_token", token, max_age=int(token_lifetime().total_seconds()), **_cookie_attributes())
 
 
 def _clear_login_cookie(response: Response) -> None:
@@ -54,7 +58,7 @@ class LoginRequest(BaseModel):
 def _make_jwt(user_id: int, email: str, token_version: int = 0) -> str:
     now = datetime.now(timezone.utc)
     return jwt.encode(
-        {"sub": str(user_id), "email": email, "iat": now, "exp": now + timedelta(days=_TOKEN_DAYS), "tv": int(token_version or 0)},
+        {"sub": str(user_id), "email": email, "iat": now, "exp": now + token_lifetime(), "tv": int(token_version or 0)},
         JWT_SECRET,
         algorithm=_ALGORITHM,
     )

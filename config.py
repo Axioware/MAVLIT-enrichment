@@ -129,3 +129,11 @@ if COOKIE_SAMESITE not in ("lax", "strict", "none"):
 if COOKIE_SAMESITE == "none" and not IS_PRODUCTION:
     raise RuntimeError("COOKIE_SAMESITE=none needs ENVIRONMENT=production (browsers drop SameSite=None cookies that are not Secure)")
 COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN", "").strip() or None
+
+# How long a login lasts, in days: the single source for the JWT exp claim and the access_token cookie max_age (api/auth.py).
+try:
+    ACCESS_TOKEN_DAYS = int(os.getenv("ACCESS_TOKEN_DAYS", "30").strip() or "30")
+except ValueError:
+    raise RuntimeError("ACCESS_TOKEN_DAYS must be a whole number of days")
+if not 1 <= ACCESS_TOKEN_DAYS <= 365:
+    raise RuntimeError("ACCESS_TOKEN_DAYS must be between 1 and 365")

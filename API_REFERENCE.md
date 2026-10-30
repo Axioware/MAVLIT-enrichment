@@ -11,7 +11,7 @@ Backend reference for the frontend build: brand detail, saved brands, pitching, 
   ```
 - If the API and frontend are on different origins, the frontend origin must be in the backend's `FRONTEND_ORIGINS` env var (CORS), and requests will be treated as cross-site (`SameSite=None; Secure` in production).
 - Every endpoint below returns **401** if the `access_token` cookie is missing, invalid, expired, or the user is inactive.
-- Session length: 7 days from login.
+- Session length: 30 days from login (ACCESS_TOKEN_DAYS).
 
 ### `POST /auth/login`
 Body:

@@ -60,7 +60,7 @@ def _client(api_app, **kw):
 def _config_import(**env):
     """Import config in a fresh interpreter with exactly this environment (no .env): returns (returncode, stderr)."""
     full_env = {k: v for k, v in os.environ.items() if k not in ("JWT_SECRET", "ADMIN_SESSION_SECRET", "ADMIN_PASSKEY", "OPERATOR_PASSKEY",
-                                                                  "ENVIRONMENT", "COOKIE_SAMESITE", "COOKIE_DOMAIN")}
+                                                                  "ENVIRONMENT", "COOKIE_SAMESITE", "COOKIE_DOMAIN", "ACCESS_TOKEN_DAYS")}
     full_env.update({"DATABASE_URL": "postgresql+psycopg2://nobody:nobody@127.0.0.1:1/unreachable", **env})
     prelude = "import dotenv; dotenv.load_dotenv = lambda *a, **k: False\n"
     result = subprocess.run([sys.executable, "-c", prelude + "import config; print(config.COOKIE_SAMESITE)"], cwd=ROOT, env=full_env,
@@ -169,7 +169,33 @@ class CookieAttributes(unittest.TestCase):
         auth._set_login_cookie(response, "token")
         attrs = self._attributes(response)
         self.assertEqual(attrs, {"path": "/", "httponly": True, "samesite": "lax"})
-        self.assertIn("Max-Age=604800", response.headers["set-cookie"])
+        self.assertIn("Max-Age=2592000", response.headers["set-cookie"], "30 days by default")
+
+    def test_jwt_exp_and_cookie_max_age_match_and_follow_one_setting(self):
+        import api.auth as auth
+        for days in (30, 7, 90):
+            with self.subTest(days=days), mock.patch.object(config, "ACCESS_TOKEN_DAYS", days):
+                response = Response()
+                token = auth._make_jwt(1, "a@example.test", 0)
+                auth._set_login_cookie(response, token)
+                claims = jwt.get_unverified_claims(token)
+                max_age = int(self._attributes_with_age(response)["max-age"])
+                self.assertEqual(claims["exp"] - claims["iat"], max_age)
+                self.assertEqual(max_age, days * 86400)
+
+    def test_access_token_days_setting(self):
+        self.assertEqual(config.ACCESS_TOKEN_DAYS, 30)
+        script_ok = _config_import(**VALID, ACCESS_TOKEN_DAYS="14")
+        self.assertEqual(script_ok[0], 0)
+        for bad in ("abc", "0", "-3", "400"):
+            rc, err, _ = _config_import(**VALID, ACCESS_TOKEN_DAYS=bad)
+            self.assertNotEqual(rc, 0, bad)
+            self.assertIn("ACCESS_TOKEN_DAYS", err)
+
+    @staticmethod
+    def _attributes_with_age(response: Response) -> dict:
+        parts = [p.strip() for p in response.headers["set-cookie"].split(";")]
+        return {p.split("=", 1)[0].lower(): (p.split("=", 1)[1] if "=" in p else True) for p in parts[1:]}
 
     def test_the_delete_uses_identical_attributes(self):
         import api.auth as auth
