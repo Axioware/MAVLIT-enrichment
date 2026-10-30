@@ -4,6 +4,9 @@ from typing import Literal
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
+import hashlib
+import hmac
+
 import wtforms
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,13 +39,15 @@ from api.own_brands import router as own_brands_router
 from api.pitches import router as pitches_router
 from api.saved_brands import router as saved_brands_router
 from api.schemas import CreatorProfileResponse
+from api import attempt_limits
+import config
 from api.operator import MIN_RECOMMENDED_LENGTH, allow_unauthenticated_admin, operator_configured, passkey, passkey_matches, require_operator
 from api.settings import RUN_MIGRATIONS, drop_migration_credentials
 from api.schemas import profile_to_response as _profile_to_response
 from config import (
     FRONTEND_ORIGINS,
+    ADMIN_SESSION_SECRET,
     IS_PRODUCTION,
-    JWT_SECRET,
     POSTHOG_HOST,
     POSTHOG_PROJECT_TOKEN,
 )
@@ -168,6 +173,34 @@ if FRONTEND_ORIGINS:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+
+# --- CSRF -----------------------------------------------------------------------------------------------------------------------------
+# A browser sends the login cookie with a request that another website triggers. For cookie-authenticated unsafe methods the request must
+# therefore come from this site or a configured frontend: with an Origin header it has to be our own origin or one of FRONTEND_ORIGINS; without
+# one, a browser that says Sec-Fetch-Site: cross-site is refused. Requests with neither header (curl, servers) carry no ambient cookie to abuse.
+_UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+# No cookie involved: /health*, the public sign-up (called from the landing page on another site) and the operator endpoints (Bearer passkey).
+_CSRF_EXEMPT_PREFIXES = ("/health", "/early-access", "/seed", "/enrich/signals", "/score/brands", "/content-creator-re/bulk-add")
+
+
+def _origin_allowed(request) -> bool:
+    origin = request.headers.get("origin")
+    if origin is None:
+        return request.headers.get("sec-fetch-site", "").lower() != "cross-site"
+    origin = origin.strip().rstrip("/")
+    if origin in FRONTEND_ORIGINS:
+        return True
+    host = (request.headers.get("host") or "").lower()
+    from urllib.parse import urlparse
+    return bool(host) and urlparse(origin).netloc.lower() == host   # our own origin; "null" and anything else is refused
+
+
+@app.middleware("http")
+async def csrf_origin_check(request, call_next):
+    if request.method in _UNSAFE_METHODS and not request.url.path.startswith(_CSRF_EXEMPT_PREFIXES) and not _origin_allowed(request):
+        return JSONResponse(status_code=403, content={"detail": "Cross-site request refused"})
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -768,6 +801,7 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
         CreatorProfile.instagram_excluded_categories,
         CreatorProfile.youtube_sub_niches,
         CreatorProfile.youtube_excluded_categories,
+        CreatorProfile.token_version,   # managed by the code below, not typed in
     ]
     form_overrides   = {"password_hash": wtforms.PasswordField}
     form_labels      = {"password_hash": "Password"}
@@ -776,13 +810,27 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
 
     async def on_model_change(self, data: dict, model, is_created: bool, request) -> None:
         plaintext = (data.get("password_hash") or "").strip()
+        revoke_sessions = False
         if plaintext:
-            data["password_hash"] = hash_password(plaintext)
+            data["password_hash"] = hash_password(plaintext)   # a ValueError (too long for bcrypt) is shown by SQLAdmin as the form error
+            revoke_sessions = True
         elif is_created:
             raise ValueError("Password is required when creating a creator profile")
         else:
             # Blank on edit — leave the existing hash untouched.
             data.pop("password_hash", None)
+        if "is_active" in data and not is_created and bool(data["is_active"]) != bool(model.is_active):
+            revoke_sessions = True   # deactivated or reactivated: tokens issued before must not come back to life
+        if revoke_sessions and not is_created:
+            data["token_version"] = int(model.token_version or 0) + 1   # every login token issued so far stops working
+
+def _admin_fingerprint() -> str:
+    """HMAC(ADMIN_SESSION_SECRET, ADMIN_PASSKEY): stored in the admin session, compared on every request; the passkey itself is never stored."""
+    return hmac.new(config.ADMIN_SESSION_SECRET.encode("utf-8"), (passkey() or "").encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+ADMIN_SESSION_SECONDS = 8 * 60 * 60
+
 
 class AdminAuth(AuthenticationBackend):
     """
@@ -796,10 +844,14 @@ class AdminAuth(AuthenticationBackend):
     succeeds, and a session only counts while a passkey is still configured.
     """
     async def login(self, request: Request) -> bool:
+        attempt_limits.check("admin", request)   # HTTP 429 while this client is locked out (5 failures in 15 minutes)
         form = await request.form()
         if not passkey_matches(str(form.get("password") or "")):   # constant time; false when no passkey is configured
+            attempt_limits.failed("admin", request)
             return False
+        attempt_limits.succeeded("admin", request)
         request.session["admin_authenticated"] = True
+        request.session["admin_fp"] = _admin_fingerprint()
         return True
 
     async def logout(self, request: Request) -> bool:
@@ -807,7 +859,9 @@ class AdminAuth(AuthenticationBackend):
         return True
 
     async def authenticate(self, request: Request) -> bool:
-        return bool(request.session.get("admin_authenticated")) and operator_configured()
+        # The session only counts while it was made with the CURRENT passkey and session secret: changing either ends every admin session.
+        return (bool(request.session.get("admin_authenticated")) and operator_configured()
+                and hmac.compare_digest(str(request.session.get("admin_fp") or ""), _admin_fingerprint()))
 
 # tables
 
@@ -815,7 +869,7 @@ class AdminAuth(AuthenticationBackend):
 # nothing can log in, so /admin is unreachable. The only way to leave it open is ADMIN_ALLOW_UNAUTHENTICATED=1 for local development,
 # which is ignored when ENVIRONMENT=production (api/operator.py).
 def _admin_authentication_backend():
-    backend = AdminAuth(secret_key=JWT_SECRET, https_only=IS_PRODUCTION)
+    backend = AdminAuth(secret_key=ADMIN_SESSION_SECRET, https_only=IS_PRODUCTION, max_age=ADMIN_SESSION_SECONDS)
     if operator_configured():
         if len(passkey()) < MIN_RECOMMENDED_LENGTH:
             logger.warning("ADMIN_PASSKEY is shorter than %d characters; use a long random value", MIN_RECOMMENDED_LENGTH)

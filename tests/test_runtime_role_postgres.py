@@ -573,7 +573,7 @@ class RuntimeRole(unittest.TestCase):
             db.commit()
             brand_id = brand.id
         env = {**os.environ, "DATABASE_URL": str(self.url.set(username=APP, password=None).render_as_string(hide_password=False)),
-               "RUN_MIGRATIONS": "0", "JWT_SECRET": "smoke-secret", "ADMIN_PASSKEY": "smoke-admin-passkey-0123456789", "ENVIRONMENT": "development"}
+               "RUN_MIGRATIONS": "0", "JWT_SECRET": os.environ["JWT_SECRET"], "ADMIN_PASSKEY": "smoke-admin-passkey-0123456789", "ENVIRONMENT": "development"}
         env.pop("MIGRATION_DATABASE_URL", None)
         result = subprocess.run([sys.executable, str(ROOT / "tests" / "_runtime_smoke.py"), email, password, str(brand_id)],
                                 cwd=ROOT, env=env, capture_output=True, text=True, timeout=300)

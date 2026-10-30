@@ -691,6 +691,12 @@ class CreatorProfile(Base):
     id = Column(Integer, primary_key=True)
     email         = Column(Text, unique=True, nullable=False)
     password_hash = Column(Text, nullable=True)
+    # Session revocation (api/auth.py): every login token carries the value it was issued with, and a token whose value no longer matches is
+    # refused. Bumped by logout-all, a password change and an admin password / is_active change.
+    token_version = Column(Integer, nullable=False, server_default="0", default=0)
+    # True: the creator must set a new password before anything but /auth/me, /auth/change-password and /auth/logout works (e.g. a password the
+    # admin typed for them).
+    must_change_password = Column(Boolean, nullable=False, server_default="false", default=False)
     is_active     = Column(Boolean, nullable=False, server_default="true", default=True)
 
     #  Identity

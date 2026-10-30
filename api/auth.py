@@ -3,15 +3,17 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from jose import JWTError, jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from api import login_limits
 from api.client_ip import client_ip
 from api.schemas import CreatorProfileResponse, profile_to_response
-from config import IS_PRODUCTION, JWT_SECRET
+import config
+from config import JWT_SECRET
 from pipeline.db import CreatorProfile, get_db
-from pipeline.helpers.passwords import hash_password, verify_password
+from pipeline.helpers.passwords import hash_password, needs_rehash, verify_password
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +22,26 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _ALGORITHM  = "HS256"
 _TOKEN_DAYS = 7
 
-# SameSite=None is required for a cross-origin frontend's fetch() calls
-# (credentials: 'include') to carry this cookie back to the API — but
-# browsers reject SameSite=None without Secure, so this only takes effect
-# in production (HTTPS). In dev (IS_PRODUCTION=false) this stays "lax" so
-# the same-origin frontend/*.html pages keep working over plain
-# http://localhost.
-_CROSS_SITE_SAMESITE = "none" if IS_PRODUCTION else "lax"
+MIN_PASSWORD_LENGTH = 12
+
+# Routes a creator who must change their password (must_change_password) may still call.
+_PASSWORD_CHANGE_ALLOWED = {"/auth/me", "/auth/change-password", "/auth/logout", "/auth/logout-all"}
+
+
+def _cookie_attributes() -> dict:
+    """
+    The attributes of the login cookie, read from config at call time. The delete uses exactly the same ones (a browser only removes a cookie
+    when name, domain and path match). SameSite comes from COOKIE_SAMESITE (default lax); secure is on in production.
+    """
+    return {"httponly": True, "secure": config.IS_PRODUCTION, "samesite": config.COOKIE_SAMESITE, "domain": config.COOKIE_DOMAIN, "path": "/"}
+
+
+def _set_login_cookie(response: Response, token: str) -> None:
+    response.set_cookie("access_token", token, max_age=60 * 60 * 24 * _TOKEN_DAYS, **_cookie_attributes())
+
+
+def _clear_login_cookie(response: Response) -> None:
+    response.delete_cookie("access_token", **_cookie_attributes())
 
 
 class LoginRequest(BaseModel):
@@ -36,20 +51,36 @@ class LoginRequest(BaseModel):
 
 #  JWT helpers
 
-def _make_jwt(user_id: int, email: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(days=_TOKEN_DAYS)
+def _make_jwt(user_id: int, email: str, token_version: int = 0) -> str:
+    now = datetime.now(timezone.utc)
     return jwt.encode(
-        {"sub": str(user_id), "email": email, "exp": expire},
+        {"sub": str(user_id), "email": email, "iat": now, "exp": now + timedelta(days=_TOKEN_DAYS), "tv": int(token_version or 0)},
         JWT_SECRET,
         algorithm=_ALGORITHM,
     )
 
 
 def _decode_jwt(token: str) -> dict:
+    """The claims of a valid token. Only HS256 is accepted ('none' and every other algorithm are refused), and exp, sub and iat must be present."""
     try:
-        return jwt.decode(token, JWT_SECRET, algorithms=[_ALGORITHM])
+        return jwt.decode(token, JWT_SECRET, algorithms=[_ALGORITHM], options={"require_exp": True, "require_sub": True, "require_iat": True})
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+def _user_for_claims(db: Session, payload: dict) -> CreatorProfile:
+    """The active user the claims belong to, if the token has not been revoked; otherwise HTTP 401 (never a 500 for a malformed claim)."""
+    try:
+        user_id = int(payload["sub"])
+        token_version = int(payload.get("tv", 0) or 0)   # a token from before revocation existed counts as version 0
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    user = db.query(CreatorProfile).filter(CreatorProfile.id == user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+    if token_version != int(user.token_version or 0):
+        raise HTTPException(status_code=401, detail="Your session has ended. Please sign in again.")
+    return user
 
 
 #  Auth dependency
@@ -59,10 +90,9 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> Creator
     token = request.cookies.get("access_token")
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    payload = _decode_jwt(token)
-    user = db.query(CreatorProfile).filter(CreatorProfile.id == int(payload["sub"])).first()
-    if not user or not user.is_active:
-        raise HTTPException(status_code=401, detail="User not found or inactive")
+    user = _user_for_claims(db, _decode_jwt(token))
+    if user.must_change_password and request.url.path not in _PASSWORD_CHANGE_ALLOWED:
+        raise HTTPException(status_code=403, detail={"code": "password_change_required", "message": "You must set a new password before you can continue."})
     return user
 
 
@@ -72,13 +102,9 @@ def get_current_user_optional(request: Request, db: Session = Depends(get_db)) -
     if not token:
         return None
     try:
-        payload = _decode_jwt(token)
+        return _user_for_claims(db, _decode_jwt(token))
     except HTTPException:
         return None
-    user = db.query(CreatorProfile).filter(CreatorProfile.id == int(payload["sub"])).first()
-    if not user or not user.is_active:
-        return None
-    return user
 
 
 def is_profile_complete(profile: CreatorProfile | dict | None) -> bool:
@@ -184,14 +210,10 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
         raise HTTPException(status_code=403, detail="This account has been deactivated")
 
     login_limits.clear_failures(db, email)
-    token = _make_jwt(user.id, user.email)
-    response.set_cookie(
-        "access_token", token,
-        httponly=True,
-        max_age=60 * 60 * 24 * _TOKEN_DAYS,
-        samesite=_CROSS_SITE_SAMESITE,
-        secure=IS_PRODUCTION,
-    )
+    if needs_rehash(stored_hash):   # the stored hash was made with a lower cost than today's: upgrade it now that the password is known
+        user.password_hash = hash_password(body.password)
+        db.commit()
+    _set_login_cookie(response, _make_jwt(user.id, user.email, user.token_version))
     return profile_to_response(user)
 
 
@@ -203,8 +225,58 @@ def me(current_user: CreatorProfile = Depends(get_current_user)):
 
 @router.post("/logout")
 def logout(response: Response):
-    """Clear the JWT cookie."""
-    # Must match the samesite/secure attributes it was set with, or some
-    # browsers treat this as a different cookie and leave the real one intact.
-    response.delete_cookie("access_token", samesite=_CROSS_SITE_SAMESITE, secure=IS_PRODUCTION)
+    """Clear the JWT cookie on this browser (other sessions stay valid: see /auth/logout-all)."""
+    # Must match every attribute it was set with, or some browsers treat this as a different cookie and leave the real one intact.
+    _clear_login_cookie(response)
     return {"message": "Logged out"}
+
+
+def _bump_token_version(db: Session, user: CreatorProfile) -> int:
+    """token_version + 1 in the database (one atomic UPDATE); every token issued before is refused from now on."""
+    new_version = db.execute(update(CreatorProfile).where(CreatorProfile.id == user.id).values(token_version=CreatorProfile.token_version + 1)
+                             .returning(CreatorProfile.token_version)).scalar_one()
+    user.token_version = new_version
+    return new_version
+
+
+@router.post("/logout-all")
+def logout_all(response: Response, db: Session = Depends(get_db), current_user: CreatorProfile = Depends(get_current_user)):
+    """Sign this account out everywhere: every token issued so far (on every device) stops working."""
+    _bump_token_version(db, current_user)
+    db.commit()
+    _clear_login_cookie(response)
+    return {"message": "Signed out everywhere"}
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=200)
+
+
+@router.post("/change-password", response_model=CreatorProfileResponse)
+def change_password(body: ChangePasswordRequest, request: Request, response: Response, db: Session = Depends(get_db),
+                    current_user: CreatorProfile = Depends(get_current_user)):
+    """
+    Needs the current password. Sets the new one (at least 12 characters), ends every other session (token_version + 1) and gives this
+    browser a fresh cookie. Wrong current passwords count towards the same lockout as failed logins.
+    """
+    email, ip = current_user.email.strip().lower(), client_ip(request)
+    wait = login_limits.locked_for_seconds(db, email, ip)
+    if wait:
+        raise HTTPException(status_code=429, detail="Too many failed attempts. Try again later.", headers={"Retry-After": str(wait)})
+    if not current_user.password_hash or not verify_password(body.current_password, current_user.password_hash):
+        login_limits.record_failure(db, email, ip)
+        raise HTTPException(status_code=400, detail="The current password is not correct")
+    if body.new_password == body.current_password:
+        raise HTTPException(status_code=400, detail="Choose a password different from the current one")
+    try:
+        new_hash = hash_password(body.new_password)
+    except ValueError as exc:   # longer than bcrypt's 72 bytes
+        raise HTTPException(status_code=422, detail=str(exc))
+    current_user.password_hash = new_hash
+    current_user.must_change_password = False
+    version = _bump_token_version(db, current_user)
+    db.commit()
+    login_limits.clear_failures(db, email)
+    _set_login_cookie(response, _make_jwt(current_user.id, current_user.email, version))
+    return profile_to_response(current_user)

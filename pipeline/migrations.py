@@ -695,6 +695,8 @@ def _apply_migrations(engine: Engine, lock_timeout_ms: int | None = None, grant_
         # sqladmin's auto-generated form doesn't force a value on every
         # edit (see CreatorProfileAdmin's on_model_change in this file).
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS password_hash TEXT",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false",
                 """
                 UPDATE prompts
                 SET name = 'creator_niche_description'

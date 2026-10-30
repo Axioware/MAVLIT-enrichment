@@ -18,9 +18,10 @@ import hmac
 import logging
 import os
 
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Request
 
 import config
+from api import attempt_limits
 
 logger = logging.getLogger(__name__)
 
@@ -44,17 +45,37 @@ def passkey_matches(candidate: str | None) -> bool:
     return hmac.compare_digest(candidate.encode("utf-8"), key.encode("utf-8"))
 
 
+def operator_key() -> str | None:
+    """The Bearer credential of the operator endpoints: OPERATOR_PASSKEY when it is set, otherwise (as before) ADMIN_PASSKEY."""
+    value = getattr(config, "OPERATOR_PASSKEY", "")
+    if isinstance(value, str) and value.strip():
+        return value
+    return passkey()
+
+
+def operator_key_matches(candidate: str | None) -> bool:
+    key = operator_key()
+    if key is None or not candidate or not candidate.strip():
+        return False
+    return hmac.compare_digest(candidate.encode("utf-8"), key.encode("utf-8"))
+
+
 def allow_unauthenticated_admin() -> bool:
     """Development escape hatch for /admin only; never honoured in production."""
     flag = os.getenv("ADMIN_ALLOW_UNAUTHENTICATED", "").strip().lower() in ("1", "true", "yes", "on")
     return flag and not config.IS_PRODUCTION
 
 
-def require_operator(authorization: str | None = Header(default=None)) -> None:
-    """FastAPI dependency for operator endpoints: Authorization: Bearer <ADMIN_PASSKEY>, else 401 (403 when no passkey is configured)."""
-    if passkey() is None:
-        logger.warning("Operator endpoint refused: ADMIN_PASSKEY is not configured, so operator access is disabled")
+def require_operator(request: Request, authorization: str | None = Header(default=None)) -> None:
+    """
+    FastAPI dependency for operator endpoints: Authorization: Bearer <OPERATOR_PASSKEY, or ADMIN_PASSKEY when that is not set>, else 401
+    (403 when no passkey is configured). Five failures within 15 minutes lock the client out (429, api/attempt_limits.py).
+    """
+    if operator_key() is None:
+        logger.warning("Operator endpoint refused: no operator passkey is configured, so operator access is disabled")
         raise HTTPException(status_code=403, detail="Operator access is not enabled")
+    attempt_limits.check("operator", request)
     scheme, _, token = (authorization or "").partition(" ")
-    if scheme.lower() != "bearer" or not passkey_matches(token.strip()):
+    if scheme.lower() != "bearer" or not operator_key_matches(token.strip()):
+        attempt_limits.failed("operator", request)
         raise HTTPException(status_code=401, detail="Operator credentials required", headers={"WWW-Authenticate": "Bearer"})

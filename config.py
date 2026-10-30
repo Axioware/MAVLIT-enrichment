@@ -88,13 +88,44 @@ FRONTEND_ORIGINS = [o.strip().rstrip("/") for o in os.getenv("FRONTEND_ORIGINS",
 JWT_SECRET = os.getenv("JWT_SECRET")
 if not JWT_SECRET:
     raise RuntimeError("JWT_SECRET is not set in environment")
+MIN_SECRET_LENGTH = 32
+if len(JWT_SECRET) < MIN_SECRET_LENGTH:   # never print the value
+    raise RuntimeError(f"JWT_SECRET must be at least {MIN_SECRET_LENGTH} characters (e.g. python -c 'import secrets; print(secrets.token_urlsafe(48))')")
+
+# Signs the /admin session cookie (SQLAdmin). A different secret from JWT_SECRET on purpose: one leak must not forge both user sessions and
+# admin sessions. Required, 32+ characters.
+ADMIN_SESSION_SECRET = os.getenv("ADMIN_SESSION_SECRET")
+if not ADMIN_SESSION_SECRET:
+    raise RuntimeError("ADMIN_SESSION_SECRET is not set in environment")
+if len(ADMIN_SESSION_SECRET) < MIN_SECRET_LENGTH:
+    raise RuntimeError(f"ADMIN_SESSION_SECRET must be at least {MIN_SECRET_LENGTH} characters")
+if ADMIN_SESSION_SECRET == JWT_SECRET:
+    raise RuntimeError("ADMIN_SESSION_SECRET must differ from JWT_SECRET")
 
 # /admin (sqladmin) gate — a single shared passkey, not a per-person account.
 # Left empty, /admin is unprotected — set this before deploying anywhere
 # reachable outside your own machine. See AdminAuth in api/app.py.
 ADMIN_PASSKEY = os.getenv("ADMIN_PASSKEY", "")
+# Optional separate credential for the operator endpoints (/seed, /enrich/signals, /score/brands, /content-creator-re/bulk-add), sent as
+# "Authorization: Bearer <OPERATOR_PASSKEY>". Unset: ADMIN_PASSKEY keeps working there as before. Set: only this one does.
+OPERATOR_PASSKEY = os.getenv("OPERATOR_PASSKEY", "")
 
 # Controls cookie Secure flag + HSTS header. Set ENVIRONMENT=production when
 # deploying behind HTTPS — cookies must never be sent unencrypted in prod.
 ENVIRONMENT   = os.getenv("ENVIRONMENT", "development").strip().lower()
 IS_PRODUCTION = ENVIRONMENT == "production"
+
+MIN_PASSKEY_LENGTH_PRODUCTION = 16
+for _name, _value in (("ADMIN_PASSKEY", ADMIN_PASSKEY), ("OPERATOR_PASSKEY", OPERATOR_PASSKEY)):
+    if IS_PRODUCTION and _value.strip() and len(_value) < MIN_PASSKEY_LENGTH_PRODUCTION:   # an unset / blank one keeps its endpoints closed
+        raise RuntimeError(f"{_name} must be at least {MIN_PASSKEY_LENGTH_PRODUCTION} characters when ENVIRONMENT=production")
+
+# Cookie attributes of the login cookie (api/auth.py). The default is Lax, which is right once the frontend and the API are on the same site
+# (e.g. app.mavlit.com and api.mavlit.com). A frontend on a different site needs COOKIE_SAMESITE=none (production only: it requires Secure).
+# COOKIE_DOMAIN is unset by default (a host-only cookie); set it, e.g. ".mavlit.com", only if subdomains must share the login.
+COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax").strip().lower() or "lax"
+if COOKIE_SAMESITE not in ("lax", "strict", "none"):
+    raise RuntimeError("COOKIE_SAMESITE must be lax, strict or none")
+if COOKIE_SAMESITE == "none" and not IS_PRODUCTION:
+    raise RuntimeError("COOKIE_SAMESITE=none needs ENVIRONMENT=production (browsers drop SameSite=None cookies that are not Secure)")
+COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN", "").strip() or None

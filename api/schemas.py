@@ -10,6 +10,7 @@ class CreatorProfileResponse(BaseModel):
     id:         int
     email:      str
     is_active:  bool
+    must_change_password: bool = False   # true: only /auth/me, /auth/change-password and /auth/logout work until a new password is set
 
     full_name:        str | None = None
     creator_handle:   str | None = None
@@ -79,6 +80,7 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         id=row.id,
         email=row.email,
         is_active=row.is_active,
+        must_change_password=bool(getattr(row, "must_change_password", False)),
         full_name=row.full_name,
         creator_handle=row.creator_handle,
         age=row.age,

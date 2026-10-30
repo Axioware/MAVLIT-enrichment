@@ -226,7 +226,7 @@ class OperatorEndpoints(unittest.TestCase):
 
 def _run_admin_scenario(env: dict, script: str) -> dict:
     """A fresh interpreter, because whether /admin is protected is decided when the app is imported."""
-    full_env = {**os.environ, "DATABASE_URL": "postgresql+psycopg2://nobody:nobody@127.0.0.1:1/unreachable", "JWT_SECRET": "test-jwt-secret",
+    full_env = {**os.environ, "DATABASE_URL": "postgresql+psycopg2://nobody:nobody@127.0.0.1:1/unreachable", "JWT_SECRET": os.environ["JWT_SECRET"],
                 "RUN_MIGRATIONS": "", "ADMIN_PASSKEY": "", "ADMIN_ALLOW_UNAUTHENTICATED": "", "ENVIRONMENT": "development", **env}
     result = subprocess.run([sys.executable, "-c", script], cwd=ROOT, env=full_env, capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stderr[-2000:]
