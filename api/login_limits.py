@@ -45,6 +45,16 @@ def locked_for_seconds(db: Session, email: str, ip: str) -> int:
     return max(wait, 0)
 
 
+def hits_locked_for_seconds(db: Session, key: str, limit: int, window_minutes: int) -> int:
+    """For an action limited to `limit` uses per `window_minutes` under a private key (e.g. "logout-all:<user id>"): 0 if allowed, else the wait."""
+    since = _now() - timedelta(minutes=window_minutes)
+    times = [t for (t,) in db.query(LoginFailure.created_at).filter(LoginFailure.email_hash == email_hash(key), LoginFailure.created_at > since)
+             .order_by(LoginFailure.created_at.desc()).limit(limit).all()]
+    if len(times) < limit:
+        return 0
+    return max(int((times[-1] + timedelta(minutes=window_minutes) - _now()).total_seconds()) + 1, 1)
+
+
 def record_failure(db: Session, email: str, ip: str) -> None:
     db.add(LoginFailure(email_hash=email_hash(email), ip=ip))
     db.execute(delete(LoginFailure).where(LoginFailure.created_at < _now() - timedelta(days=KEEP_DAYS)))

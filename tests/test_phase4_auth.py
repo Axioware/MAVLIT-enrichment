@@ -458,6 +458,50 @@ class WithDatabase(unittest.TestCase):
         self.assertEqual(again.get("/auth/me").status_code, 200)
         self.assertEqual(jwt.get_unverified_claims(self.token_of(again))["tv"], 1)
 
+    def test_logout_all_response_and_cookie(self):
+        client, _ = self.login()
+        out = client.post("/auth/logout-all")
+        self.assertEqual((out.status_code, out.json()), (200, {"status": "ok"}))
+        self.assertNotIn("a@example.test", out.text)
+        cookie = out.headers["set-cookie"].lower()
+        for part in ("access_token=", "max-age=0", "httponly", "samesite=lax", "path=/"):
+            self.assertIn(part, cookie)
+        set_ = Response()
+        import api.auth as auth
+        auth._set_login_cookie(set_, "t")
+        keep = lambda h: sorted(p.strip().lower() for p in h.split(";")[1:] if p.strip().split("=")[0].lower() in ("path", "samesite", "secure", "httponly", "domain"))
+        self.assertEqual(keep(out.headers["set-cookie"]), keep(set_.headers["set-cookie"]), "delete matches the set")
+
+    def test_logout_all_works_when_a_password_change_is_required(self):
+        client, _ = self.login(email="must@example.test")
+        self.assertEqual(client.get("/creator-profile/me").status_code, 403)
+        self.assertEqual(client.post("/auth/logout-all").status_code, 200)
+
+    def test_logout_all_without_a_session_is_401(self):
+        self.assertEqual(_client(self.api_app).post("/auth/logout-all").status_code, 401)
+        self.assertEqual(self.with_token("garbage").post("/auth/logout-all").status_code, 401)
+
+    def test_logout_all_origin_check(self):
+        client, _ = self.login()
+        with mock.patch.object(self.api_app, "FRONTEND_ORIGINS", ["https://mavlit.com"]):
+            self.assertEqual(client.post("/auth/logout-all", headers={"Origin": "https://evil.example"}).status_code, 403)
+            self.assertEqual(self.db_value("SELECT token_version FROM creator_profiles WHERE email = 'a@example.test'"), 0, "nothing happened")
+            self.assertEqual(client.post("/auth/logout-all", headers={"Origin": "https://mavlit.com"}).status_code, 200)
+
+    def test_logout_all_is_limited_per_user(self):
+        import api.auth as auth
+        client, _ = self.login()
+        other, _ = self.login(email="must@example.test")
+        for _ in range(auth.LOGOUT_ALL_LIMIT):
+            self.assertEqual(self.with_token(self.token_of(self.login()[0])).post("/auth/logout-all").status_code, 200)
+        fresh, _ = self.login()
+        blocked = fresh.post("/auth/logout-all")
+        self.assertEqual(blocked.status_code, 429)
+        self.assertIn("Retry-After", blocked.headers)
+        self.assertEqual(fresh.get("/auth/me").status_code, 200, "a refused call changes nothing")
+        self.assertEqual(self.db_value("SELECT token_version FROM creator_profiles WHERE email = 'a@example.test'"), auth.LOGOUT_ALL_LIMIT)
+        self.assertEqual(other.post("/auth/logout-all").status_code, 200, "another user is not affected")
+
     def test_a_stolen_token_dies_after_a_password_change(self):
         client, _ = self.login()
         stolen = self.token_of(client)

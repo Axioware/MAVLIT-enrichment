@@ -243,13 +243,22 @@ def _bump_token_version(db: Session, user: CreatorProfile) -> int:
     return new_version
 
 
+LOGOUT_ALL_LIMIT = 10          # uses per user ...
+LOGOUT_ALL_WINDOW_MINUTES = 60  # ... per hour (every call counts, kept in login_failures under a private key)
+
+
 @router.post("/logout-all")
-def logout_all(response: Response, db: Session = Depends(get_db), current_user: CreatorProfile = Depends(get_current_user)):
-    """Sign this account out everywhere: every token issued so far (on every device) stops working."""
+def logout_all(request: Request, response: Response, db: Session = Depends(get_db), current_user: CreatorProfile = Depends(get_current_user)):
+    """Sign this account out everywhere: every token issued so far (on every device) stops working. Returns no token and no user data."""
+    key = f"logout-all:{current_user.id}"
+    wait = login_limits.hits_locked_for_seconds(db, key, LOGOUT_ALL_LIMIT, LOGOUT_ALL_WINDOW_MINUTES)
+    if wait:
+        raise HTTPException(status_code=429, detail="Too many attempts, try again later.", headers={"Retry-After": str(wait)})
+    login_limits.record_failure(db, key, client_ip(request))   # commits
     _bump_token_version(db, current_user)
     db.commit()
     _clear_login_cookie(response)
-    return {"message": "Signed out everywhere"}
+    return {"status": "ok"}
 
 
 class ChangePasswordRequest(BaseModel):
