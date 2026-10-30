@@ -1,5 +1,9 @@
 import json
 import logging
+import os
+import queue
+import threading
+import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -8,6 +12,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from api import usage_limits
+from api.paging import MAX_OFFSET
 from api.auth import get_completed_user
 from api.contact_access import allow_contacts
 from api.schemas import (
@@ -25,6 +30,22 @@ from pipeline.pitching import generate_pitch, stream_pitch
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pitches", tags=["pitches"])
+
+def stream_deadline_seconds() -> int:
+    """PITCH_STREAM_DEADLINE_SECONDS (default 150): the longest a pitch stream may run, kept under the browser proxy's 180 s limit."""
+    raw = (os.environ.get("PITCH_STREAM_DEADLINE_SECONDS") or "").strip()
+    if not raw:
+        return 150
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"PITCH_STREAM_DEADLINE_SECONDS must be a whole number of seconds, got {raw!r}")
+    if value < 1:
+        raise ValueError(f"PITCH_STREAM_DEADLINE_SECONDS must be >= 1, got {value}")
+    return value
+
+
+stream_deadline_seconds()   # a bad setting stops the application at start
 
 PITCH_UNAVAILABLE = "Pitch generation is temporarily unavailable, try again"   # shown instead of any provider / internal error text
 
@@ -127,7 +148,11 @@ def stream_pitch_endpoint(
         for job_id in followups:
             run_followup(job_id)
 
-    def events():
+    cancel = threading.Event()
+    finished = object()   # the worker is done
+
+    def worker(out: "queue.Queue") -> None:
+        """Runs the pitch stream on its own thread and puts the SSE events (dicts) on `out`, so the response can give up at the deadline."""
         try:
             # its own session: the request's session may be closed before the stream ends
             with SessionLocal() as stream_db:
@@ -144,25 +169,49 @@ def stream_pitch_endpoint(
                         past_brand_partnership=body.past_brand_partnership,
                         content_link=body.content_link,
                     ):
+                        if cancel.is_set():   # the deadline passed or the browser left: stop reading from the LLM
+                            return
                         if kind == "status":
-                            yield _sse({"type": "status", "text": value})
+                            out.put({"type": "status", "text": value})
                         elif kind == "delta":
-                            yield _sse({"type": "delta", "text": value})
+                            out.put({"type": "delta", "text": value})
                         else:
                             job_id = claim_followup(stream_db, creator_id, value.brand_raw_id)
                             if job_id:
                                 followups.append(job_id)
-                            yield _sse({"type": "done", "pitch": json.loads(pitch_to_response(value).model_dump_json())})
+                            out.put({"type": "done", "pitch": json.loads(pitch_to_response(value).model_dump_json())})
                 except ValueError as exc:   # a brand that does not exist
-                    yield _sse({"type": "error", "detail": str(exc)})
+                    out.put({"type": "error", "detail": str(exc)})
                 except (LLMUnavailableError, RuntimeError) as exc:
                     logger.warning("Pitch stream failed for creator_id=%s: %s", creator_id, exc)
-                    yield _sse({"type": "error", "detail": PITCH_UNAVAILABLE})
+                    out.put({"type": "error", "detail": PITCH_UNAVAILABLE})
                 except DBAPIError:
                     # the response has already started, so no 503: report it in-stream without the SQL text
                     logger.exception("Pitch stream database error for creator_id=%s", creator_id)
-                    yield _sse({"type": "error", "detail": "Database busy, retry"})
+                    out.put({"type": "error", "detail": "Database busy, retry"})
+        except Exception:
+            logger.exception("Pitch stream crashed for creator_id=%s", creator_id)
+            out.put({"type": "error", "detail": PITCH_UNAVAILABLE})
         finally:
+            out.put(finished)
+
+    def events():
+        out: "queue.Queue" = queue.Queue()
+        deadline = time.monotonic() + stream_deadline_seconds()
+        threading.Thread(target=worker, args=(out,), name=f"pitch-stream-{creator_id}", daemon=True).start()
+        try:
+            while True:
+                try:
+                    item = out.get(timeout=max(deadline - time.monotonic(), 0))
+                except queue.Empty:
+                    logger.warning("Pitch stream for creator_id=%s hit the %ss deadline and was stopped", creator_id, stream_deadline_seconds())
+                    yield _sse({"type": "error", "detail": PITCH_UNAVAILABLE})
+                    return
+                if item is finished:
+                    return
+                yield _sse(item)
+        finally:
+            cancel.set()   # a worker still running stops at its next event
             usage_limits.release_lock(lock_bind, creator_id)
 
     return StreamingResponse(
@@ -274,7 +323,7 @@ def delete_pitch(
 @router.get("/me", response_model=PitchListResponse)
 def list_pitches(
     limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=MAX_OFFSET),
     db: Session = Depends(get_db),
     current_user: CreatorProfile = Depends(get_completed_user),
 ):

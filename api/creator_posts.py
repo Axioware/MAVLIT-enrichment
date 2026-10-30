@@ -1,3 +1,4 @@
+import os
 import time
 
 import httpx
@@ -119,22 +120,56 @@ _thumb_cache: dict[str, tuple[float, bytes, str]] = {}
 _THUMB_HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"}
 
 
+class ThumbnailTooLarge(Exception):
+    """The picture Instagram returned is larger than THUMBNAIL_MAX_BYTES."""
+
+
+def thumbnail_max_bytes() -> int:
+    raw = (os.environ.get("THUMBNAIL_MAX_BYTES") or "").strip()
+    if not raw:
+        return 2 * 1024 * 1024
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"THUMBNAIL_MAX_BYTES must be a whole number of bytes, got {raw!r}")
+    if value < 1024:
+        raise ValueError(f"THUMBNAIL_MAX_BYTES must be >= 1024, got {value}")
+    return value
+
+
+thumbnail_max_bytes()   # a bad setting stops the application at start
+
+
 def _fetch_thumbnail(code: str) -> tuple[bytes, str] | None:
+    """The picture and its type; None when there is none. Raises ThumbnailTooLarge above THUMBNAIL_MAX_BYTES (default 2 MB), without keeping it."""
     cached = _thumb_cache.get(code)
     if cached and time.time() - cached[0] < _THUMB_TTL:
         return cached[1], cached[2]
+    limit = thumbnail_max_bytes()
     try:
         # instagram.com/p/<code>/media/ redirects to the post's current picture (public posts only)
-        resp = httpx.get(f"https://www.instagram.com/p/{code}/media/?size=m", headers=_THUMB_HEADERS, timeout=10, follow_redirects=True)
+        with httpx.stream("GET", f"https://www.instagram.com/p/{code}/media/?size=m", headers=_THUMB_HEADERS, timeout=10, follow_redirects=True) as resp:
+            kind = resp.headers.get("content-type", "")
+            if resp.status_code != 200 or not kind.startswith("image/"):
+                return None
+            declared = resp.headers.get("content-length", "")
+            if declared.isdigit() and int(declared) > limit:
+                raise ThumbnailTooLarge()
+            chunks, size = [], 0
+            for chunk in resp.iter_bytes():
+                size += len(chunk)
+                if size > limit:   # also catches a missing or wrong Content-Length
+                    raise ThumbnailTooLarge()
+                chunks.append(chunk)
+            content = b"".join(chunks)
     except httpx.HTTPError:
         return None
-    kind = resp.headers.get("content-type", "")
-    if resp.status_code != 200 or not kind.startswith("image/") or not resp.content:
+    if not content:
         return None
     if len(_thumb_cache) >= _THUMB_MAX:
         _thumb_cache.pop(min(_thumb_cache, key=lambda k: _thumb_cache[k][0]))   # drop the oldest
-    _thumb_cache[code] = (time.time(), resp.content, kind)
-    return resp.content, kind
+    _thumb_cache[code] = (time.time(), content, kind)
+    return content, kind
 
 
 @router.get("/{post_id}/thumbnail")
@@ -142,7 +177,10 @@ def get_thumbnail(post_id: int, db: Session = Depends(get_db), current_user: Cre
     """The picture of one of the creator's posts (404 when the post has none: private, deleted or Instagram not answering)."""
     row = _own_post(db, current_user, post_id)
     code = post_code(row.post_url or "")
-    found = _fetch_thumbnail(code) if code else None
+    try:
+        found = _fetch_thumbnail(code) if code else None
+    except ThumbnailTooLarge:
+        raise HTTPException(status_code=502, detail="This post's picture is too large to show")
     if found is None:
         raise HTTPException(status_code=404, detail="No picture for this post")
     content, kind = found

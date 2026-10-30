@@ -1,4 +1,7 @@
+import contextvars
 import logging
+import os
+from contextlib import contextmanager
 
 from apify_client import ApifyClient
 from apify_client.errors import ApifyApiError
@@ -20,6 +23,43 @@ logger = logging.getLogger(__name__)
 #                        normally-finishing run isn't cut off early here.
 _RUN_TIMEOUT_SECS = 600
 _WAIT_SECS = 630
+
+# A person is waiting on a request-path run (adding a post, a pitch that reads linked posts, a profile description, an own-brand lookup), so
+# those runs are cut off at APIFY_REQUEST_TIMEOUT_SECS (default 90) for both the server-side run limit and the client-side wait. Batch jobs
+# keep the limits above. A request path opts in with `with request_path():` around its calls (a context variable: it covers the calls
+# made on that thread, not worker threads started inside).
+_request_limit: contextvars.ContextVar[int | None] = contextvars.ContextVar("apify_request_limit", default=None)
+
+
+def request_timeout_secs() -> int:
+    raw = (os.environ.get("APIFY_REQUEST_TIMEOUT_SECS") or "").strip()
+    if not raw:
+        return 90
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"APIFY_REQUEST_TIMEOUT_SECS must be a whole number of seconds, got {raw!r}")
+    if value < 10:
+        raise ValueError(f"APIFY_REQUEST_TIMEOUT_SECS must be >= 10, got {value}")
+    return value
+
+
+request_timeout_secs()   # a bad setting stops the application at start
+
+
+@contextmanager
+def request_path():
+    token = _request_limit.set(request_timeout_secs())
+    try:
+        yield
+    finally:
+        _request_limit.reset(token)
+
+
+def _limits() -> tuple[int, int]:
+    """(run timeout, wait) in seconds for the call being made now."""
+    limit = _request_limit.get()
+    return (min(limit, _RUN_TIMEOUT_SECS), limit) if limit else (_RUN_TIMEOUT_SECS, _WAIT_SECS)
 
 
 class ApifyQuotaExceeded(Exception):
@@ -75,10 +115,11 @@ def run_apify_actor(
     prefix = f"{label}: " if label else ""
     client = ApifyClient(APIFY_TOKEN)
     try:
+        run_timeout, wait = _limits()
         run = client.actor(actor_id).call(
             run_input=run_input,
-            timeout_secs=_RUN_TIMEOUT_SECS,
-            wait_secs=_WAIT_SECS,
+            timeout_secs=run_timeout,
+            wait_secs=wait,
         )
         status = _run_field(run, "status", "status")
         if status != "SUCCEEDED":

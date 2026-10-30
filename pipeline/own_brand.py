@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, OPENAI_KEY
 from pipeline.db import BrandRaw, CreatorProfile, InstagramPost, OwnBrandJob, Prompt, BatchSessionLocal, SessionLocal, normalize_niche
+from pipeline.helpers.apify import request_path
 from pipeline.helpers.gpt_llm import LLMUnavailableError, call_gpt_json, fill_template, llm_usage_scope, record_apify_scrape
 from pipeline.helpers.normalize import normalize
 from pipeline.helpers.prompts import BRAND_FROM_INSTAGRAM_DEFAULT_PROMPT, BRAND_FROM_INSTAGRAM_PROMPT_NAME
@@ -339,7 +340,8 @@ def run_own_brand_job(job_id: str) -> None:
                 if not APIFY_TOKEN:
                     return _fail(db, job, "Brand lookup is not available right now. Please try again later.")
                 _set_stage(db, job, "Reading the brand's Instagram posts (this can take a minute)", "running")
-                saved = scrape_and_save_posts(db, brand, handle, creator_id)
+                with request_path():   # the creator is waiting: 90 s, not the batch limit
+                    saved = scrape_and_save_posts(db, brand, handle, creator_id)
                 if saved is None:
                     return _fail(db, job, "Could not reach this Instagram account right now. Please try again.")
                 if saved == 0:

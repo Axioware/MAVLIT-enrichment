@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from api import usage_limits
+from api.paging import MAX_OFFSET, SAVED_BRANDS_PAGE_DEFAULT, SAVED_BRANDS_PAGE_MAX
 from api.auth import get_completed_user
 from api.schemas import SavedBrandResponse, saved_brand_to_response
 from pipeline.db import BrandRaw, CreatorProfile, SavedBrand, get_db
@@ -44,16 +45,27 @@ def save_brand(
 
 @router.get("/me", response_model=list[SavedBrandResponse])
 def list_saved_brands(
+    response: Response,
+    limit: int = Query(SAVED_BRANDS_PAGE_DEFAULT, ge=1, le=SAVED_BRANDS_PAGE_MAX),
+    offset: int = Query(0, ge=0, le=MAX_OFFSET),
     db: Session = Depends(get_db),
     current_user: CreatorProfile = Depends(get_completed_user),
 ):
+    """
+    The creator's saved brands, newest first, as a plain list (the same shape as before). A page of `limit` (default 100, at most 500, which is
+    the most brands one user can save) starting at `offset`; the header X-Total-Count says how many are saved in all.
+    """
+    total = db.query(func.count()).select_from(SavedBrand).filter(SavedBrand.creator_profile_id == current_user.id).scalar()
     rows = (
         db.query(SavedBrand, BrandRaw)
         .join(BrandRaw, BrandRaw.id == SavedBrand.brand_raw_id)
         .filter(SavedBrand.creator_profile_id == current_user.id)
-        .order_by(SavedBrand.created_at.desc())
+        .order_by(SavedBrand.created_at.desc(), SavedBrand.brand_raw_id.desc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
+    response.headers["X-Total-Count"] = str(total)
     return [saved_brand_to_response(brand, saved.created_at) for saved, brand in rows]
 
 

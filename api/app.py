@@ -1,4 +1,5 @@
 import logging
+import os
 import uuid
 from typing import Annotated, Literal
 from contextlib import asynccontextmanager
@@ -41,6 +42,9 @@ from api.saved_brands import router as saved_brands_router
 from api.schemas import CreatorProfileResponse
 from api import attempt_limits, usage_limits
 from api.body_limits import BodySizeLimitMiddleware
+from pipeline.helpers.apify import request_path
+from api.paging import BRAND_POSTS_LIMIT, MAX_OFFSET
+from api.ttl_cache import cached_niche
 import config
 from api.operator import MIN_RECOMMENDED_LENGTH, allow_unauthenticated_admin, operator_configured, passkey, passkey_matches, require_operator
 from api.settings import RUN_MIGRATIONS, drop_migration_credentials
@@ -891,6 +895,10 @@ admin = Admin(
     app, engine,
     authentication_backend=_admin_authentication_backend(),
 )
+# Every view that still allows export is capped (sqladmin 0 = every row): ADMIN_EXPORT_MAX_ROWS, default 10000.
+ADMIN_EXPORT_MAX_ROWS = int((os.environ.get("ADMIN_EXPORT_MAX_ROWS") or "10000").strip())
+if ADMIN_EXPORT_MAX_ROWS < 1:
+    raise ValueError("ADMIN_EXPORT_MAX_ROWS must be >= 1")
 admin.add_view(CreatorProfileAdmin)
 admin.add_view(BrandProfileAdmin)
 admin.add_view(BrandContactAdmin)
@@ -919,6 +927,9 @@ admin.add_view(OwnBrandJobAdmin)
 admin.add_view(RateEstimateAdmin)
 admin.add_view(EarlyAccessSignupAdmin)
 admin.add_view(ContractReviewAdmin)
+for _view in admin.views:
+    if getattr(_view, "can_export", False):
+        _view.export_max_rows = ADMIN_EXPORT_MAX_ROWS
 
 # 
 # API models
@@ -1372,6 +1383,7 @@ class CreatorDescriptionResponse(BaseModel):
 
 
 @app.get("/brand-niches")
+@cached_niche("brand-niches")
 def list_brand_niches():
     """
     Distinct niche values supplied through content_creator_re, for the
@@ -1392,6 +1404,7 @@ def list_brand_niches():
 
 
 @app.get("/brand-category-niches")
+@cached_niche("brand-category-niches")
 def list_brand_category_niches():
     """Distinct brand category values used by the creator avoid fields."""
     db = SessionLocal()
@@ -1409,6 +1422,7 @@ def list_brand_category_niches():
 
 
 @app.get("/brand-category-tags")
+@cached_niche("brand-category-tags")
 def list_brand_category_tags(niche: Annotated[list[Annotated[str, Field(max_length=100)]], Query(max_length=20)] = []):
     """
     Options for the creator-profile "Brand categories to avoid" fields:
@@ -1447,6 +1461,7 @@ def list_brand_category_tags(niche: Annotated[list[Annotated[str, Field(max_leng
 
 
 @app.get("/creator-sub-niches")
+@cached_niche("creator-sub-niches")
 def list_creator_sub_niches():
     """Distinct brand tag values used as searchable creator sub-niches."""
     db = SessionLocal()
@@ -1465,6 +1480,7 @@ def list_creator_sub_niches():
 
 
 @app.get("/brand-niche-tags")
+@cached_niche("brand-niche-tags")
 def list_brand_niche_tags():
     """
     Sub-niche/category tags from brands_niches.tags — LLM-extracted in
@@ -1529,7 +1545,7 @@ def _run_creator_description_job(
         setattr(row, status_field, "running")
         db.commit()
 
-        with llm_usage_scope(creator_id, "description"):
+        with request_path(), llm_usage_scope(creator_id, "description"):   # request_path: a person is waiting, Apify is cut off at 90 s
             if platform == "instagram":
                 result = generate_instagram_description(
                     db, username, niche, creator_id=creator_id, previous_handle=row.instagram_handle,   # old username: its posts are emptied
@@ -1791,7 +1807,7 @@ class MatchesResponse(BaseModel):
 @app.get("/matches/me", response_model=MatchesResponse)
 def get_my_matches(
     limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=MAX_OFFSET),
     current_user: CreatorProfile = Depends(get_completed_user),
 ):
     """
@@ -2035,6 +2051,8 @@ def get_brand_partnership_posts(
                 InstagramPost.paid_partnership.is_(True),
                 InstagramPost.post_url.isnot(None),
             )
+            .order_by(InstagramPost.timestamp.desc().nullslast(), InstagramPost.id.desc())
+            .limit(BRAND_POSTS_LIMIT)
             .all()
         )
         for row in instagram_rows:
@@ -2056,6 +2074,8 @@ def get_brand_partnership_posts(
                 TestCreatorBrandPartnershipPost.brand_raw_id == brand_raw_id,
                 TestCreatorBrandPartnershipPost.sponsorship_confidence >= _PARTNERSHIP_MIN_CONFIDENCE,
             )
+            .order_by(TestCreatorBrandPartnershipPost.post_timestamp.desc().nullslast(), TestCreatorBrandPartnershipPost.id.desc())
+            .limit(BRAND_POSTS_LIMIT)
             .all()
         )
         for row in re_rows:

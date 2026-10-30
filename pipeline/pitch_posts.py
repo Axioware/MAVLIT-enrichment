@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from config import APIFY_TOKEN
 from pipeline.creator_content.instagram_description import save_creator_posts
 from pipeline.db import CreatorInstagramPost, CreatorProfile
-from pipeline.helpers.apify import ApifyQuotaExceeded, run_apify_actor
+from pipeline.helpers.apify import ApifyQuotaExceeded, request_path, run_apify_actor
 from pipeline.helpers.gpt_llm import llm_usage_scope, record_apify_scrape
 
 logger = logging.getLogger(__name__)
@@ -82,12 +82,13 @@ def _scrape_posts(db: Session, creator: CreatorProfile, urls: dict[str, str]) ->
         return {}
     db.commit()   # end the read transaction first: an Apify run can take minutes
     try:
-        items = run_apify_actor(
-            _ACTOR_ID,
-            {"directUrls": list(urls.values()), "resultsType": "posts", "resultsLimit": len(urls)},
-            label=f"pitch posts ({len(urls)})",
-            require_success=True,
-        )
+        with request_path():   # a person is waiting: 90 s, not the batch limit
+            items = run_apify_actor(
+                _ACTOR_ID,
+                {"directUrls": list(urls.values()), "resultsType": "posts", "resultsLimit": len(urls)},
+                label=f"pitch posts ({len(urls)})",
+                require_success=True,
+            )
     except ApifyQuotaExceeded:
         logger.warning("Pitch posts: Apify quota exceeded - using the URLs without details")
         return {}

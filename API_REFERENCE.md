@@ -84,7 +84,7 @@ Response `201`: `{ "brand_id": 1, "saved": true }`
 Errors: `404` if brand_id doesn't exist.
 
 ### `GET /saved-brands/me`
-Auth required. Response `200` — array, newest-saved first:
+Auth required (completed profile). Query: `limit` (default 100, 1-500; 500 is also the most brands a user can save) and `offset` (default 0, at most 10000). Response `200` — array, newest-saved first, with the header `X-Total-Count` (how many are saved in all):
 ```json
 [
   { "brand_id": 1, "name": "8D Creative", "niche": "music", "short_bio": "...", "saved_at": "2026-08-10 12:00:00+00" }
