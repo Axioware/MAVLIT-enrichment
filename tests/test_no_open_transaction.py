@@ -177,7 +177,9 @@ class StreamRouteEndsItsTransaction(unittest.TestCase):
         db, user = mock.MagicMock(), mock.MagicMock(id=7)
         body = PitchRequest(is_custom=True, custom_brand_name="Acme", story="s")
         response = pitches.stream_pitch_endpoint(body, db=db, current_user=user)
-        db.commit.assert_called_once()
+        # the lock and the daily-cap count commit too; what matters is that the last thing the request session does is a commit
+        db.commit.assert_called()
+        self.assertEqual(db.method_calls[-1], mock.call.commit())
         self.assertEqual(response.media_type, "text/event-stream")
 
 

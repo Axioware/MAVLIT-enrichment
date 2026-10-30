@@ -64,6 +64,8 @@ CODE = {
     "early_access_signups": "SIU",                # POST /early-access (upsert)
     "facebook_branded_content_checks": "",        # CLI only
     "initial_brand_score": "SIU",                 # /score/brands, own-brand job
+    "feature_usage": "SIU",                       # api/usage_limits.py: per-user daily caps on LLM / Apify features
+    "feature_locks": "SID",                       # api/usage_limits.py: one in-flight pitch per user
     "login_failures": "SID",                      # api/login_limits.py: failed-login lockout (rows removed on success and after a day)
     "instagram_creator_commenters": "S",          # read by the matching; writes are CLI-only
     "instagram_posts": "SIU",                     # own-brand job, sponsorship scoring
@@ -101,6 +103,8 @@ ADMIN = {
     "early_access_signups": (False, True, True),
     "facebook_branded_content_checks": (True, True, True),
     "initial_brand_score": (True, True, True),
+    "feature_usage": None,
+    "feature_locks": None,
     "login_failures": None,
     "instagram_creator_commenters": (True, True, True),
     "instagram_posts": (True, True, True),

@@ -907,6 +907,28 @@ class ContactReveal(Base):
     created_at           = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
+class FeatureUsage(Base):
+    """
+    How many times a creator used a cost-bearing feature (pitch, rate estimate, contract review, ranking refresh, own brand, description
+    generation) on a UTC day. The per-user daily caps (api/usage_limits.py) count here, so they hold across restarts and processes.
+    """
+    __tablename__ = "feature_usage"
+
+    creator_profile_id = Column(Integer, ForeignKey("creator_profiles.id", ondelete="CASCADE"), primary_key=True)
+    feature             = Column(Text, primary_key=True)
+    used_on             = Column(Date, primary_key=True)
+    uses                = Column(Integer, nullable=False, server_default="0", default=0)
+
+
+class FeatureLock(Base):
+    """One in-flight request per creator and feature (a pitch or a pitch stream). Deleted when the request ends; a row older than the stale limit is taken over."""
+    __tablename__ = "feature_locks"
+
+    creator_profile_id = Column(Integer, ForeignKey("creator_profiles.id", ondelete="CASCADE"), primary_key=True)
+    feature             = Column(Text, primary_key=True)
+    started_at          = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+
 class LoginFailure(Base):
     """
     One failed login, for the lockout in api/login_limits.py. The email is stored only as a SHA-256 of its lower-cased form and the

@@ -1,8 +1,11 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from api.auth import get_current_user
+from api import usage_limits
+from api.auth import get_completed_user
 from api.schemas import (
     ContractAdviceRequest,
     ContractAdviceResponse,
@@ -15,15 +18,22 @@ from pipeline.contract_advice import review_contract
 from pipeline.db import CreatorProfile, RateEstimate, get_db
 from pipeline.rate_intelligence import estimate_rate
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["advisory"])
+
+RATE_UNAVAILABLE = "Rate estimation is temporarily unavailable, try again"   # shown instead of any provider / internal error text
+CONTRACT_UNAVAILABLE = "Contract review is temporarily unavailable, try again"
 
 
 @router.post("/rate-intelligence", response_model=RateIntelligenceResponse)
 def get_rate_intelligence(
     body: RateIntelligenceRequest,
     db: Session = Depends(get_db),
-    current_user: CreatorProfile = Depends(get_current_user),
+    current_user: CreatorProfile = Depends(get_completed_user),
 ):
+    if body.brand_id is None and not (body.brand_name or "").strip():
+        raise HTTPException(status_code=422, detail="brand_id or brand_name is required")
+    usage_limits.consume(db, current_user.id, "rate_intelligence")   # 429 over the daily cap, before any LLM call
     try:
         estimate = estimate_rate(
             db, current_user,
@@ -35,23 +45,24 @@ def get_rate_intelligence(
             usage=body.usage,
             duration_months=body.duration_months,
         )
-    except ValueError as exc:
+    except ValueError as exc:   # a brand_id that does not exist
         raise HTTPException(status_code=404, detail=str(exc))
     except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        logger.warning("Rate estimation failed for creator_id=%s: %s", current_user.id, exc)
+        raise HTTPException(status_code=502, detail=RATE_UNAVAILABLE)
     return rate_estimate_to_response(estimate)
 
 
 @router.get("/rate-intelligence/latest", response_model=RateIntelligenceResponse | None)
 def get_latest_rate_intelligence(
-    brand_id: int | None = Query(None),
-    brand_name: str | None = Query(None),
-    deliverable_type: str | None = Query(None),
-    exclusivity: str | None = Query(None),
-    usage: str | None = Query(None),
-    duration_months: int | None = Query(None),
+    brand_id: int | None = Query(None, ge=1),
+    brand_name: str | None = Query(None, max_length=200),
+    deliverable_type: str | None = Query(None, max_length=100),
+    exclusivity: str | None = Query(None, max_length=100),
+    usage: str | None = Query(None, max_length=100),
+    duration_months: int | None = Query(None, ge=1, le=120),
     db: Session = Depends(get_db),
-    current_user: CreatorProfile = Depends(get_current_user),
+    current_user: CreatorProfile = Depends(get_completed_user),
 ):
     """
     The creator's saved estimate, so it is still there after the page is reloaded (null when there is none).
@@ -78,8 +89,9 @@ def get_latest_rate_intelligence(
 def get_contract_advice(
     body: ContractAdviceRequest,
     db: Session = Depends(get_db),
-    current_user: CreatorProfile = Depends(get_current_user),
+    current_user: CreatorProfile = Depends(get_completed_user),
 ):
+    usage_limits.consume(db, current_user.id, "contract_advice")   # 429 over the daily cap, before any LLM call
     try:
         review = review_contract(
             db, current_user, body.contract_text,
@@ -87,5 +99,6 @@ def get_contract_advice(
             usage=body.usage, duration_months=body.duration_months,
         )
     except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        logger.warning("Contract review failed for creator_id=%s: %s", current_user.id, exc)
+        raise HTTPException(status_code=502, detail=CONTRACT_UNAVAILABLE)
     return contract_review_to_response(review)

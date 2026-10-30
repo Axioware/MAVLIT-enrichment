@@ -2,7 +2,7 @@ import time
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
@@ -37,7 +37,7 @@ class CreatorPostsResponse(BaseModel):
 
 
 class AddPostRequest(BaseModel):
-    post_url: str
+    post_url: str = Field(max_length=500)
     is_partnership_post: bool = False   # also mark the post as a paid partnership (the pitch's "Past brand partnerships" picker does)
 
 

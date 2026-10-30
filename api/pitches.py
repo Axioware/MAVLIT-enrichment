@@ -7,7 +7,8 @@ from starlette.background import BackgroundTask
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from api.auth import get_current_user
+from api import usage_limits
+from api.auth import get_completed_user
 from api.contact_access import allow_contacts
 from api.schemas import (
     ManualPitchRequest,
@@ -25,6 +26,8 @@ from pipeline.pitching import generate_pitch, stream_pitch
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pitches", tags=["pitches"])
 
+PITCH_UNAVAILABLE = "Pitch generation is temporarily unavailable, try again"   # shown instead of any provider / internal error text
+
 _ALLOWED_STATUSES = {"generated", "sent", "negotiating", "closed_won", "closed_lost", "declined"}
 _STATUS_TRANSITIONS = {
     "generated": {"generated", "sent"},
@@ -41,7 +44,7 @@ def create_pitch(
     body: PitchRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: CreatorProfile = Depends(get_current_user),
+    current_user: CreatorProfile = Depends(get_completed_user),
 ):
     if body.is_custom:
         if not body.custom_brand_name or body.brand_id is not None:
@@ -49,28 +52,36 @@ def create_pitch(
     elif body.brand_id is None:
         raise HTTPException(status_code=400, detail="brand_id is required for a non-custom pitch")
 
-    include_contact = allow_contacts(db, current_user.id, body.brand_id)   # False (no contact in the pitch) for a brand the creator may not see; 429 over the daily cap
+    creator_id = current_user.id
+    lock_bind = db.get_bind()
+    usage_limits.acquire_lock(db, creator_id)   # 409 while another pitch of this user is being written
     try:
-        pitch = generate_pitch(
-            db, current_user,
-            include_contact=include_contact,
-            is_custom=body.is_custom,
-            brand_id=body.brand_id,
-            custom_brand_name=body.custom_brand_name,
-            story=body.story,
-            product_reference=body.product_reference,
-            past_brand_partnership=body.past_brand_partnership,
-            content_link=body.content_link,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
-    # A brand the user added through "my own brand": now that the pitch exists, run the rest of its pipeline.
-    followup_job = claim_followup(db, current_user.id, pitch.brand_raw_id)
-    if followup_job:
-        background_tasks.add_task(run_followup, followup_job)
-    return pitch_to_response(pitch)
+        usage_limits.consume(db, creator_id, "pitches")   # 429 over the daily cap, before any LLM call
+        include_contact = allow_contacts(db, creator_id, body.brand_id)   # False (no contact in the pitch) for a brand the creator may not see; 429 over the daily cap
+        try:
+            pitch = generate_pitch(
+                db, current_user,
+                include_contact=include_contact,
+                is_custom=body.is_custom,
+                brand_id=body.brand_id,
+                custom_brand_name=body.custom_brand_name,
+                story=body.story,
+                product_reference=body.product_reference,
+                past_brand_partnership=body.past_brand_partnership,
+                content_link=body.content_link,
+            )
+        except ValueError as exc:   # a brand that does not exist
+            raise HTTPException(status_code=404, detail=str(exc))
+        except RuntimeError as exc:
+            logger.warning("Pitch generation failed for creator_id=%s: %s", creator_id, exc)
+            raise HTTPException(status_code=502, detail=PITCH_UNAVAILABLE)
+        # A brand the user added through "my own brand": now that the pitch exists, run the rest of its pipeline.
+        followup_job = claim_followup(db, creator_id, pitch.brand_raw_id)
+        if followup_job:
+            background_tasks.add_task(run_followup, followup_job)
+        return pitch_to_response(pitch)
+    finally:
+        usage_limits.release_lock(lock_bind, creator_id)
 
 
 def _sse(event: dict) -> str:
@@ -81,7 +92,7 @@ def _sse(event: dict) -> str:
 def stream_pitch_endpoint(
     body: PitchRequest,
     db: Session = Depends(get_db),
-    current_user: CreatorProfile = Depends(get_current_user),
+    current_user: CreatorProfile = Depends(get_completed_user),
 ):
     """
     Same as POST /pitches (same body, same prompt, saved as a generated, unsent pitch), but the
@@ -99,46 +110,60 @@ def stream_pitch_endpoint(
         raise HTTPException(status_code=400, detail="brand_id is required for a non-custom pitch")
     elif not db.query(BrandRaw.id).filter(BrandRaw.id == body.brand_id).first():
         raise HTTPException(status_code=404, detail=f"brand_id={body.brand_id} not found")
-    include_contact = allow_contacts(db, current_user.id, body.brand_id)   # commits; 429 over the daily cap, before the stream starts
-    db.commit()   # the request session only validated; end its transaction so it is not open for the whole stream
     creator_id = current_user.id
+    lock_bind = db.get_bind()
+    usage_limits.acquire_lock(db, creator_id)   # 409 while another pitch of this user is being written
+    try:
+        usage_limits.consume(db, creator_id, "pitches")   # 429 over the daily cap, before the stream starts and before any LLM call
+        include_contact = allow_contacts(db, creator_id, body.brand_id)   # commits; 429 over the daily cap, before the stream starts
+        db.commit()   # the request session only validated; end its transaction so it is not open for the whole stream
+    except BaseException:
+        usage_limits.release_lock(lock_bind, creator_id)
+        raise
     followups: list[str] = []   # filled once the pitch is saved; run after the response has been sent
 
     def start_followups():
+        usage_limits.release_lock(lock_bind, creator_id)   # in case the stream was cut before its own cleanup ran
         for job_id in followups:
             run_followup(job_id)
 
     def events():
-        # its own session: the request's session may be closed before the stream ends
-        with SessionLocal() as stream_db:
-            creator = stream_db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
-            try:
-                for kind, value in stream_pitch(
-                    stream_db, creator,
-                    include_contact=include_contact,
-                    is_custom=body.is_custom,
-                    brand_id=body.brand_id,
-                    custom_brand_name=body.custom_brand_name,
-                    story=body.story,
-                    product_reference=body.product_reference,
-                    past_brand_partnership=body.past_brand_partnership,
-                    content_link=body.content_link,
-                ):
-                    if kind == "status":
-                        yield _sse({"type": "status", "text": value})
-                    elif kind == "delta":
-                        yield _sse({"type": "delta", "text": value})
-                    else:
-                        job_id = claim_followup(stream_db, creator_id, value.brand_raw_id)
-                        if job_id:
-                            followups.append(job_id)
-                        yield _sse({"type": "done", "pitch": json.loads(pitch_to_response(value).model_dump_json())})
-            except (LLMUnavailableError, RuntimeError, ValueError) as exc:
-                yield _sse({"type": "error", "detail": str(exc)})
-            except DBAPIError:
-                # the response has already started, so no 503: report it in-stream without the SQL text
-                logger.exception("Pitch stream database error for creator_id=%s", creator_id)
-                yield _sse({"type": "error", "detail": "Database busy, retry"})
+        try:
+            # its own session: the request's session may be closed before the stream ends
+            with SessionLocal() as stream_db:
+                creator = stream_db.query(CreatorProfile).filter(CreatorProfile.id == creator_id).first()
+                try:
+                    for kind, value in stream_pitch(
+                        stream_db, creator,
+                        include_contact=include_contact,
+                        is_custom=body.is_custom,
+                        brand_id=body.brand_id,
+                        custom_brand_name=body.custom_brand_name,
+                        story=body.story,
+                        product_reference=body.product_reference,
+                        past_brand_partnership=body.past_brand_partnership,
+                        content_link=body.content_link,
+                    ):
+                        if kind == "status":
+                            yield _sse({"type": "status", "text": value})
+                        elif kind == "delta":
+                            yield _sse({"type": "delta", "text": value})
+                        else:
+                            job_id = claim_followup(stream_db, creator_id, value.brand_raw_id)
+                            if job_id:
+                                followups.append(job_id)
+                            yield _sse({"type": "done", "pitch": json.loads(pitch_to_response(value).model_dump_json())})
+                except ValueError as exc:   # a brand that does not exist
+                    yield _sse({"type": "error", "detail": str(exc)})
+                except (LLMUnavailableError, RuntimeError) as exc:
+                    logger.warning("Pitch stream failed for creator_id=%s: %s", creator_id, exc)
+                    yield _sse({"type": "error", "detail": PITCH_UNAVAILABLE})
+                except DBAPIError:
+                    # the response has already started, so no 503: report it in-stream without the SQL text
+                    logger.exception("Pitch stream database error for creator_id=%s", creator_id)
+                    yield _sse({"type": "error", "detail": "Database busy, retry"})
+        finally:
+            usage_limits.release_lock(lock_bind, creator_id)
 
     return StreamingResponse(
         events(),
@@ -152,7 +177,7 @@ def stream_pitch_endpoint(
 def create_manual_pitch(
     body: ManualPitchRequest,
     db: Session = Depends(get_db),
-    current_user: CreatorProfile = Depends(get_current_user),
+    current_user: CreatorProfile = Depends(get_completed_user),
 ):
     if body.status not in _ALLOWED_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid pitch status")
@@ -192,7 +217,7 @@ def update_pitch(
     pitch_id: int,
     body: PitchUpdateRequest,
     db: Session = Depends(get_db),
-    current_user: CreatorProfile = Depends(get_current_user),
+    current_user: CreatorProfile = Depends(get_completed_user),
 ):
     pitch = db.query(Pitch).filter(Pitch.id == pitch_id).first()
     if not pitch:
@@ -203,7 +228,7 @@ def update_pitch(
         raise HTTPException(status_code=400, detail="At least one field is required")
     if body.pitch_text is not None:
         if pitch.is_manual:
-            raise HTTPException(status_code=400, detail="A manually recorded pitch has no email text to edit")
+            raise HTTPException(status_code=409, detail="A manually recorded pitch has no email text to edit")
         pitch.pitch_text = body.pitch_text   # the exact text the creator edited
 
     if body.status is not None:
@@ -211,13 +236,13 @@ def update_pitch(
             raise HTTPException(status_code=400, detail="Invalid pitch status")
         allowed_next_statuses = _STATUS_TRANSITIONS.get(pitch.status)
         if allowed_next_statuses is None or body.status not in allowed_next_statuses:
-            raise HTTPException(status_code=400, detail=f"Cannot transition from {pitch.status} to {body.status}")
+            raise HTTPException(status_code=409, detail=f"Cannot transition from {pitch.status} to {body.status}")
         if body.status == "sent" and pitch.sent_at is None and body.sent_at is None:
             raise HTTPException(status_code=400, detail="sent_at is required when marking a pitch sent")
         pitch.status = body.status
     if "sent_at" in body.model_fields_set:
         if body.sent_at is None and pitch.status != "generated":
-            raise HTTPException(status_code=400, detail="sent_at cannot be cleared after a pitch is sent")
+            raise HTTPException(status_code=409, detail="sent_at cannot be cleared after a pitch is sent")
         if body.sent_at is not None and body.status not in {"sent", "negotiating", "closed_won", "closed_lost", "declined"} and pitch.status == "generated":
             raise HTTPException(status_code=400, detail="sent_at requires a sent or later pitch status")
         pitch.sent_at = body.sent_at
@@ -233,7 +258,7 @@ def update_pitch(
 def delete_pitch(
     pitch_id: int,
     db: Session = Depends(get_db),
-    current_user: CreatorProfile = Depends(get_current_user),
+    current_user: CreatorProfile = Depends(get_completed_user),
 ):
     """Deletes one of the creator's own pitches (the Pipeline's Delete button)."""
     pitch = db.query(Pitch).filter(Pitch.id == pitch_id).first()
@@ -251,7 +276,7 @@ def list_pitches(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
-    current_user: CreatorProfile = Depends(get_current_user),
+    current_user: CreatorProfile = Depends(get_completed_user),
 ):
     query = db.query(Pitch).filter(Pitch.creator_profile_id == current_user.id)
     total = query.count()

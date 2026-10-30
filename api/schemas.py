@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -202,16 +203,19 @@ def saved_brand_to_response(brand: BrandRaw, saved_at) -> SavedBrandResponse:
 
 class PitchRequest(BaseModel):
     is_custom: bool
-    brand_id: int | None = None
-    custom_brand_name: str | None = None
-    story: str = ""   # optional: without it the pitch is written from the creator's content and the brand's fit
-    product_reference: str | None = None
-    past_brand_partnership: str | None = None
-    content_link: str | None = None
+    brand_id: int | None = Field(default=None, ge=1)
+    custom_brand_name: str | None = Field(default=None, max_length=200)
+    story: str = Field(default="", max_length=3000)   # optional: without it the pitch is written from the creator's content and the brand's fit
+    product_reference: str | None = Field(default=None, max_length=500)
+    past_brand_partnership: str | None = Field(default=None, max_length=500)
+    content_link: str | None = Field(default=None, max_length=500)
+
+
+PitchStatus = Literal["generated", "sent", "negotiating", "closed_won", "closed_lost", "declined"]
 
 
 class PitchUpdateRequest(BaseModel):
-    status: str | None = None
+    status: PitchStatus | None = None
     sent_at: date | None = None
     agreed_rate: Decimal | None = Field(default=None, ge=0)
     pitch_text: str | None = Field(default=None, max_length=20000)   # the creator's edited email
@@ -225,9 +229,9 @@ class PitchUpdateRequest(BaseModel):
 
 
 class ManualPitchRequest(BaseModel):
-    brand_id: int | None = None
-    custom_brand_name: str | None = None
-    status: str = "sent"
+    brand_id: int | None = Field(default=None, ge=1)
+    custom_brand_name: str | None = Field(default=None, max_length=200)
+    status: PitchStatus = "sent"
     sent_at: date
 
 
@@ -292,13 +296,13 @@ class DashboardResponse(BaseModel):
 #  Rate intelligence (pipeline/rate_intelligence.py -> api/advisory.py)
 
 class RateIntelligenceRequest(BaseModel):
-    brand_id: int | None = None       # a brand from MAVLIT's database, else send brand_name
-    brand_name: str | None = None
-    platform: str = "Instagram"
-    deliverable_type: str
-    exclusivity: str | None = None
-    usage: str | None = None
-    duration_months: int | None = None
+    brand_id: int | None = Field(default=None, ge=1)       # a brand from MAVLIT's database, else send brand_name
+    brand_name: str | None = Field(default=None, max_length=200)
+    platform: str = Field(default="Instagram", max_length=50)
+    deliverable_type: str = Field(max_length=100)
+    exclusivity: str | None = Field(default=None, max_length=100)
+    usage: str | None = Field(default=None, max_length=100)
+    duration_months: int | None = Field(default=None, ge=1, le=120)
 
 
 class RateIntelligenceResponse(BaseModel):
@@ -351,9 +355,9 @@ class ContractAdviceRequest(BaseModel):
     contract_text: str = Field(min_length=1, max_length=20000)
     # The Deal Tools terms to compare the contract with - all optional.
     brand_name:       str | None = Field(default=None, max_length=200)
-    deliverable_type: str | None = None
-    exclusivity:      str | None = None     # None | Narrow | Broad
-    usage:            str | None = None
+    deliverable_type: str | None = Field(default=None, max_length=100)
+    exclusivity:      str | None = Field(default=None, max_length=100)     # None | Narrow | Broad
+    usage:            str | None = Field(default=None, max_length=100)
     duration_months:  int | None = Field(default=None, ge=1, le=120)
 
 

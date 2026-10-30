@@ -1,16 +1,17 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from api.auth import get_current_user
+from api import usage_limits
+from api.auth import get_completed_user
 from pipeline.db import BrandRaw, CreatorProfile, OwnBrandJob, get_db
-from pipeline.own_brand import refresh_stale, run_own_brand_job, start_own_brand_job
+from pipeline.own_brand import parse_instagram_handle, refresh_stale, run_own_brand_job, start_own_brand_job
 
 router = APIRouter(prefix="/own-brands", tags=["own-brands"])
 
 
 class OwnBrandRequest(BaseModel):
-    instagram: str   # the brand's Instagram URL or handle
+    instagram: str = Field(max_length=200)   # the brand's Instagram URL or handle
 
 
 class OwnBrandInfo(BaseModel):
@@ -56,7 +57,7 @@ def add_own_brand(
     body: OwnBrandRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: CreatorProfile = Depends(get_current_user),
+    current_user: CreatorProfile = Depends(get_completed_user),
 ):
     """
     "My own brand" on the pitch page. Adds the brand's Instagram account to MAVLIT (or reuses it if
@@ -64,6 +65,11 @@ def add_own_brand(
     (name, description, niche, target audience, latest product). Poll GET /own-brands/jobs/{job_id}
     until status is "ready", then pitch with POST /pitches using the returned brand_id.
     """
+    try:
+        parse_instagram_handle(body.instagram)   # a typo is a 400 and does not use up the daily cap
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    usage_limits.consume(db, current_user.id, "own_brands")   # 429 over the daily cap, before the Apify run is queued
     try:
         job = start_own_brand_job(db, current_user.id, body.instagram)
     except ValueError as exc:
@@ -77,7 +83,7 @@ def add_own_brand(
 def get_own_brand_job(
     job_id: str,
     db: Session = Depends(get_db),
-    current_user: CreatorProfile = Depends(get_current_user),
+    current_user: CreatorProfile = Depends(get_completed_user),
 ):
     job = db.get(OwnBrandJob, job_id)
     if job is None or job.creator_profile_id != current_user.id:   # a foreign job id gets the same answer as a missing one

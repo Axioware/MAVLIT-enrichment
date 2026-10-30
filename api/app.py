@@ -1,6 +1,6 @@
 import logging
 import uuid
-from typing import Literal
+from typing import Annotated, Literal
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -39,7 +39,8 @@ from api.own_brands import router as own_brands_router
 from api.pitches import router as pitches_router
 from api.saved_brands import router as saved_brands_router
 from api.schemas import CreatorProfileResponse
-from api import attempt_limits
+from api import attempt_limits, usage_limits
+from api.body_limits import BodySizeLimitMiddleware
 import config
 from api.operator import MIN_RECOMMENDED_LENGTH, allow_unauthenticated_admin, operator_configured, passkey, passkey_matches, require_operator
 from api.settings import RUN_MIGRATIONS, drop_migration_credentials
@@ -123,12 +124,17 @@ async def lifespan(app: FastAPI):
     yield
 
 
+# The interactive docs and the OpenAPI schema list every route (the operator ones too): public in development only.
+_DOCS = {"docs_url": None, "redoc_url": None, "openapi_url": None} if IS_PRODUCTION else {}
+
 app = FastAPI(
     title="Sponsorship Pipeline",
     description="Brand database enrichment pipeline API",
     version="0.1.0",
     lifespan=lifespan,
+    **_DOCS,
 )
+app.add_middleware(BodySizeLimitMiddleware)   # 413 JSON for an oversized body, before any route parses it
 
 _QUERY_CANCELED = "57014"   # statement_timeout (or a cancel)
 _LOCK_NOT_AVAILABLE = "55P03"   # lock_timeout
@@ -918,20 +924,23 @@ admin.add_view(ContractReviewAdmin)
 # API models
 # 
 
+Text200 = Annotated[str, Field(max_length=200)]
+
+
 class SeedRequest(BaseModel):
-    niche:          str
-    limit:          int | None  = None
-    country:        str | None  = None
-    headquarters:   str | None  = None
-    location:       str | None  = None
-    operating_area: str | None  = None
-    niche_label:    str | None  = None
+    niche:          Text200
+    limit:          int | None  = Field(default=None, ge=1, le=5000)
+    country:        Text200 | None  = None
+    headquarters:   Text200 | None  = None
+    location:       Text200 | None  = None
+    operating_area: Text200 | None  = None
+    niche_label:    Text200 | None  = None
 
 
 class EnrichRequest(BaseModel):
-    niche:           str | None  = None
-    limit_per_step:  int         = 300
-    steps:           list[str] | None = None  # None = all steps
+    niche:           Text200 | None  = None
+    limit_per_step:  int         = Field(default=300, ge=1, le=5000)
+    steps:           list[Literal["wikidata_socials", "shopify", "tranco", "meta_ads", "youtube"]] | None = Field(default=None, max_length=5)  # None = all steps
 
 
 # 
@@ -1133,8 +1142,8 @@ class EnrichStatusResponse(BaseModel):
 
 
 class BulkAddCreatorsRequest(BaseModel):
-    urls:  list[str]
-    niche: str
+    urls:  list[Annotated[str, Field(max_length=300)]] = Field(max_length=200)
+    niche: Text200
 
 
 class BulkAddCreatorsResponse(BaseModel):
@@ -1242,7 +1251,7 @@ def enrich_signals_status(job_id: str):
 # 
 
 class ScoreRequest(BaseModel):
-    limit: int = 500
+    limit: int = Field(default=500, ge=1, le=5000)
 
 
 class ScoreJobResponse(BaseModel):
@@ -1299,48 +1308,55 @@ def score_brands_status(job_id: str):
 # Creator profile endpoints — self-service, one profile per logged-in user
 # ---------------------------------------------------------------------------
 
-class CreatorProfileRequest(BaseModel):
-    full_name:        str
-    creator_handle:   str
-    age:              int | None = None
-    gender:           str | None = None
+Text100 = Annotated[str, Field(max_length=100)]
+Count = Annotated[int, Field(ge=0, le=10**10)]
+Description = Annotated[str, Field(max_length=4000)]
+DescriptionMode = Literal["generate", "manual", "write"]   # "write" is the older static page's name for "manual"
+TextList = Annotated[list[Text100], Field(max_length=30)]
 
-    content_niche:       str | None = None
-    excluded_categories:  list[str] | None = None
+
+class CreatorProfileRequest(BaseModel):
+    full_name:        str = Field(max_length=150)
+    creator_handle:   str = Field(max_length=100)
+    age:              int | None = Field(default=None, ge=13, le=100)
+    gender:           str | None = Field(default=None, max_length=50)
+
+    content_niche:       Text200 | None = None
+    excluded_categories:  TextList | None = None
     # Free-text brand preferences (wanted / unwanted brand types) for the
     # Matches v3 LLM ranking. Stored trimmed; empty becomes NULL.
     brand_preferences:    str | None = Field(default=None, max_length=1000)
     pitch_style_preferences: str | None = Field(default=None, max_length=1000)
 
-    instagram_handle: str | None = None
-    instagram_followers: int | None = None
-    instagram_highest_views: int | None = Field(default=None, ge=0)
+    instagram_handle: Text100 | None = None
+    instagram_followers: Count | None = None
+    instagram_highest_views: int | None = Field(default=None, ge=0, le=10**10)
 
-    primary_platform: str | None = None
-    follower_count:   int | None = None
+    primary_platform: str | None = Field(default=None, max_length=100)
+    follower_count:   Count | None = None
 
-    instagram_primary_niche: str | None = None
-    instagram_sub_niches: list[str] | None = None
-    instagram_excluded_categories: list[str] | None = None
-    instagram_description: str | None = None
-    instagram_description_mode: str | None = None
+    instagram_primary_niche: Text200 | None = None
+    instagram_sub_niches: TextList | None = None
+    instagram_excluded_categories: TextList | None = None
+    instagram_description: Description | None = None
+    instagram_description_mode: DescriptionMode | None = None
     instagram_audience_gender: Literal["male", "female", "both"] | None = None
     instagram_audience_description: str | None = Field(default=None, max_length=1500)
-    youtube_channel_name: str | None = None
-    youtube_subscribers: int | None = None
-    youtube_primary_niche: str | None = None
-    youtube_sub_niches: list[str] | None = None
-    youtube_excluded_categories: list[str] | None = None
-    youtube_description: str | None = None
-    youtube_description_mode: str | None = None
+    youtube_channel_name: Text200 | None = None
+    youtube_subscribers: Count | None = None
+    youtube_primary_niche: Text200 | None = None
+    youtube_sub_niches: TextList | None = None
+    youtube_excluded_categories: TextList | None = None
+    youtube_description: Description | None = None
+    youtube_description_mode: DescriptionMode | None = None
     youtube_audience_gender: Literal["male", "female", "both"] | None = None
     youtube_audience_description: str | None = Field(default=None, max_length=1500)
 
 
 class CreatorDescriptionRequest(BaseModel):
-    platform: str
-    username: str
-    niche: str
+    platform: Literal["instagram", "youtube"]
+    username: str = Field(max_length=100)
+    niche: Text200
 
 
 class CreatorDescriptionResponse(BaseModel):
@@ -1393,7 +1409,7 @@ def list_brand_category_niches():
 
 
 @app.get("/brand-category-tags")
-def list_brand_category_tags(niche: list[str] = Query(default=[])):
+def list_brand_category_tags(niche: Annotated[list[Annotated[str, Field(max_length=100)]], Query(max_length=20)] = []):
     """
     Options for the creator-profile "Brand categories to avoid" fields:
     distinct brands_niches.tags of brands in the requested primary niche(s),
@@ -1591,6 +1607,7 @@ def generate_my_creator_description(
                 error=getattr(row, error_field),
             )
 
+        usage_limits.consume(db, current_user.id, "description_generation")   # 429 over the daily cap, before the Apify / LLM job is queued
         job_id = str(uuid.uuid4())
         setattr(row, status_field, "queued")
         setattr(row, job_field, job_id)
@@ -1718,6 +1735,8 @@ def upsert_my_creator_profile(
                 detail="Complete the required onboarding fields before continuing: full name, age, gender, primary platforms, Instagram username, follower count, primary niche, and at least one creator description.",
             )
         row = db.query(CreatorProfile).filter(CreatorProfile.id == current_user.id).first()
+        if (row.instagram_description_status or "idle") in {"queued", "running"} or (row.youtube_description_status or "idle") in {"queued", "running"}:
+            raise HTTPException(status_code=409, detail="A description is still being generated. Wait for it to finish before saving your profile.")
         previous_handle = row.instagram_handle
         for field, value in payload.items():
             setattr(row, field, value)
@@ -1886,6 +1905,7 @@ def _refresh_ai_matches(background_tasks: BackgroundTasks, user_id: int, version
         if _AI_RANKINGS[version]["paused"]:
             return _ai_matches_response(db, user_id, version)
         if getattr(row, f"{prefix}_ranking_status") not in ("queued", "running"):
+            usage_limits.consume(db, user_id, "match_refresh")   # 429 over the daily cap, before the LLM ranking is queued
             setattr(row, f"{prefix}_ranking_status", "queued")
             setattr(row, f"{prefix}_ranking_error", None)
             db.commit()

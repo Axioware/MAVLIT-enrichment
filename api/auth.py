@@ -49,8 +49,8 @@ def _clear_login_cookie(response: Response) -> None:
 
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: str = Field(min_length=1, max_length=254)
+    password: str = Field(min_length=1, max_length=200)
 
 
 #  JWT helpers
@@ -174,7 +174,7 @@ def is_profile_complete(profile: CreatorProfile | dict | None) -> bool:
 def get_completed_user(current_user: CreatorProfile = Depends(get_current_user)) -> CreatorProfile:
     """Require authentication and a completed creator profile."""
     if not is_profile_complete(current_user):
-        raise HTTPException(status_code=403, detail="Complete your creator profile before accessing the application")
+        raise HTTPException(status_code=403, detail={"error": "profile_incomplete", "message": "Complete your creator profile before accessing the application"})
     return current_user
 
 
@@ -262,7 +262,7 @@ def logout_all(request: Request, response: Response, db: Session = Depends(get_d
 
 
 class ChangePasswordRequest(BaseModel):
-    current_password: str
+    current_password: str = Field(min_length=1, max_length=200)
     new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=200)
 
 
