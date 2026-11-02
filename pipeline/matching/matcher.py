@@ -122,6 +122,7 @@ cheap enough for a real-time page load regardless.
 """
 
 import logging
+import os
 
 from sqlalchemy import exists, func, or_, text
 from sqlalchemy.orm import Session
@@ -142,6 +143,26 @@ from pipeline.matching.match_text import collect_match_reasons, generate_match_r
 from pipeline.matching.scoring import score_match
 
 logger = logging.getLogger(__name__)
+
+def match_shortlist_max() -> int:
+    """
+    MATCH_SHORTLIST_MAX (default 500): the most brands get_matches scores for one request. They are the nearest by embedding distance, so a creator
+    with more qualifying brands than this sees their 500 best semantic fits. The scoring below runs in Python for every shortlisted brand, so the
+    cost of a request grows with this number (it used to grow with the whole brand table).
+    """
+    raw = (os.environ.get("MATCH_SHORTLIST_MAX") or "").strip()
+    if not raw:
+        return 500
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"MATCH_SHORTLIST_MAX must be a whole number, got {raw!r}")
+    if value < 1:
+        raise ValueError(f"MATCH_SHORTLIST_MAX must be >= 1, got {value}")
+    return value
+
+
+match_shortlist_max()   # a bad setting stops the application at start
 
 _ACTIVITY_FLOOR = 0   # brands with a CONFIRMED score at or below this are dropped; unscored (NULL) brands are kept
 _MIN_PARTNERSHIP_CONFIDENCE = 90   # a shown brand needs a post at/above this in test_creator_brand_partnership_posts or instagram_posts
@@ -537,9 +558,10 @@ def get_matches(
 
     total = query.count()
 
-    # Step B — semantic shortlist (single indexed pgvector query)
-    query = query.order_by(distance_expr)
-    shortlist = query.all()
+    # Step B — semantic shortlist (single indexed pgvector query): the MATCH_SHORTLIST_MAX nearest brands
+    cap = match_shortlist_max()
+    shortlist = query.order_by(distance_expr).limit(cap).all()
+    total = min(total, cap)   # pages beyond the shortlist are empty, so the total a client pages through stops there
 
     if not shortlist:
         logger.info("Matching: creator_id=%d — no qualifying brands after hard filters", creator_id)
@@ -566,7 +588,6 @@ def get_matches(
     # Niche tier first (see scoring._niche_tier), then score within a tier.
     results.sort(key=lambda r: (r["niche_tier"], r["total_score"]), reverse=True)
     logger.info("length======== %d", len(results))
-    print("length========", len(results))
 
     logger.info(
         "Matching: creator_id=%d -> %d shortlisted, returning %d (offset=%d)",

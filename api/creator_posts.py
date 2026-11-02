@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 
 import httpx
@@ -115,7 +116,7 @@ def _own_post(db: Session, creator: CreatorProfile, post_id: int) -> CreatorInst
 # Instagram (its picture server answers "Cross-Origin-Resource-Policy: same-origin", so another site's <img> is blocked).
 # Nothing is stored in the database; a small in-memory cache spares Instagram repeated requests.
 _THUMB_TTL = 6 * 3600
-_THUMB_MAX = 300
+_THUMB_MAX = 300   # entries; THUMBNAIL_CACHE_MAX_ENTRIES overrides
 _thumb_cache: dict[str, tuple[float, bytes, str]] = {}
 _THUMB_HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"}
 
@@ -138,6 +139,47 @@ def thumbnail_max_bytes() -> int:
 
 
 thumbnail_max_bytes()   # a bad setting stops the application at start
+
+
+def _cache_setting(name: str, default: int, minimum: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be a whole number, got {raw!r}")
+    if value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}, got {value}")
+    return value
+
+
+def thumbnail_cache_max_bytes() -> int:
+    """THUMBNAIL_CACHE_MAX_BYTES (default 64 MB): the most picture bytes the cache keeps in all."""
+    return _cache_setting("THUMBNAIL_CACHE_MAX_BYTES", 64 * 1024 * 1024, 1024)
+
+
+def thumbnail_cache_max_entries() -> int:
+    """THUMBNAIL_CACHE_MAX_ENTRIES (default 300): the most pictures the cache keeps."""
+    return _cache_setting("THUMBNAIL_CACHE_MAX_ENTRIES", _THUMB_MAX, 1)
+
+
+thumbnail_cache_max_bytes(), thumbnail_cache_max_entries()   # a bad setting stops the application at start
+_thumb_lock = threading.Lock()
+
+
+def _remember_thumbnail(code: str, content: bytes, kind: str) -> None:
+    """Keep the picture, dropping the oldest ones first while there are too many or together too many bytes."""
+    max_bytes, max_entries = thumbnail_cache_max_bytes(), thumbnail_cache_max_entries()
+    if len(content) > max_bytes:
+        return   # larger than the whole cache: serve it, do not keep it
+    with _thumb_lock:
+        _thumb_cache.pop(code, None)
+        total = sum(len(entry[1]) for entry in _thumb_cache.values())
+        while _thumb_cache and (len(_thumb_cache) >= max_entries or total + len(content) > max_bytes):
+            oldest = min(_thumb_cache, key=lambda k: _thumb_cache[k][0])
+            total -= len(_thumb_cache.pop(oldest)[1])
+        _thumb_cache[code] = (time.time(), content, kind)
 
 
 def _fetch_thumbnail(code: str) -> tuple[bytes, str] | None:
@@ -166,9 +208,7 @@ def _fetch_thumbnail(code: str) -> tuple[bytes, str] | None:
         return None
     if not content:
         return None
-    if len(_thumb_cache) >= _THUMB_MAX:
-        _thumb_cache.pop(min(_thumb_cache, key=lambda k: _thumb_cache[k][0]))   # drop the oldest
-    _thumb_cache[code] = (time.time(), content, kind)
+    _remember_thumbnail(code, content, kind)
     return content, kind
 
 
