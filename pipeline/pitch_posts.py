@@ -158,3 +158,25 @@ def resolve_post_details(db: Session, creator: CreatorProfile, *values: str | No
         logger.info("Pitch posts: %d post(s) saved already, scraping %d", len(details), len(missing))
         details.update(_scrape_posts(db, creator, missing))
     return details
+
+
+def ensure_content_links(text: str, content_link: str | None) -> str:
+    """
+    The pitch text with every Instagram post URL of the "most relevant content" field in it. The LLM is told to
+    keep them all but sometimes drops some; a missing one is added as a short paragraph before the closing
+    paragraph and sign-off. Text that already has them all is returned unchanged.
+    """
+    missing = []
+    for entry in split_entries(content_link):
+        code = post_code(entry)
+        if code and code not in text and _clean_url(entry) not in missing:
+            missing.append(_clean_url(entry))
+    if not missing:
+        return text
+    if len(missing) == 1:
+        line = f"Another recent example of my content: {missing[0]}"
+    else:
+        line = "A few more recent examples of my content: " + ", ".join(missing[:-1]) + f" and {missing[-1]}"
+    paragraphs = text.rstrip().split("\n\n")
+    paragraphs.insert(max(len(paragraphs) - 2, 1), line + ".")
+    return "\n\n".join(paragraphs)

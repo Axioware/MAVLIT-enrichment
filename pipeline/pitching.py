@@ -6,15 +6,16 @@ and persists it as a generated, unsent Pitch row.
 
 import logging
 import re
+import statistics
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from pipeline.brand_detail import _top_contact
-from pipeline.db import BrandRaw, CreatorProfile, InstagramPost, Pitch, Prompt
+from pipeline.db import BrandRaw, CreatorInstagramPost, CreatorProfile, InstagramPost, Pitch, Prompt
 from pipeline.helpers.creator_gender import creator_match_gender
 from pipeline.helpers.social import normalize_handle
-from pipeline.pitch_posts import describe_entries, has_post_urls, resolve_post_details
+from pipeline.pitch_posts import describe_entries, ensure_content_links, has_post_urls, resolve_post_details
 from pipeline.helpers.gpt_llm import call_gpt_text, fill_template, llm_usage_scope, stream_gpt_text
 from pipeline.helpers.prompts import (
     PITCH_DEFAULT_PROMPT,
@@ -22,6 +23,8 @@ from pipeline.helpers.prompts import (
     PITCH_POSTS_RULE,
     PITCH_PRODUCT_RULE,
     PITCH_PROMPT_NAME,
+    PITCH_STATS_LINE,
+    PITCH_STATS_RULE,
     PITCH_STYLE_BLOCK,
     PITCH_VIEWS_LINE,
     PITCH_VIEWS_RULE,
@@ -173,6 +176,47 @@ def _brand_instagram_followers(db: Session, brand_id: int) -> str:
     return f"{row[0]:,}" if row else "unknown"
 
 
+_STATS_POSTS = 20        # the same latest-20 window as the highest views
+_STATS_MIN_POSTS = 5     # fewer saved posts say too little about "typical"
+
+
+def _rounded(value: float) -> str:
+    return f"{int(round(value)):,}"
+
+
+def _figures(label: str, values: list[int]) -> str:
+    return f"{label}: highest {_rounded(max(values))}, average {_rounded(statistics.mean(values))}, median {_rounded(statistics.median(values))}"
+
+
+def creator_post_stats(db: Session, creator: CreatorProfile) -> str:
+    """
+    Views and engagement (likes + comments per post) of the creator's latest 20 saved Instagram posts, as one
+    line for the pitch prompt: highest / average / median of each. Views count video posts that have a view
+    count; a post whose likes are hidden is left out of the engagement figures. "unknown" when the creator has
+    no Instagram handle or fewer than 5 saved posts.
+    """
+    handle = normalize_handle(creator.instagram_handle or "").lower()
+    if not handle:
+        return "unknown"
+    rows = (
+        db.query(CreatorInstagramPost.likes_count, CreatorInstagramPost.comments_count, CreatorInstagramPost.video_view_count)
+        .filter(CreatorInstagramPost.creator_profile_id == creator.id, func.lower(CreatorInstagramPost.instagram_handle) == handle)
+        .order_by(CreatorInstagramPost.timestamp.desc().nullslast())
+        .limit(_STATS_POSTS)
+        .all()
+    )
+    if len(rows) < _STATS_MIN_POSTS:
+        return "unknown"
+    views = [v for _, _, v in rows if isinstance(v, int) and v > 0]
+    engagement = [likes + max(comments or 0, 0) for likes, comments, _ in rows if isinstance(likes, int) and likes >= 0]
+    parts = []
+    if views:
+        parts.append(_figures(f"views per reel/video ({len(views)} with views)", views))
+    if engagement:
+        parts.append(_figures(f"engagement per post, likes + comments ({len(engagement)} posts)", engagement))
+    return f"across their latest {len(rows)} posts, " + "; ".join(parts) if parts else "unknown"
+
+
 def _build_pitch_prompt(
     db: Session,
     creator: CreatorProfile,
@@ -231,6 +275,10 @@ def _build_pitch_prompt(
     if creator.instagram_highest_views and "{creator_highest_views}" not in template:
         # an edited stored copy without the placeholder: still give the LLM the creator's highest views
         template = template.rstrip() + "\n\n" + PITCH_VIEWS_LINE + PITCH_VIEWS_RULE
+    post_stats = creator_post_stats(db, creator)
+    if post_stats != "unknown" and "{creator_post_stats}" not in template:
+        # an edited stored copy without the placeholder: still give the LLM the performance figures
+        template = template.rstrip() + "\n\n" + PITCH_STATS_LINE + PITCH_STATS_RULE
     # Instagram post URLs in the past partnerships / content links become url + caption + views (saved posts are
     # reused, only unknown ones are scraped). The stream endpoint resolves them first to show progress.
     if post_details is None:
@@ -242,6 +290,7 @@ def _build_pitch_prompt(
     prompt = fill_template(
         template,
         creator_highest_views=f"{creator.instagram_highest_views:,}" if creator.instagram_highest_views else "unknown",
+        creator_post_stats=post_stats,
         pitch_style_preferences=style or "none",
         product_reference=(product_reference or "").strip() or "none provided",
         creator_name=creator.full_name or "unknown",
@@ -321,6 +370,7 @@ def generate_pitch(
         pitch_text = call_gpt_text(built["prompt"], context=f"pitch for creator_id={creator.id} brand={built['brand_name']}")
     if not pitch_text:
         raise RuntimeError("Pitch generation failed — LLM returned no content")
+    pitch_text = ensure_content_links(pitch_text, content_link)
     return _save_pitch(db, creator, built, pitch_text, is_custom=is_custom, **fields)
 
 
@@ -364,4 +414,5 @@ def stream_pitch(
     pitch_text = "".join(parts).strip()
     if not pitch_text:
         raise RuntimeError("Pitch generation failed — LLM returned no content")
+    pitch_text = ensure_content_links(pitch_text, content_link)   # the saved pitch (sent in "done") has every link
     yield "done", _save_pitch(db, creator, built, pitch_text, is_custom=is_custom, **fields)

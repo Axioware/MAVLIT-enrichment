@@ -1673,6 +1673,25 @@ PITCH_VIEWS_RULE = """\
 - If the value says "unknown", omit it.
 """
 
+# Average / median views and engagement of the creator's latest posts (pipeline/pitching.py: creator_post_stats).
+# Keep this constant separate for compatibility with prompt migration.
+PITCH_STATS_LINE = """\
+Performance of their latest posts (computed by MAVLIT from their saved Instagram posts): {creator_post_stats}
+"""
+PITCH_STATS_RULE = """\
+- The performance line above is supplied data. Its figures (average and
+  median views, highest, average and median engagement, where engagement
+  is likes plus comments per post) may be used, so the ban above on
+  average views and engagement figures does not apply to those exact
+  numbers. Use at most one or two of them, only when they strengthen the
+  pitch, rounded naturally.
+- Say what each figure measures, for example "my posts average about X
+  likes and comments" or "the median reel gets about Y views". Do not
+  present the highest figure as typical, and never turn these numbers into
+  an engagement rate, a prediction, or a guarantee.
+- If the line says "unknown", omit it.
+"""
+
 # Additional information supplied for a past partnership or content link.
 # The post may include a caption and its recorded view count.
 PITCH_POSTS_RULE = """\
@@ -1891,7 +1910,7 @@ Instagram: @{creator_handle}
 Niche: {creator_niche}
 Sub-niches: {creator_sub_niches}
 Instagram followers: {creator_follower_count}
-""" + PITCH_VIEWS_LINE + """\
+""" + PITCH_VIEWS_LINE + PITCH_STATS_LINE + """\
 Main audience gender: {creator_audience_gender}
 What their content is about: {creator_content_description}
 Their audience: {creator_audience_description}
@@ -2003,7 +2022,7 @@ of content ideas tailored to the brand.
 Choose the most natural option for this email. Do not combine several
 requests or pressure the recipient to respond.
 
-""" + PITCH_PRODUCT_RULE + PITCH_VIEWS_RULE + PITCH_POSTS_RULE + PITCH_STORY_RULE + PITCH_QUALITY_RULES + """\
+""" + PITCH_PRODUCT_RULE + PITCH_VIEWS_RULE + PITCH_STATS_RULE + PITCH_POSTS_RULE + PITCH_STORY_RULE + PITCH_QUALITY_RULES + """\
 FIXED RULES
 
 - Return ONLY the email body. Never include a subject line, "Subject:",
@@ -2067,6 +2086,8 @@ def _previous_pitch_defaults() -> tuple[str, ...]:
         PITCH_PRODUCT_RULE,
         PITCH_VIEWS_LINE,
         PITCH_VIEWS_RULE,
+        PITCH_STATS_LINE,
+        PITCH_STATS_RULE,
         PITCH_POSTS_RULE,
         PITCH_STORY_RULE,
     )
@@ -2077,9 +2098,11 @@ def _previous_pitch_defaults() -> tuple[str, ...]:
         for block, kept in zip(blocks, keep):
             if not kept:
                 text = text.replace(block, "")
-        for candidate in (text, text.replace(_PITCH_LINKS_SECTION, _OLD_PITCH_LINKS_SECTION).replace(PITCH_POSTS_RULE, _OLD_PITCH_POSTS_RULE)):
-            if candidate != PITCH_DEFAULT_PROMPT and candidate not in versions:
-                versions.append(candidate)
+        if text != PITCH_DEFAULT_PROMPT and text not in versions:
+            versions.append(text)
+    # The release before every content link was required (and before the post statistics): the only one with the old wording.
+    without_stats = PITCH_DEFAULT_PROMPT.replace(PITCH_STATS_LINE, "").replace(PITCH_STATS_RULE, "")
+    versions.append(without_stats.replace(_PITCH_LINKS_SECTION, _OLD_PITCH_LINKS_SECTION).replace(PITCH_POSTS_RULE, _OLD_PITCH_POSTS_RULE))
     return tuple(versions)
 
 

@@ -24,3 +24,32 @@ def test_prompt_requires_every_content_link():
 def test_previous_wording_is_still_recognised_as_an_unedited_default():
     assert any("when available and relevant" in old for old in P.PITCH_PREVIOUS_DEFAULT_PROMPTS)
     assert P.PITCH_DEFAULT_PROMPT not in P.PITCH_PREVIOUS_DEFAULT_PROMPTS
+
+
+def test_a_dropped_content_link_is_added_before_the_sign_off():
+    from pipeline.pitch_posts import ensure_content_links
+    pitch = ("Hello team,\n\nI love your pressings: https://www.instagram.com/p/DeuON3BpcmB/\n\n"
+             "Would you be open to a partnership?\n\nThanks,\nAlex")
+    out = ensure_content_links(pitch, LINKS)
+    for code in ("DeuON3BpcmB", "DeiF93ZOr4J", "DeenHsmOZJc"):
+        assert out.count(code) == 1
+    assert out.endswith("Would you be open to a partnership?\n\nThanks,\nAlex")
+    assert out.index("DeiF93ZOr4J") < out.index("Would you be open")
+
+
+def test_nothing_is_added_when_all_links_are_present_or_none_given():
+    from pipeline.pitch_posts import ensure_content_links
+    full = "Hi\n\n" + " ".join(["https://www.instagram.com/p/DeuON3BpcmB/", "https://www.instagram.com/p/DeiF93ZOr4J/",
+                                "https://www.instagram.com/p/DeenHsmOZJc/"]) + "\n\nThanks,\nAlex"
+    assert ensure_content_links(full, LINKS) == full
+    assert ensure_content_links("Hi\n\nThanks", None) == "Hi\n\nThanks"
+    assert ensure_content_links("Hi\n\nThanks", "my website, https://example.com") == "Hi\n\nThanks"
+
+
+def test_post_statistics_are_in_the_prompt_and_the_previous_release_is_recognised():
+    d = P.PITCH_DEFAULT_PROMPT
+    assert "{creator_post_stats}" in d and "median" in P.PITCH_STATS_RULE
+    old = next(x for x in P.PITCH_PREVIOUS_DEFAULT_PROMPTS if "when available and relevant" in x)
+    assert "{creator_post_stats}" not in old
+    # the release just before the statistics (links already required) is recognised too
+    assert d.replace(P.PITCH_STATS_LINE, "").replace(P.PITCH_STATS_RULE, "") in P.PITCH_PREVIOUS_DEFAULT_PROMPTS
