@@ -1682,8 +1682,8 @@ PITCH_POSTS_RULE = """\
   when relevant to the pitch.
 - Make clear that the figure belongs to that particular post. Never
   present it as typical or average performance.
-- Keep relevant supplied post URLs in the email so the brand can inspect
-  the creator's work.
+- Keep every supplied post URL in the email, each once and unchanged, so
+  the brand can inspect the creator's work. Never leave one out.
 - Do not invent campaign results, brand relationships, product usage,
   endorsements, or content details that are not supplied.
 - Do not imply that a normal content example was a paid partnership
@@ -1977,10 +1977,16 @@ Do not force other social proof into the email when it adds little value.
 
 4. RELEVANT CONTENT
 
-Include the supplied content link naturally when available and relevant.
+Include every supplied content link naturally. When several are
+supplied (numbered 1), 2), 3)), the email must contain all of them, each
+URL once. The creator chose each one on purpose, so do not drop any, even
+if one fits the brand better than the others. A few extra words beyond
+the length guideline are fine to fit them in. If the value is "none
+provided", skip this step.
 
-Use it as an example of the creator's actual content style or subject
-matter. Do not claim that the content features the current brand,
+Use them as examples of the creator's actual content style or subject
+matter. Group them in one or two sentences instead of one sentence per
+link. Do not claim that the content features the current brand,
 shows a sponsored partnership, or demonstrates a particular result
 unless the supplied information confirms that claim.
 
@@ -2044,6 +2050,12 @@ Return the finished email body only, as plain text, with no Markdown.
 # Keep these blocks identical to their corresponding occurrences in
 # PITCH_DEFAULT_PROMPT so that the historical matching logic continues
 # to work as intended.
+# The wording before every supplied content link was required (a stored unedited copy of it is upgraded).
+_PITCH_LINKS_SECTION = 'Include every supplied content link naturally. When several are\nsupplied (numbered 1), 2), 3)), the email must contain all of them, each\nURL once. The creator chose each one on purpose, so do not drop any, even\nif one fits the brand better than the others. A few extra words beyond\nthe length guideline are fine to fit them in. If the value is "none\nprovided", skip this step.\n\nUse them as examples of the creator\'s actual content style or subject\nmatter. Group them in one or two sentences instead of one sentence per\nlink.'
+_OLD_PITCH_LINKS_SECTION = "Include the supplied content link naturally when available and relevant.\n\nUse it as an example of the creator's actual content style or subject\nmatter."
+_OLD_PITCH_POSTS_RULE = "- Keep relevant supplied post URLs in the email so the brand can inspect\n  the creator's work.\n"
+
+
 def _previous_pitch_defaults() -> tuple[str, ...]:
     """Return prior default-prompt combinations with optional blocks removed."""
     from itertools import product
@@ -2065,8 +2077,9 @@ def _previous_pitch_defaults() -> tuple[str, ...]:
         for block, kept in zip(blocks, keep):
             if not kept:
                 text = text.replace(block, "")
-        if text != PITCH_DEFAULT_PROMPT and text not in versions:
-            versions.append(text)
+        for candidate in (text, text.replace(_PITCH_LINKS_SECTION, _OLD_PITCH_LINKS_SECTION).replace(PITCH_POSTS_RULE, _OLD_PITCH_POSTS_RULE)):
+            if candidate != PITCH_DEFAULT_PROMPT and candidate not in versions:
+                versions.append(candidate)
     return tuple(versions)
 
 
