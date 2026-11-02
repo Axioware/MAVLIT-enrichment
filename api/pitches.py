@@ -1,7 +1,7 @@
+import asyncio
 import json
 import logging
 import os
-import queue
 import threading
 import time
 
@@ -46,6 +46,53 @@ def stream_deadline_seconds() -> int:
 
 
 stream_deadline_seconds()   # a bad setting stops the application at start
+
+
+def stream_max() -> int:
+    """PITCH_STREAM_MAX (default 6): pitch streams open at once (inside the SLOW_ROUTE_CONCURRENCY limit); the next gets HTTP 503."""
+    raw = (os.environ.get("PITCH_STREAM_MAX") or "").strip()
+    if not raw:
+        return 6
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"PITCH_STREAM_MAX must be a whole number, got {raw!r}")
+    if value < 1:
+        raise ValueError(f"PITCH_STREAM_MAX must be >= 1, got {value}")
+    return value
+
+
+stream_max()   # a bad setting stops the application at start
+
+
+class _StreamSlots:
+    """The open pitch streams of this process. A slot nobody released (a response that never started) expires after the deadline + 60 s."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._held: dict[object, float] = {}
+
+    def acquire(self):
+        with self._lock:
+            horizon = time.monotonic() - (stream_deadline_seconds() + 60)
+            for token in [t for t, started in self._held.items() if started < horizon]:
+                del self._held[token]
+            if len(self._held) >= stream_max():
+                return None
+            token = object()
+            self._held[token] = time.monotonic()
+            return token
+
+    def release(self, token) -> None:
+        with self._lock:
+            self._held.pop(token, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._held.clear()
+
+
+stream_slots = _StreamSlots()
 
 PITCH_UNAVAILABLE = "Pitch generation is temporarily unavailable, try again"   # shown instead of any provider / internal error text
 
@@ -133,17 +180,26 @@ def stream_pitch_endpoint(
         raise HTTPException(status_code=404, detail=f"brand_id={body.brand_id} not found")
     creator_id = current_user.id
     lock_bind = db.get_bind()
-    usage_limits.acquire_lock(db, creator_id)   # 409 while another pitch of this user is being written
+    slot = stream_slots.acquire()
+    if slot is None:   # too many streams open: refused before anything is locked or counted
+        raise HTTPException(status_code=503, detail="Server is busy, please try again in a few seconds", headers={"Retry-After": "5"})
+    try:
+        usage_limits.acquire_lock(db, creator_id)   # 409 while another pitch of this user is being written
+    except BaseException:
+        stream_slots.release(slot)
+        raise
     try:
         usage_limits.consume(db, creator_id, "pitches")   # 429 over the daily cap, before the stream starts and before any LLM call
         include_contact = allow_contacts(db, creator_id, body.brand_id)   # commits; 429 over the daily cap, before the stream starts
         db.commit()   # the request session only validated; end its transaction so it is not open for the whole stream
     except BaseException:
+        stream_slots.release(slot)
         usage_limits.release_lock(lock_bind, creator_id)
         raise
     followups: list[str] = []   # filled once the pitch is saved; run after the response has been sent
 
     def start_followups():
+        stream_slots.release(slot)
         usage_limits.release_lock(lock_bind, creator_id)   # in case the stream was cut before its own cleanup ran
         for job_id in followups:
             run_followup(job_id)
@@ -151,8 +207,8 @@ def stream_pitch_endpoint(
     cancel = threading.Event()
     finished = object()   # the worker is done
 
-    def worker(out: "queue.Queue") -> None:
-        """Runs the pitch stream on its own thread and puts the SSE events (dicts) on `out`, so the response can give up at the deadline."""
+    def worker(put) -> None:
+        """Runs the pitch stream on its own thread and hands the SSE events (dicts) to `put`, so the response can give up at the deadline."""
         try:
             # its own session: the request's session may be closed before the stream ends
             with SessionLocal() as stream_db:
@@ -172,38 +228,49 @@ def stream_pitch_endpoint(
                         if cancel.is_set():   # the deadline passed or the browser left: stop reading from the LLM
                             return
                         if kind == "status":
-                            out.put({"type": "status", "text": value})
+                            put({"type": "status", "text": value})
                         elif kind == "delta":
-                            out.put({"type": "delta", "text": value})
+                            put({"type": "delta", "text": value})
                         else:
                             job_id = claim_followup(stream_db, creator_id, value.brand_raw_id)
                             if job_id:
                                 followups.append(job_id)
-                            out.put({"type": "done", "pitch": json.loads(pitch_to_response(value).model_dump_json())})
+                            put({"type": "done", "pitch": json.loads(pitch_to_response(value).model_dump_json())})
                 except ValueError as exc:   # a brand that does not exist
-                    out.put({"type": "error", "detail": str(exc)})
+                    put({"type": "error", "detail": str(exc)})
                 except (LLMUnavailableError, RuntimeError) as exc:
                     logger.warning("Pitch stream failed for creator_id=%s: %s", creator_id, exc)
-                    out.put({"type": "error", "detail": PITCH_UNAVAILABLE})
+                    put({"type": "error", "detail": PITCH_UNAVAILABLE})
                 except DBAPIError:
                     # the response has already started, so no 503: report it in-stream without the SQL text
                     logger.exception("Pitch stream database error for creator_id=%s", creator_id)
-                    out.put({"type": "error", "detail": "Database busy, retry"})
+                    put({"type": "error", "detail": "Database busy, retry"})
         except Exception:
             logger.exception("Pitch stream crashed for creator_id=%s", creator_id)
-            out.put({"type": "error", "detail": PITCH_UNAVAILABLE})
+            put({"type": "error", "detail": PITCH_UNAVAILABLE})
         finally:
-            out.put(finished)
+            put(finished)
 
-    def events():
-        out: "queue.Queue" = queue.Queue()
-        deadline = time.monotonic() + stream_deadline_seconds()
-        threading.Thread(target=worker, args=(out,), name=f"pitch-stream-{creator_id}", daemon=True).start()
+    async def events():
+        """
+        An async generator: it waits for the worker's events with asyncio, so an open stream holds NO AnyIO worker thread (the old sync generator
+        held one for up to 150 s). The worker thread reports through loop.call_soon_threadsafe.
+        """
+        loop = asyncio.get_running_loop()
+        out: asyncio.Queue = asyncio.Queue()
+
+        def put(item) -> None:
+            try:
+                loop.call_soon_threadsafe(out.put_nowait, item)
+            except RuntimeError:   # the loop is gone (shutdown): nobody is listening
+                pass
+        deadline = loop.time() + stream_deadline_seconds()
+        threading.Thread(target=worker, args=(put,), name=f"pitch-stream-{creator_id}", daemon=True).start()
         try:
             while True:
                 try:
-                    item = out.get(timeout=max(deadline - time.monotonic(), 0))
-                except queue.Empty:
+                    item = await asyncio.wait_for(out.get(), timeout=max(deadline - loop.time(), 0))
+                except asyncio.TimeoutError:
                     logger.warning("Pitch stream for creator_id=%s hit the %ss deadline and was stopped", creator_id, stream_deadline_seconds())
                     yield _sse({"type": "error", "detail": PITCH_UNAVAILABLE})
                     return
@@ -212,7 +279,9 @@ def stream_pitch_endpoint(
                 yield _sse(item)
         finally:
             cancel.set()   # a worker still running stops at its next event
-            usage_limits.release_lock(lock_bind, creator_id)
+            stream_slots.release(slot)
+            # a short DB delete: on its own thread, so neither the event loop nor a cancelled generator waits for the database
+            threading.Thread(target=usage_limits.release_lock, args=(lock_bind, creator_id), daemon=True).start()
 
     return StreamingResponse(
         events(),

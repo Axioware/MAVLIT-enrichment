@@ -1,8 +1,11 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+import time
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api import usage_limits
+from api.jobs import QueueFull, busy_error, ensure_room, submit_user_job
 from api.auth import get_completed_user
 from pipeline.db import BrandRaw, CreatorProfile, OwnBrandJob, get_db
 from pipeline.own_brand import parse_instagram_handle, refresh_stale, run_own_brand_job, start_own_brand_job
@@ -55,7 +58,6 @@ def _to_response(db: Session, job: OwnBrandJob) -> OwnBrandJobResponse:
 @router.post("", response_model=OwnBrandJobResponse)
 def add_own_brand(
     body: OwnBrandRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: CreatorProfile = Depends(get_completed_user),
 ):
@@ -66,17 +68,45 @@ def add_own_brand(
     until status is "ready", then pitch with POST /pitches using the returned brand_id.
     """
     try:
-        parse_instagram_handle(body.instagram)   # a typo is a 400 and does not use up the daily cap
+        handle = parse_instagram_handle(body.instagram)   # a typo is a 400 and does not use up the daily cap
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    usage_limits.consume(db, current_user.id, "own_brands")   # 429 over the daily cap, before the Apify run is queued
+    ensure_room()   # 503 when the job queue is full: nothing is locked or counted yet
+    bind = db.get_bind()
+    if not usage_limits.try_acquire_lock(db, current_user.id, "own_brand", usage_limits.job_lock_stale_seconds()):
+        # one active lookup per user: the same brand again (a double click) gets that job back, another brand waits
+        active = None
+        for attempt in range(15):   # a double click: the first request is still creating its job row, give it a moment (3 s at most)
+            db.rollback()
+            active = (db.query(OwnBrandJob).filter(OwnBrandJob.creator_profile_id == current_user.id, OwnBrandJob.status.in_(("queued", "running")))
+                      .order_by(OwnBrandJob.created_at.desc()).first())
+            if active is not None or attempt == 14:
+                break
+            time.sleep(0.2)
+        if active is not None and active.instagram_handle == handle:
+            return _to_response(db, refresh_stale(db, active))
+        raise HTTPException(status_code=409, detail="A brand lookup is already running. Wait for it to finish, then look up the next one.")
+    queued = False
     try:
-        job = start_own_brand_job(db, current_user.id, body.instagram)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    if job.status == "queued":
-        background_tasks.add_task(run_own_brand_job, job.id)
-    return _to_response(db, job)
+        usage_limits.consume(db, current_user.id, "own_brands")   # 429 over the daily cap, before the Apify run is queued
+        try:
+            job = start_own_brand_job(db, current_user.id, body.instagram)
+        except ValueError as exc:
+            usage_limits.refund(db, current_user.id, "own_brands")
+            raise HTTPException(status_code=400, detail=str(exc))
+        if job.status == "queued":
+            try:
+                submit_user_job(run_own_brand_job, job.id, creator_id=current_user.id, locks=("own_brand",), bind=bind)
+                queued = True
+            except QueueFull:   # lost the race for the last place in the queue: the job is not run, and not counted
+                job.status, job.stage, job.error = "failed", "Stopped", "The server is busy, please try again in a moment"
+                db.commit()
+                usage_limits.refund(db, current_user.id, "own_brands")
+                raise busy_error()
+        return _to_response(db, job)
+    finally:
+        if not queued:
+            usage_limits.release_lock(bind, current_user.id, "own_brand")   # a queued job releases it itself when it ends
 
 
 @router.get("/jobs/{job_id}", response_model=OwnBrandJobResponse)

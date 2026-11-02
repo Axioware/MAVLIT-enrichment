@@ -4,7 +4,8 @@ api/recovery.py
 Startup recovery of work that a restart interrupted. Description and AI-ranking jobs run inside the API process: when it stops, a creator's
 row is left as 'queued' or 'running' and nothing would ever finish it (the status endpoints keep returning the dead job, and saving the profile
 is refused with 409 while a description is pending). At startup these are marked 'failed' with a plain message, and the in-flight pitch locks
-(feature_locks) are cleared.
+(feature_locks) are cleared. The jobs waiting in the in-memory executors (api/jobs.py) are gone with the old process; their rows are the
+ones marked failed here.
 
 THIS IS ONLY SAFE WITH A SINGLE API WORKER PROCESS (the case today: one uvicorn worker). With more than one worker, a starting worker would
 fail jobs that another, still running worker is working on: change this to fail only rows older than this process's start time, or run it
@@ -15,7 +16,7 @@ import logging
 
 from sqlalchemy import delete, update
 
-from pipeline.db import CreatorProfile, FeatureLock, SessionLocal
+from pipeline.db import CreatorProfile, FeatureLock, OwnBrandJob, SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,8 @@ def recover_stuck_jobs(session_factory=None) -> dict[str, int]:
             status, error = getattr(CreatorProfile, status_name), getattr(CreatorProfile, error_name)
             result = db.execute(update(CreatorProfile).where(status.in_(_PENDING)).values({status_name: "failed", error_name: RESTART_MESSAGE}))
             changed[status_name] = result.rowcount or 0
+        changed["own_brand_jobs"] = db.execute(
+            update(OwnBrandJob).where(OwnBrandJob.status.in_(_PENDING)).values(status="failed", stage="Stopped", error=RESTART_MESSAGE)).rowcount or 0
         changed["feature_locks"] = db.execute(delete(FeatureLock)).rowcount or 0
         db.commit()
     if any(changed.values()):

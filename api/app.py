@@ -1,5 +1,7 @@
 import logging
 import os
+import threading
+import time
 import uuid
 
 import anyio.to_thread
@@ -11,7 +13,7 @@ import hashlib
 import hmac
 
 import wtforms
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -22,7 +24,7 @@ from sqladmin.filters import AllUniqueStringValuesFilter, OperationColumnFilter
 from sqlalchemy import String, cast, or_, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session, aliased, object_session
 from sqlalchemy.sql import Select
 
 from api.advisory import router as advisory_router
@@ -45,6 +47,7 @@ from api.schemas import CreatorProfileResponse
 from api import attempt_limits, usage_limits
 from api.body_limits import BodySizeLimitMiddleware
 from api.concurrency import THREAD_RESERVE, SlowRouteLimitMiddleware, slow_route_concurrency
+from api.jobs import JOB_KINDS, STALE_MESSAGE, QueueFull, busy_error, ensure_room, operator_job_keep_seconds, operator_job_stale_seconds, operator_jobs, submit_user_job, sweep_stale, user_jobs
 from api.recovery import recover_stuck_jobs
 from pipeline.helpers.apify import request_path
 from api.paging import BRAND_POSTS_LIMIT, MAX_OFFSET
@@ -139,6 +142,9 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Startup recovery of interrupted jobs failed; stuck jobs (if any) stay as they are")
     yield
+    # Shutdown: waiting jobs are dropped (a restart loses them; the next start marks them failed) and running ones get a few seconds. Never hangs.
+    user_jobs.shutdown()
+    operator_jobs.shutdown()
 
 
 # The interactive docs and the OpenAPI schema list every route (the operator ones too): public in development only.
@@ -973,6 +979,61 @@ class EnrichRequest(BaseModel):
 # 
 
 _jobs: dict[str, dict] = {}
+_jobs_lock = threading.Lock()
+
+
+def _purge_jobs(now: float) -> None:
+    """Forget operator jobs that finished more than OPERATOR_JOB_KEEP_SECONDS (1 h) ago. Call with _jobs_lock held."""
+    keep = operator_job_keep_seconds()
+    for job_id in [j for j, job in _jobs.items() if job.get("finished_at") is not None and now - job["finished_at"] > keep]:
+        del _jobs[job_id]
+
+
+def _job_is_stale(job: dict, now: float) -> bool:
+    return job.get("status") in ("queued", "running") and now - job.get("created_at", now) > operator_job_stale_seconds()
+
+
+def _get_job(job_id: str) -> dict:
+    """The operator job, 404 if unknown. One that has been queued/running longer than OPERATOR_JOB_STALE_SECONDS (6 h) is reported as failed."""
+    now = time.time()
+    with _jobs_lock:
+        _purge_jobs(now)
+        job = _jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if _job_is_stale(job, now):
+            job.update({"status": "error", "error": STALE_MESSAGE, "finished_at": now})
+        return dict(job)
+
+
+def _start_operator_job(kind: str, entry: dict, fn, *args) -> str:
+    """Queue an operator job on the one-worker operator executor. HTTP 409 while a job of the same kind is queued or running, 503 if the queue is full."""
+    now = time.time()
+    with _jobs_lock:
+        _purge_jobs(now)
+        for other in _jobs.values():
+            if other.get("kind") == kind and other.get("status") in ("queued", "running") and not _job_is_stale(other, now):
+                raise HTTPException(status_code=409, detail=f"A {kind} job is already running. Wait for it to finish, then start another.")
+        job_id = str(uuid.uuid4())[:8]
+        _jobs[job_id] = {**entry, "kind": kind, "status": "queued", "created_at": now}
+
+    def run() -> None:
+        _jobs[job_id]["status"] = "running"
+        try:
+            fn(job_id, *args)
+        finally:
+            job = _jobs.get(job_id)
+            if job is not None:
+                if job.get("status") in ("queued", "running"):
+                    job.update({"status": "error", "error": "The job ended without a result"})
+                job["finished_at"] = time.time()
+    try:
+        operator_jobs.submit(run)
+    except QueueFull:
+        with _jobs_lock:
+            _jobs.pop(job_id, None)
+        raise busy_error()
+    return job_id
 
 
 BATCH_BUSY_MESSAGE = "Another job is running, retry shortly."   # the batch pool (2 connections) had none free within pool_timeout
@@ -1210,17 +1271,15 @@ def bulk_add_content_creators(body: BulkAddCreatorsRequest):
 
 
 @app.post("/seed", response_model=SeedJobResponse, dependencies=[Depends(require_operator)])
-def seed_niche(body: SeedRequest, background_tasks: BackgroundTasks):
+def seed_niche(body: SeedRequest):
     """
     Kick off a seed job in the background and return a job_id immediately.
     Poll GET /seed/status/{job_id} to track progress.
     """
-    job_id = str(uuid.uuid4())[:8]
-    _jobs[job_id] = {"status": "running", "niche": body.niche, "inserted": 0}
-    background_tasks.add_task(_run_seed_job, job_id, body)
+    job_id = _start_operator_job("seed", {"niche": body.niche, "inserted": 0}, _run_seed_job, body)
     return SeedJobResponse(
         job_id=job_id,
-        status="running",
+        status="queued",
         niche=body.niche,
         message=f"Seeding '{body.niche}' started",
     )
@@ -1229,9 +1288,7 @@ def seed_niche(body: SeedRequest, background_tasks: BackgroundTasks):
 @app.get("/seed/status/{job_id}", response_model=SeedStatusResponse, dependencies=[Depends(require_operator)])
 def seed_status(job_id: str):
     """Poll every 2 s until status is 'done' or 'error'."""
-    job = _jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    job = _get_job(job_id)
     return SeedStatusResponse(
         status=job["status"],
         niche=job["niche"],
@@ -1241,19 +1298,17 @@ def seed_status(job_id: str):
 
 
 @app.post("/enrich/signals", response_model=EnrichJobResponse, dependencies=[Depends(require_operator)])
-def enrich_signals(body: EnrichRequest, background_tasks: BackgroundTasks):
+def enrich_signals(body: EnrichRequest):
     """
     Kick off signal enrichment in the background.
     Steps: wikidata_socials, shopify, tranco, meta_ads, youtube.
     Pass `steps` to run only a subset, e.g. ["shopify", "tranco"].
     Poll GET /enrich/signals/status/{job_id} to track progress.
     """
-    job_id = str(uuid.uuid4())[:8]
-    _jobs[job_id] = {"status": "running", "results": {}}
-    background_tasks.add_task(_run_enrich_job, job_id, body)
+    job_id = _start_operator_job("enrich", {"results": {}}, _run_enrich_job, body)
     return EnrichJobResponse(
         job_id=job_id,
-        status="running",
+        status="queued",
         message="Signal enrichment started",
     )
 
@@ -1261,9 +1316,7 @@ def enrich_signals(body: EnrichRequest, background_tasks: BackgroundTasks):
 @app.get("/enrich/signals/status/{job_id}", response_model=EnrichStatusResponse, dependencies=[Depends(require_operator)])
 def enrich_signals_status(job_id: str):
     """Poll until status is 'done' or 'error'."""
-    job = _jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    job = _get_job(job_id)
     return EnrichStatusResponse(
         status=job["status"],
         results=job.get("results"),
@@ -1304,23 +1357,19 @@ def _run_scoring_job(job_id: str, limit: int) -> None:
 
 
 @app.post("/score/brands", response_model=ScoreJobResponse, dependencies=[Depends(require_operator)])
-def score_brands(body: ScoreRequest, background_tasks: BackgroundTasks):
+def score_brands(body: ScoreRequest):
     """
     Score all brands that have enrichment data. Results are written to initial_brand_score.
     Poll GET /score/brands/status/{job_id} to track progress.
     """
-    job_id = str(uuid.uuid4())[:8]
-    _jobs[job_id] = {"status": "running", "scored": 0}
-    background_tasks.add_task(_run_scoring_job, job_id, body.limit)
-    return ScoreJobResponse(job_id=job_id, status="running", message="Brand scoring started")
+    job_id = _start_operator_job("score", {"scored": 0}, _run_scoring_job, body.limit)
+    return ScoreJobResponse(job_id=job_id, status="queued", message="Brand scoring started")
 
 
 @app.get("/score/brands/status/{job_id}", response_model=ScoreStatusResponse, dependencies=[Depends(require_operator)])
 def score_brands_status(job_id: str):
     """Poll until status is 'done' or 'error'."""
-    job = _jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    job = _get_job(job_id)
     return ScoreStatusResponse(
         status=job["status"],
         scored=job.get("scored"),
@@ -1536,6 +1585,9 @@ def list_brand_niche_tags():
 @app.get("/creator-profile/me", response_model=CreatorProfileResponse)
 def get_my_creator_profile(current_user: CreatorProfile = Depends(get_current_user)):
     """Return the logged-in user's creator profile."""
+    session = object_session(current_user)
+    if session is not None:
+        sweep_stale(session, current_user)   # a description / ranking that says running but is not alive is reported failed
     return _profile_to_response(current_user)
 
 
@@ -1607,10 +1659,9 @@ def _run_creator_description_job(
 @app.post("/creator-profile/me/generate-description", response_model=CreatorDescriptionResponse)
 def generate_my_creator_description(
     body: CreatorDescriptionRequest,
-    background_tasks: BackgroundTasks,
     current_user: CreatorProfile = Depends(get_current_user),
 ):
-    """Queue one platform description generation job and return immediately."""
+    """Queue one platform description generation job and return immediately (the one already running, if there is one)."""
     platform = body.platform.strip().lower()
     db = SessionLocal()
     try:
@@ -1626,6 +1677,7 @@ def generate_my_creator_description(
         description_field = f"{platform}_description"
         error_field = f"{platform}_description_error"
         row = db.query(CreatorProfile).filter(CreatorProfile.id == current_user.id).first()
+        sweep_stale(db, row)   # a dead "running" job is failed first, so a new one can start
         current_status = getattr(row, status_field) or "idle"
         current_job_id = getattr(row, job_field)
         if current_status in {"queued", "running"} and current_job_id:
@@ -1637,20 +1689,34 @@ def generate_my_creator_description(
                 error=getattr(row, error_field),
             )
 
-        usage_limits.consume(db, current_user.id, "description_generation")   # 429 over the daily cap, before the Apify / LLM job is queued
+        ensure_room()   # 503 when the job queue is full: nothing is locked or counted yet
+        lock = f"description:{platform}"
+        bind = db.get_bind()
+        if not usage_limits.try_acquire_lock(db, current_user.id, lock, usage_limits.job_lock_stale_seconds()):
+            # two clicks at once: the other request is queuing the job right now
+            raise HTTPException(status_code=409, detail="A description is already being generated. Wait for it to finish.")
+        try:
+            usage_limits.consume(db, current_user.id, "description_generation")   # 429 over the daily cap, before the Apify / LLM job is queued
+        except BaseException:
+            usage_limits.release_lock(bind, current_user.id, lock)
+            raise
+        previous = (current_status, current_job_id, getattr(row, error_field))
         job_id = str(uuid.uuid4())
         setattr(row, status_field, "queued")
         setattr(row, job_field, job_id)
         setattr(row, error_field, None)
         db.commit()
-        background_tasks.add_task(
-            _run_creator_description_job,
-            current_user.id,
-            platform,
-            body.username.strip(),
-            body.niche.strip(),
-            job_id,
-        )
+        try:
+            submit_user_job(_run_creator_description_job, current_user.id, platform, body.username.strip(), body.niche.strip(), job_id,
+                            creator_id=current_user.id, locks=(lock,), bind=bind)
+        except QueueFull:   # lost the race for the last place in the queue: undo, do not count it
+            setattr(row, status_field, previous[0])
+            setattr(row, job_field, previous[1])
+            setattr(row, error_field, previous[2])
+            db.commit()
+            usage_limits.refund(db, current_user.id, "description_generation")
+            usage_limits.release_lock(bind, current_user.id, lock)
+            raise busy_error()
         return CreatorDescriptionResponse(
             platform=platform,
             status="queued",
@@ -1726,6 +1792,22 @@ def _run_llm_v3_ranking_job(creator_id: int) -> None:
     _run_ai_ranking_job(creator_id, "v3")
 
 
+def _try_ranking_locks(db, creator_id: int) -> list[str]:
+    """Take the lock of every ranking a profile save re-runs (v2 unless paused, and v3). All or none; [] if one is busy or the job queue is full."""
+    if not user_jobs.has_room():
+        return []
+    wanted = ([] if _AI_RANKINGS["v2"]["paused"] else ["ranking:v2"]) + ["ranking:v3"]
+    taken: list[str] = []
+    for feature in wanted:
+        if usage_limits.try_acquire_lock(db, creator_id, feature, usage_limits.job_lock_stale_seconds()):
+            taken.append(feature)
+        else:
+            for held in taken:
+                usage_limits.release_lock(db.get_bind(), creator_id, held)
+            return []
+    return taken
+
+
 def _run_creator_signals_job(creator_id: int) -> None:
     db = SessionLocal()
     try:
@@ -1744,7 +1826,6 @@ def _run_creator_signals_job(creator_id: int) -> None:
 @app.put("/creator-profile/me", response_model=CreatorProfileResponse)
 def upsert_my_creator_profile(
     body: CreatorProfileRequest,
-    background_tasks: BackgroundTasks,
     current_user: CreatorProfile = Depends(get_current_user),
 ):
     """
@@ -1765,24 +1846,39 @@ def upsert_my_creator_profile(
                 detail="Complete the required onboarding fields before continuing: full name, age, gender, primary platforms, Instagram username, follower count, primary niche, and at least one creator description.",
             )
         row = db.query(CreatorProfile).filter(CreatorProfile.id == current_user.id).first()
+        sweep_stale(db, row)
         if (row.instagram_description_status or "idle") in {"queued", "running"} or (row.youtube_description_status or "idle") in {"queued", "running"}:
             raise HTTPException(status_code=409, detail="A description is still being generated. Wait for it to finish before saving your profile.")
+        bind = db.get_bind()
+        ranking_locks = _try_ranking_locks(db, row.id)   # [] when this creator's ranking is already running, or the job queue is full
         previous_handle = row.instagram_handle
         for field, value in payload.items():
             setattr(row, field, value)
         row.creator_tier = bucket_creator_tier(row.follower_count)
-        if not _AI_RANKINGS["v2"]["paused"]:
-            row.llm_ranking_status = "queued"     # signals job runs the v2 LLM ranking next,
-            row.llm_ranking_error = None
-        row.llm_v3_ranking_status = "queued"  # then v3
-        row.llm_v3_ranking_error = None
+        if ranking_locks:
+            if not _AI_RANKINGS["v2"]["paused"]:
+                row.llm_ranking_status = "queued"     # signals job runs the v2 LLM ranking next,
+                row.llm_ranking_error = None
+            row.llm_v3_ranking_status = "queued"  # then v3
+            row.llm_v3_ranking_error = None
 
         db.commit()
         db.refresh(row)
         # A changed Instagram username: the old username's saved posts are emptied (unless generating the description already
         # saved the new username's posts); they are filled again the next time the description is generated.
         clear_posts_if_username_changed(db, row.id, previous_handle, row.instagram_handle)
-        background_tasks.add_task(_run_creator_signals_job, row.id)
+        if ranking_locks:
+            try:
+                submit_user_job(_run_creator_signals_job, row.id, creator_id=row.id, locks=tuple(ranking_locks), bind=bind)
+            except QueueFull:   # the profile is saved; only the re-ranking is skipped, and the creator can refresh the matches later
+                for feature in ranking_locks:
+                    usage_limits.release_lock(bind, row.id, feature)
+                for status_field, error_field, feature in JOB_KINDS:
+                    if feature in ranking_locks:
+                        setattr(row, status_field, "failed")
+                        setattr(row, error_field, "The server is busy, refresh your matches in a moment")
+                db.commit()
+                db.refresh(row)
         return _profile_to_response(row)
     finally:
         db.close()
@@ -1880,6 +1976,8 @@ def _ai_matches_response(db, user_id: int, version: str) -> LlmMatchesResponse:
     config = _AI_RANKINGS[version]
     ranking_model = config["model"]
     row = db.query(CreatorProfile).filter(CreatorProfile.id == user_id).first()
+    if row is not None:
+        sweep_stale(db, row)   # a ranking that says running but is not alive is reported failed
     # Stored rankings are re-checked against the brand-only hard filters (geo,
     # referral, partnership, avoided niches) so a newly blocked brand disappears
     # at once, without waiting for the creator's next re-rank.
@@ -1926,20 +2024,37 @@ def _ai_matches_response(db, user_id: int, version: str) -> LlmMatchesResponse:
     )
 
 
-def _refresh_ai_matches(background_tasks: BackgroundTasks, user_id: int, version: str) -> LlmMatchesResponse:
-    """Queue a new ranking run for `version` (no-op if one is already queued/running)."""
+def _refresh_ai_matches(user_id: int, version: str) -> LlmMatchesResponse:
+    """Queue a new ranking run for `version` (no-op if one is already queued/running: the creator's lock is taken in one atomic statement)."""
     prefix = _AI_RANKINGS[version]["prefix"]
     db = SessionLocal()
     try:
         row = db.query(CreatorProfile).filter(CreatorProfile.id == user_id).first()
         if _AI_RANKINGS[version]["paused"]:
             return _ai_matches_response(db, user_id, version)
+        sweep_stale(db, row)
         if getattr(row, f"{prefix}_ranking_status") not in ("queued", "running"):
-            usage_limits.consume(db, user_id, "match_refresh")   # 429 over the daily cap, before the LLM ranking is queued
-            setattr(row, f"{prefix}_ranking_status", "queued")
-            setattr(row, f"{prefix}_ranking_error", None)
-            db.commit()
-            background_tasks.add_task(_run_ai_ranking_job, user_id, version)
+            ensure_room()   # 503 when the job queue is full: nothing is locked or counted yet
+            lock, bind = f"ranking:{version}", db.get_bind()
+            if usage_limits.try_acquire_lock(db, user_id, lock, usage_limits.job_lock_stale_seconds()):   # lost the race: another click is queuing it
+                try:
+                    usage_limits.consume(db, user_id, "match_refresh")   # 429 over the daily cap, before the LLM ranking is queued
+                except BaseException:
+                    usage_limits.release_lock(bind, user_id, lock)
+                    raise
+                previous = (getattr(row, f"{prefix}_ranking_status"), getattr(row, f"{prefix}_ranking_error"))
+                setattr(row, f"{prefix}_ranking_status", "queued")
+                setattr(row, f"{prefix}_ranking_error", None)
+                db.commit()
+                try:
+                    submit_user_job(_run_ai_ranking_job, user_id, version, creator_id=user_id, locks=(lock,), bind=bind)
+                except QueueFull:
+                    setattr(row, f"{prefix}_ranking_status", previous[0])
+                    setattr(row, f"{prefix}_ranking_error", previous[1])
+                    db.commit()
+                    usage_limits.refund(db, user_id, "match_refresh")
+                    usage_limits.release_lock(bind, user_id, lock)
+                    raise busy_error()
         return _ai_matches_response(db, user_id, version)
     finally:
         db.close()
@@ -1962,11 +2077,10 @@ def get_my_llm_matches(current_user: CreatorProfile = Depends(get_completed_user
 
 @app.post("/matches/me/v2/refresh", response_model=LlmMatchesResponse)
 def refresh_my_llm_matches(
-    background_tasks: BackgroundTasks,
     current_user: CreatorProfile = Depends(get_completed_user),
 ):
     """Queue a new v2 LLM ranking run (no-op if one is already queued/running)."""
-    return _refresh_ai_matches(background_tasks, current_user.id, "v2")
+    return _refresh_ai_matches(current_user.id, "v2")
 
 
 @app.get("/matches/me/v3", response_model=LlmMatchesResponse)
@@ -1987,11 +2101,10 @@ def get_my_llm_v3_matches(current_user: CreatorProfile = Depends(get_completed_u
 
 @app.post("/matches/me/v3/refresh", response_model=LlmMatchesResponse)
 def refresh_my_llm_v3_matches(
-    background_tasks: BackgroundTasks,
     current_user: CreatorProfile = Depends(get_completed_user),
 ):
     """Queue a new v3 LLM ranking run (no-op if one is already queued/running)."""
-    return _refresh_ai_matches(background_tasks, current_user.id, "v3")
+    return _refresh_ai_matches(current_user.id, "v3")
 
 
 class PartnershipPost(BaseModel):

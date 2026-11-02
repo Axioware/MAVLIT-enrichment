@@ -464,13 +464,16 @@ class WithDatabase(unittest.TestCase):
             conn.execute(text("""UPDATE creator_profiles SET instagram_description_status = 'completed', youtube_description_status = 'idle',
                                  llm_ranking_status = 'failed', llm_v3_ranking_status = 'completed' WHERE id = :b"""), {"b": self.ids["b"]})
             conn.execute(text("INSERT INTO feature_locks (creator_profile_id, feature) VALUES (:a, 'pitch'), (:b, 'pitch')"), {"a": self.ids["a"], "b": self.ids["b"]})
+        with self.engine.begin() as conn:   # the old process's locks are still in the table
+            conn.execute(text("""INSERT INTO feature_locks (creator_profile_id, feature) VALUES (:a, 'description:instagram'), (:a, 'description:youtube'),
+                                 (:a, 'ranking:v2'), (:a, 'ranking:v3')"""), {"a": self.ids["a"]})
         a = self.client("a")
         before = a.put("/creator-profile/me", json=self.profile_body())
         self.assertEqual(before.status_code, 409, "the stuck job blocks the save, which is what the recovery is for")
 
         changed = recover_stuck_jobs(self.factory)
         self.assertEqual(changed, {"instagram_description_status": 1, "youtube_description_status": 1, "llm_ranking_status": 1,
-                                   "llm_v3_ranking_status": 1, "feature_locks": 2})
+                                   "llm_v3_ranking_status": 1, "own_brand_jobs": 0, "feature_locks": 6})
         self.assertEqual(self.row("a", "instagram_description_status", "instagram_description_error", "youtube_description_status",
                                   "youtube_description_error", "llm_ranking_status", "llm_ranking_error", "llm_v3_ranking_status", "llm_v3_ranking_error"),
                          ("failed", RESTART_MESSAGE, "failed", RESTART_MESSAGE, "failed", RESTART_MESSAGE, "failed", RESTART_MESSAGE))

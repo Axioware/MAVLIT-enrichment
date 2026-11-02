@@ -19,7 +19,7 @@ import os
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -59,6 +59,11 @@ def lock_stale_seconds() -> int:
     return _int_setting("PITCH_LOCK_STALE_SECONDS", 300, minimum=30)
 
 
+def job_lock_stale_seconds() -> int:
+    """JOB_LOCK_STALE_SECONDS (default 1800): a background-job lock older than this is dead and is taken over (and its job reported failed)."""
+    return _int_setting("JOB_LOCK_STALE_SECONDS", 1800, minimum=60)
+
+
 def saved_brands_max() -> int:
     return _int_setting("SAVED_BRANDS_MAX", 500)
 
@@ -67,6 +72,7 @@ def check_settings() -> None:
     for feature in DAILY_CAPS:
         daily_cap(feature)
     lock_stale_seconds()
+    job_lock_stale_seconds()
     saved_brands_max()
 
 
@@ -106,9 +112,13 @@ def consume(db: Session, creator_id: int, feature: str) -> None:
     db.commit()
 
 
-def acquire_lock(db: Session, creator_id: int, feature: str = PITCH_LOCK) -> None:
-    """Take this creator's in-flight lock for `feature`, or raise HTTP 409 when another request holds it. Commits."""
-    stale = timedelta(seconds=lock_stale_seconds())
+def try_acquire_lock(db: Session, creator_id: int, feature: str = PITCH_LOCK, stale_seconds: int | None = None) -> bool:
+    """
+    Take this creator's in-flight lock for `feature` in one atomic statement: True if it is now ours, False when another request holds it. A row
+    older than `stale_seconds` (default PITCH_LOCK_STALE_SECONDS) is taken over. Commits. Keys in use: "pitch", "ranking:v2", "ranking:v3",
+    "description:instagram", "description:youtube", "own_brand".
+    """
+    stale = timedelta(seconds=stale_seconds if stale_seconds is not None else lock_stale_seconds())
     stmt = (
         pg_insert(FeatureLock)
         .values(creator_profile_id=creator_id, feature=feature)
@@ -118,8 +128,27 @@ def acquire_lock(db: Session, creator_id: int, feature: str = PITCH_LOCK) -> Non
     )
     got = db.execute(stmt).first()
     db.commit()
-    if got is None:
+    return got is not None
+
+
+def acquire_lock(db: Session, creator_id: int, feature: str = PITCH_LOCK) -> None:
+    """Take this creator's in-flight lock for `feature`, or raise HTTP 409 when another request holds it. Commits."""
+    if not try_acquire_lock(db, creator_id, feature):
         raise HTTPException(status_code=409, detail="Another pitch is already being written for you. Wait for it to finish, then try again.")
+
+
+def active_locks(db: Session, creator_id: int, stale_seconds: int | None = None) -> set[str]:
+    """The features this creator holds a live (not stale) lock for."""
+    stale = timedelta(seconds=stale_seconds if stale_seconds is not None else job_lock_stale_seconds())
+    rows = db.execute(select(FeatureLock.feature).where(FeatureLock.creator_profile_id == creator_id, FeatureLock.started_at > func.now() - stale))
+    return {feature for (feature,) in rows}
+
+
+def refund(db: Session, creator_id: int, feature: str) -> None:
+    """Give back one use of today's daily cap (a job that could not be queued must not count). Commits."""
+    db.execute(update(FeatureUsage).where(FeatureUsage.creator_profile_id == creator_id, FeatureUsage.feature == feature,
+                                          FeatureUsage.used_on == _today(), FeatureUsage.uses > 0).values(uses=FeatureUsage.uses - 1))
+    db.commit()
 
 
 def release_lock(bind, creator_id: int, feature: str = PITCH_LOCK) -> None:

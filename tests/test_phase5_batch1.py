@@ -9,9 +9,11 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -499,7 +501,8 @@ class WithDatabase(unittest.TestCase):
         a = self.client("a")
         self.assertEqual(a.post("/own-brands", json={"instagram": "not a handle!"}).status_code, 400)
         self.assertEqual(self.uses("a", "own_brands"), 0)
-        with mock.patch("api.own_brands.start_own_brand_job", side_effect=ValueError("stop")):
+        ready = SimpleNamespace(id="job-1", status="ready", stage=None, error=None, brand_raw_id=None)   # a brand that is already known: no job to run
+        with mock.patch("api.own_brands.start_own_brand_job", return_value=ready):
             self.assert_cap("own_brands", "OWN_BRANDS_PER_DAY", lambda c: c.post("/own-brands", json={"instagram": "brandname"}))
 
     def test_match_refresh_cap(self):
@@ -517,10 +520,13 @@ class WithDatabase(unittest.TestCase):
                         lambda c: c.post("/creator-profile/me/generate-description", json=body), between=reset)
 
     def test_a_pending_description_job_is_returned_without_using_the_cap(self):
+        gate = threading.Event()   # the job stays alive (and keeps its lock) until the test ends
+        self.addCleanup(gate.set)
         a = self.client("a")
         body = {"platform": "instagram", "username": "someone", "niche": "Beauty"}
-        self.assertEqual(a.post("/creator-profile/me/generate-description", json=body).status_code, 200)
-        self.assertEqual(a.post("/creator-profile/me/generate-description", json=body).status_code, 200)
+        with mock.patch.object(self.api_app, "_run_creator_description_job", side_effect=lambda *args, **kwargs: gate.wait(20)):
+            self.assertEqual(a.post("/creator-profile/me/generate-description", json=body).status_code, 200)
+            self.assertEqual(a.post("/creator-profile/me/generate-description", json=body).status_code, 200)
         self.assertEqual(self.uses("a", "description_generation"), 1)
 
     def test_the_cap_resets_on_the_next_utc_day(self):
@@ -631,11 +637,14 @@ class WithDatabase(unittest.TestCase):
             for status in ("queued", "running"):
                 with self.engine.begin() as conn:
                     conn.execute(text(f"UPDATE creator_profiles SET {platform}_description_status = '{status}' WHERE id = :c"), {"c": self.ids["a"]})
+                    conn.execute(text("INSERT INTO feature_locks (creator_profile_id, feature) VALUES (:c, :f) ON CONFLICT DO NOTHING"),
+                                 {"c": self.ids["a"], "f": f"description:{platform}"})   # the job is alive: its lock is held
                 r = a.put("/creator-profile/me", json=self.profile_body())
                 self.assertEqual(r.status_code, 409, (platform, status))
                 self.assertIn("still being generated", r.json()["detail"])
             with self.engine.begin() as conn:
                 conn.execute(text(f"UPDATE creator_profiles SET {platform}_description_status = 'completed' WHERE id = :c"), {"c": self.ids["a"]})
+                conn.execute(text("DELETE FROM feature_locks WHERE creator_profile_id = :c"), {"c": self.ids["a"]})
         self.assertEqual(a.put("/creator-profile/me", json=self.profile_body()).status_code, 200)
 
     def test_a_stored_profile_over_the_caps_is_readable_and_a_save_must_shorten_it(self):

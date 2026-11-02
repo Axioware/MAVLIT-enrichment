@@ -176,6 +176,7 @@ class StreamRouteEndsItsTransaction(unittest.TestCase):
         from api.schemas import PitchRequest
         db, user = mock.MagicMock(), mock.MagicMock(id=7)
         body = PitchRequest(is_custom=True, custom_brand_name="Acme", story="s")
+        self.addCleanup(pitches.stream_slots.clear)   # the stream is never iterated here, so its slot is freed by hand
         response = pitches.stream_pitch_endpoint(body, db=db, current_user=user)
         # the lock and the daily-cap count commit too; what matters is that the last thing the request session does is a commit
         db.commit.assert_called()
