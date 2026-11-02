@@ -10,7 +10,7 @@ count.
      any MAVLIT user are reused, no Apify run.
   2. Only the posts NOT found there are scraped with Apify (one run for all of them), and saved in
      creator_instagram_posts for the user.
-  3. The LLM gets  <url> (post caption: "..."; views: 45,000)  for each such entry.
+  3. The LLM gets  <url> (post caption: "..."; views: 45,000; likes: 3,200; comments: 150; engagement (likes + comments): 3,350)  for each such entry.
 
 Any other entry (a brand name, a description, a non-Instagram link) is passed on as typed, and an entry
 that never needs Apify never runs it. A post that cannot be read (private, deleted, Apify failure) is
@@ -70,7 +70,7 @@ def _saved_post(db: Session, code: str) -> dict | None:
     )
     if row is None:
         return None
-    return {"caption": row.caption, "views": row.video_view_count}
+    return {"caption": row.caption, "views": row.video_view_count, "likes": row.likes_count, "comments": row.comments_count}
 
 
 def _scrape_posts(db: Session, creator: CreatorProfile, urls: dict[str, str]) -> dict[str, dict]:
@@ -102,7 +102,8 @@ def _scrape_posts(db: Session, creator: CreatorProfile, urls: dict[str, str]) ->
         code = item.get("shortCode") or (post_code(item.get("url") or "") or "")
         if code not in urls:
             continue
-        found[code] = {"caption": item.get("caption"), "views": item.get("videoViewCount")}
+        found[code] = {"caption": item.get("caption"), "views": item.get("videoViewCount"),
+                       "likes": item.get("likesCount"), "comments": item.get("commentsCount")}
         by_owner.setdefault((item.get("ownerUsername") or "").strip() or "unknown", []).append(item)
     for owner, owner_items in by_owner.items():
         save_creator_posts(db, creator.id, owner, owner_items)   # never raises
@@ -128,6 +129,12 @@ def describe_entries(db: Session, creator: CreatorProfile, value: str | None, de
             parts.append(f'post caption: "{caption[:_CAPTION_CHARS]}{"..." if len(caption) > _CAPTION_CHARS else ""}"')
         if isinstance(info.get("views"), int) and info["views"] > 0:
             parts.append(f"views: {info['views']:,}")
+        likes, comments = info.get("likes"), info.get("comments")
+        if isinstance(likes, int) and likes >= 0:   # Instagram reports -1 when the likes are hidden
+            parts.append(f"likes: {likes:,}")
+            if isinstance(comments, int) and comments >= 0:
+                parts.append(f"comments: {comments:,}")
+                parts.append(f"engagement (likes + comments): {likes + comments:,}")
         lines.append(f"{_clean_url(entry)} ({'; '.join(parts)})" if parts else _clean_url(entry))
     if len(lines) <= 1:
         return lines[0] if lines else ""

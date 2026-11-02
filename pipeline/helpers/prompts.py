@@ -1683,12 +1683,13 @@ PITCH_STATS_RULE = """\
   median views, highest, average and median engagement, where engagement
   is likes plus comments per post) may be used, so the ban above on
   average views and engagement figures does not apply to those exact
-  numbers. Use at most one or two of them, only when they strengthen the
-  pitch, rounded naturally.
-- Say what each figure measures, for example "my posts average about X
-  likes and comments" or "the median reel gets about Y views". Do not
-  present the highest figure as typical, and never turn these numbers into
-  an engagement rate, a prediction, or a guarantee.
+  numbers.
+- When the line is not "unknown", include one short sentence with the
+  most useful figures from it, for example the average views per reel and
+  the average engagement per post, or the highest views of a recent
+  reel. Round naturally and say what each figure measures.
+- Do not present the highest figure as typical, and never turn these
+  numbers into an engagement rate, a prediction, or a guarantee.
 - If the line says "unknown", omit it.
 """
 
@@ -1696,11 +1697,14 @@ PITCH_STATS_RULE = """\
 # The post may include a caption and its recorded view count.
 PITCH_POSTS_RULE = """\
 - A past partnership or content link may include an Instagram URL, post
-  caption, and view count. Describe the content only using the supplied
-  caption. You may mention the recorded views once, rounded naturally,
-  when relevant to the pitch.
-- Make clear that the figure belongs to that particular post. Never
-  present it as typical or average performance.
+  caption, view count, likes, comments and engagement (likes plus
+  comments). Describe the content only using the supplied caption.
+- For every supplied post that comes with figures, give its most
+  impressive supplied figure or two (views, likes or engagement) in a few
+  words right beside that post, for example "(about 45K views)" or
+  "(around 3,000 likes)". Round naturally and make clear the figure
+  belongs to that particular post. Never present it as typical or average
+  performance. Skip a figure that is missing, and never invent one.
 - Keep every supplied post URL in the email, each once and unchanged, so
   the brand can inspect the creator's work. Never leave one out.
 - Do not invent campaign results, brand relationships, product usage,
@@ -2075,6 +2079,11 @@ _OLD_PITCH_LINKS_SECTION = "Include the supplied content link naturally when ava
 _OLD_PITCH_POSTS_RULE = "- Keep relevant supplied post URLs in the email so the brand can inspect\n  the creator's work.\n"
 
 
+# The post and statistics rules of the release before per-post figures became expected (a stored unedited copy of it is upgraded).
+_PRIOR_PITCH_POSTS_RULE = "- A past partnership or content link may include an Instagram URL, post\n  caption, and view count. Describe the content only using the supplied\n  caption. You may mention the recorded views once, rounded naturally,\n  when relevant to the pitch.\n- Make clear that the figure belongs to that particular post. Never\n  present it as typical or average performance.\n- Keep every supplied post URL in the email, each once and unchanged, so\n  the brand can inspect the creator's work. Never leave one out.\n- Do not invent campaign results, brand relationships, product usage,\n  endorsements, or content details that are not supplied.\n- Do not imply that a normal content example was a paid partnership\n  unless the supplied information confirms that it was.\n"
+_PRIOR_PITCH_STATS_RULE = '- The performance line above is supplied data. Its figures (average and\n  median views, highest, average and median engagement, where engagement\n  is likes plus comments per post) may be used, so the ban above on\n  average views and engagement figures does not apply to those exact\n  numbers. Use at most one or two of them, only when they strengthen the\n  pitch, rounded naturally.\n- Say what each figure measures, for example "my posts average about X\n  likes and comments" or "the median reel gets about Y views". Do not\n  present the highest figure as typical, and never turn these numbers into\n  an engagement rate, a prediction, or a guarantee.\n- If the line says "unknown", omit it.\n'
+
+
 def _previous_pitch_defaults() -> tuple[str, ...]:
     """Return prior default-prompt combinations with optional blocks removed."""
     from itertools import product
@@ -2103,9 +2112,12 @@ def _previous_pitch_defaults() -> tuple[str, ...]:
     # The release before every content link was required (and before the post statistics): the only one with the old wording.
     without_stats = PITCH_DEFAULT_PROMPT.replace(PITCH_STATS_LINE, "").replace(PITCH_STATS_RULE, "")
     versions.append(without_stats.replace(_PITCH_LINKS_SECTION, _OLD_PITCH_LINKS_SECTION).replace(PITCH_POSTS_RULE, _OLD_PITCH_POSTS_RULE))
+    # The release before the per-post figures and the creator statistics were expected in the email.
+    prior_rules = PITCH_DEFAULT_PROMPT.replace(PITCH_POSTS_RULE, _PRIOR_PITCH_POSTS_RULE).replace(PITCH_STATS_RULE, _PRIOR_PITCH_STATS_RULE)
+    versions.append(prior_rules)
     # The releases with a fixed "120 to 190 words" (before the length followed the number of content links).
     fixed_length = "- Write approximately 120 to 190 words in short paragraphs by default,"
-    for release in (PITCH_DEFAULT_PROMPT, without_stats):
+    for release in (PITCH_DEFAULT_PROMPT, without_stats, prior_rules):
         versions.append(release.replace("- Write approximately {pitch_word_range} words in short paragraphs by default,", fixed_length))
     return tuple(versions)
 

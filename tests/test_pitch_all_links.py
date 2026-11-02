@@ -70,3 +70,20 @@ def test_prompt_uses_the_range_placeholder_and_the_fixed_length_release_is_recog
     assert "120 to 190 words" not in P.PITCH_DEFAULT_PROMPT
     current_with_fixed = P.PITCH_DEFAULT_PROMPT.replace("{pitch_word_range}", "120 to 190")
     assert current_with_fixed in P.PITCH_PREVIOUS_DEFAULT_PROMPTS
+
+
+def test_per_post_figures_are_given_and_expected():
+    from pipeline.pitch_posts import describe_entries
+    url = "https://www.instagram.com/p/DeuON3BpcmB/"
+    text = describe_entries(None, None, url, {"DeuON3BpcmB": {"caption": "x", "views": 45000, "likes": 3200, "comments": 150}})
+    assert "views: 45,000" in text and "likes: 3,200" in text and "comments: 150" in text
+    assert "engagement (likes + comments): 3,350" in text
+    hidden = describe_entries(None, None, url, {"DeuON3BpcmB": {"caption": "x", "views": None, "likes": -1, "comments": 5}})
+    assert "likes" not in hidden and "engagement" not in hidden
+    assert "For every supplied post that comes with figures" in P.PITCH_POSTS_RULE
+    assert "include one short sentence" in P.PITCH_STATS_RULE
+
+
+def test_the_release_before_is_recognised_as_an_unedited_default():
+    prior = P.PITCH_DEFAULT_PROMPT.replace(P.PITCH_POSTS_RULE, P._PRIOR_PITCH_POSTS_RULE).replace(P.PITCH_STATS_RULE, P._PRIOR_PITCH_STATS_RULE)
+    assert prior in P.PITCH_PREVIOUS_DEFAULT_PROMPTS and prior != P.PITCH_DEFAULT_PROMPT
