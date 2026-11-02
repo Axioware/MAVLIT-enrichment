@@ -15,7 +15,7 @@ from pipeline.brand_detail import _top_contact
 from pipeline.db import BrandRaw, CreatorInstagramPost, CreatorProfile, InstagramPost, Pitch, Prompt
 from pipeline.helpers.creator_gender import creator_match_gender
 from pipeline.helpers.social import normalize_handle
-from pipeline.pitch_posts import describe_entries, ensure_content_links, has_post_urls, resolve_post_details
+from pipeline.pitch_posts import describe_entries, ensure_content_links, has_post_urls, resolve_post_details, split_entries
 from pipeline.helpers.gpt_llm import call_gpt_text, fill_template, llm_usage_scope, stream_gpt_text
 from pipeline.helpers.prompts import (
     PITCH_DEFAULT_PROMPT,
@@ -217,6 +217,16 @@ def creator_post_stats(db: Session, creator: CreatorProfile) -> str:
     return f"across their latest {len(rows)} posts, " + "; ".join(parts) if parts else "unknown"
 
 
+# Soft word range of the email by the number of "most relevant content" posts the creator selected: more posts
+# need more room to mention each one briefly. The prompt only asks for it ("approximately"), nothing cuts the text.
+_WORD_RANGES = {0: "120 to 190", 1: "120 to 190", 2: "150 to 210", 3: "180 to 250"}
+
+
+def pitch_word_range(content_link: str | None) -> str:
+    """"120 to 190" for none or one content link, "150 to 210" for two, "180 to 250" for three."""
+    return _WORD_RANGES[min(len(split_entries(content_link)), 3)]
+
+
 def _build_pitch_prompt(
     db: Session,
     creator: CreatorProfile,
@@ -291,6 +301,7 @@ def _build_pitch_prompt(
         template,
         creator_highest_views=f"{creator.instagram_highest_views:,}" if creator.instagram_highest_views else "unknown",
         creator_post_stats=post_stats,
+        pitch_word_range=pitch_word_range(content_link),
         pitch_style_preferences=style or "none",
         product_reference=(product_reference or "").strip() or "none provided",
         creator_name=creator.full_name or "unknown",

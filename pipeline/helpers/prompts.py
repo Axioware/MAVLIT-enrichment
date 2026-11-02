@@ -2031,7 +2031,7 @@ FIXED RULES
   sections in the generated email.
 - Sign off with the creator's first name only. Do not invent a surname,
   business title, company name, or additional signature details.
-- Write approximately 120 to 190 words in short paragraphs by default,
+- Write approximately {pitch_word_range} words in short paragraphs by default,
   unless the creator's style preferences request a different length.
 - Address the contact by first name when available. If no name is
   available, use a natural opening without a placeholder.
@@ -2103,6 +2103,10 @@ def _previous_pitch_defaults() -> tuple[str, ...]:
     # The release before every content link was required (and before the post statistics): the only one with the old wording.
     without_stats = PITCH_DEFAULT_PROMPT.replace(PITCH_STATS_LINE, "").replace(PITCH_STATS_RULE, "")
     versions.append(without_stats.replace(_PITCH_LINKS_SECTION, _OLD_PITCH_LINKS_SECTION).replace(PITCH_POSTS_RULE, _OLD_PITCH_POSTS_RULE))
+    # The releases with a fixed "120 to 190 words" (before the length followed the number of content links).
+    fixed_length = "- Write approximately 120 to 190 words in short paragraphs by default,"
+    for release in (PITCH_DEFAULT_PROMPT, without_stats):
+        versions.append(release.replace("- Write approximately {pitch_word_range} words in short paragraphs by default,", fixed_length))
     return tuple(versions)
 
 

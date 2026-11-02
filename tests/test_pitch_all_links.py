@@ -53,3 +53,20 @@ def test_post_statistics_are_in_the_prompt_and_the_previous_release_is_recognise
     assert "{creator_post_stats}" not in old
     # the release just before the statistics (links already required) is recognised too
     assert d.replace(P.PITCH_STATS_LINE, "").replace(P.PITCH_STATS_RULE, "") in P.PITCH_PREVIOUS_DEFAULT_PROMPTS
+
+
+def test_word_range_follows_the_number_of_content_links():
+    from pipeline.pitching import pitch_word_range
+    one = "https://www.instagram.com/p/DeuON3BpcmB/"
+    two = one + ", https://www.instagram.com/p/DeiF93ZOr4J/"
+    assert pitch_word_range(None) == pitch_word_range("") == pitch_word_range(one) == "120 to 190"
+    assert pitch_word_range(two) == "150 to 210"
+    assert pitch_word_range(LINKS) == "180 to 250"
+    assert pitch_word_range(LINKS + ", https://example.com") == "180 to 250"   # at most 3 entries count
+
+
+def test_prompt_uses_the_range_placeholder_and_the_fixed_length_release_is_recognised():
+    assert "approximately {pitch_word_range} words" in P.PITCH_DEFAULT_PROMPT
+    assert "120 to 190 words" not in P.PITCH_DEFAULT_PROMPT
+    current_with_fixed = P.PITCH_DEFAULT_PROMPT.replace("{pitch_word_range}", "120 to 190")
+    assert current_with_fixed in P.PITCH_PREVIOUS_DEFAULT_PROMPTS
