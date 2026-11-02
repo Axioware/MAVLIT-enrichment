@@ -30,8 +30,10 @@ from sqlalchemy.orm import Session
 from config import META_ACCESS_TOKEN
 from pipeline.db import BrandRaw, MetaAd
 from pipeline.helpers.db import upsert_rows
+from pipeline.helpers.redact import describe_http_error, install_redaction, redact
 
 logger = logging.getLogger(__name__)
+install_redaction(logger)   # keys in URLs, tokens and key fragments never reach the log, messages or tracebacks
 
 _BASE_URL = "https://graph.facebook.com/v21.0"
 _ADS_URL  = f"{_BASE_URL}/ads_archive"
@@ -110,7 +112,7 @@ def _resolve_page_id(slug: str) -> str | None:
     except (_AuthError, _PermissionError):
         raise
     except Exception as exc:
-        logger.debug("Page ID resolution error for '%s': %s", slug, exc)
+        logger.debug("Page ID resolution error for '%s': %s", slug, describe_http_error(exc))
     return None
 
 
@@ -187,7 +189,7 @@ def _fetch_ads(*, page_id: str | None, brand_name: str) -> list[dict]:
                 if err.get("code") == 190:
                     raise _AuthError(err.get("message", "token expired/invalid"))
                 message = body_err if isinstance(body_err, dict) else resp.text[:300]
-                logger.error("Meta Ads API %s for '%s' — %s", resp.status_code, brand_name, message)
+                logger.error("Meta Ads API %s for '%s' — %s", resp.status_code, brand_name, redact(message))
                 raise _FetchError(f"Meta Ads API {resp.status_code} for '{brand_name}'")
             body = resp.json()
         except _AuthError:

@@ -68,7 +68,10 @@ from pipeline.helpers.prompts import (
     SPONSOR_CHECK_PROMPT_NAME,
 )
 
+from pipeline.helpers.redact import describe_http_error, install_redaction, redact
+
 logger = logging.getLogger(__name__)
+install_redaction(logger)   # keys in URLs, tokens and key fragments never reach the log, messages or tracebacks
 
 _SEARCH_URL   = "https://www.googleapis.com/youtube/v3/search"
 _VIDEOS_URL   = "https://www.googleapis.com/youtube/v3/videos"
@@ -348,7 +351,7 @@ def _yt_get(url: str, params: dict) -> dict | None:
                     resp = None
                     continue
             if resp is None:
-                logger.warning("YouTube API call failed: %s", exc)
+                logger.warning("YouTube API call failed (%s)", describe_http_error(exc))   # never the exception text: it can carry the URL, and the key is in it
                 _transient_failures += 1
                 return None
             # resp now holds a real response from the retry — fall through
@@ -359,7 +362,7 @@ def _yt_get(url: str, params: dict) -> dict | None:
                 logger.warning(
                     "YouTube key invalid/expired (HTTP %s: %s) — rotating to next key. "
                     "This key needs to be renewed/replaced in .env, it won't recover on its own.",
-                    resp.status_code, resp.json().get("error", {}).get("message", ""),
+                    resp.status_code, redact(resp.json().get("error", {}).get("message", "")),
                 )
             else:
                 logger.warning(
@@ -385,7 +388,7 @@ def _yt_get(url: str, params: dict) -> dict | None:
             resp.raise_for_status()
             return resp.json()
         except Exception as exc:
-            logger.warning("YouTube API call failed: %s", exc)
+            logger.warning("YouTube API call failed (%s)", describe_http_error(exc))   # raise_for_status() puts the URL, and so the key, in the message
             _transient_failures += 1
             return None
 

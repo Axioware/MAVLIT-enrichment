@@ -43,8 +43,10 @@ from sqlalchemy.sql import func
 
 from config import HUNTER_API_KEY
 from pipeline.db import BrandContact
+from pipeline.helpers.redact import describe_http_error, install_redaction, redact
 
 logger = logging.getLogger(__name__)
+install_redaction(logger)   # keys in URLs, tokens and key fragments never reach the log, messages or tracebacks
 
 _VERIFY_URL = "https://api.hunter.io/v2/email-verifier"
 _TIMEOUT = 20
@@ -100,7 +102,7 @@ def _verify_email(email: str) -> dict | None:
             "Hunter verify: HTTP %s for %s: %s",
             exc.response.status_code,
             email,
-            exc.response.text[:500],
+            redact(exc.response.text[:500]),
         )
         return None
 
@@ -108,7 +110,7 @@ def _verify_email(email: str) -> dict | None:
         logger.warning(
             "Hunter verify: request error for %s: %s",
             email,
-            exc,
+            describe_http_error(exc),
         )
         return None
 

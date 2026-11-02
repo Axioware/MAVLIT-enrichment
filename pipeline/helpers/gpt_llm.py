@@ -11,7 +11,10 @@ import httpx
 
 from config import EMBEDDING_MODEL, OPENAI_KEY
 
+from pipeline.helpers.redact import install_redaction
+
 logger = logging.getLogger(__name__)
+install_redaction(logger)   # keys in URLs, tokens and key fragments never reach the log, messages or tracebacks
 
 _BASE_URL = "https://api.openai.com/v1"
 _MODEL = "gpt-6-luna"
