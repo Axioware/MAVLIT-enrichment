@@ -2,6 +2,7 @@ import contextlib
 import contextvars
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -272,10 +273,38 @@ def _classify_failure(exc: Exception) -> tuple[str | None, str, float]:
     return None, str(exc), 0.0
 
 
+def _int_setting(name: str, default: int, minimum: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be a whole number, got {raw!r}")
+    if value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}, got {value}")
+    return value
+
+
+def max_attempts() -> int:
+    """OPENAI_MAX_ATTEMPTS (default 2): how many times ONE call is tried."""
+    return _int_setting("OPENAI_MAX_ATTEMPTS", 2, 1)
+
+
+def call_deadline_seconds() -> int:
+    """OPENAI_CALL_DEADLINE_SECONDS (default 150): the longest ONE call may take in all, attempts and waits included."""
+    return _int_setting("OPENAI_CALL_DEADLINE_SECONDS", 150, 1)
+
+
+max_attempts(), call_deadline_seconds()   # a bad setting stops the application at start
+
+
 def _post_openai(path: str, payload: dict, timeout: float, context: str = "") -> dict:
     """
-    POST to OpenAI and return the decoded JSON body. Retries one unavailable
-    failure once, raises LLMUnavailableError on the second consecutive one.
+    POST to OpenAI and return the decoded JSON body. An unavailable failure is retried, but one call is tried at most OPENAI_MAX_ATTEMPTS times
+    (2) and for at most OPENAI_CALL_DEADLINE_SECONDS (150) in all: past either it raises LLMUnavailableError. The failure counter shared by all
+    threads stays the circuit breaker (two consecutive failures stop the run for a minute), but it no longer decides how long one call may retry:
+    another thread's success used to reset it, so a call could be retried without end.
     Any other failure is re-raised as is, for the caller's own handler.
     """
     global _consecutive_failures, _stopped_until, _stopped_reason
@@ -283,10 +312,13 @@ def _post_openai(path: str, payload: dict, timeout: float, context: str = "") ->
         if time.monotonic() < _stopped_until:
             raise LLMUnavailableError(_stopped_reason)
     label = f" ({context})" if context else ""
+    attempts, call_started, deadline_seconds, attempts_allowed = 0, time.monotonic(), call_deadline_seconds(), max_attempts()
     while True:
         try:
             started = time.monotonic()
-            resp = httpx.post(f"{_BASE_URL}{path}", headers=_headers(), json=payload, timeout=timeout)
+            attempts += 1
+            remaining = deadline_seconds - (started - call_started)
+            resp = httpx.post(f"{_BASE_URL}{path}", headers=_headers(), json=payload, timeout=max(min(timeout, remaining), 1.0))
             resp.raise_for_status()
             with _state_lock:
                 _consecutive_failures = 0
@@ -312,6 +344,10 @@ def _post_openai(path: str, payload: dict, timeout: float, context: str = "") ->
                     "as done; re-run once OpenAI is available again.", _stopped_reason, _STOP_AFTER_FAILURES,
                 )
                 raise LLMUnavailableError(_stopped_reason) from exc
+            elapsed = time.monotonic() - call_started
+            if attempts >= attempts_allowed or elapsed + delay >= deadline_seconds:
+                logger.error("OpenAI call given up%s after %d attempt(s) and %.0fs — %s", label, attempts, elapsed, kind)
+                raise LLMUnavailableError(f"OpenAI unavailable ({kind}): {detail}") from exc
             time.sleep(delay)
 
 

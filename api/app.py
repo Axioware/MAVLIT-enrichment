@@ -1,6 +1,8 @@
 import logging
 import os
 import uuid
+
+import anyio.to_thread
 from typing import Annotated, Literal
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -42,6 +44,8 @@ from api.saved_brands import router as saved_brands_router
 from api.schemas import CreatorProfileResponse
 from api import attempt_limits, usage_limits
 from api.body_limits import BodySizeLimitMiddleware
+from api.concurrency import THREAD_RESERVE, SlowRouteLimitMiddleware, slow_route_concurrency
+from api.recovery import recover_stuck_jobs
 from pipeline.helpers.apify import request_path
 from api.paging import BRAND_POSTS_LIMIT, MAX_OFFSET
 from api.ttl_cache import cached_niche
@@ -121,10 +125,19 @@ def _run_migrations() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     drop_migration_credentials()
+    # Sync routes and background tasks share AnyIO's worker threads (default 40). The slow routes are capped at SLOW_ROUTE_CONCURRENCY
+    # (api/concurrency.py); this many more threads stay for login, /health and the rest.
+    anyio.to_thread.current_default_thread_limiter().total_tokens = slow_route_concurrency() + THREAD_RESERVE
     if RUN_MIGRATIONS:
         _run_migrations()
     else:
         logger.info("RUN_MIGRATIONS is off: skipping the startup migrations (run `python -m pipeline.migrate` when the schema changes)")
+    # Jobs that a restart interrupted are failed and the pitch locks cleared. ONLY SAFE WITH ONE WORKER PROCESS (see api/recovery.py): it
+    # must change before uvicorn runs with --workers > 1.
+    try:
+        recover_stuck_jobs()
+    except Exception:
+        logger.exception("Startup recovery of interrupted jobs failed; stuck jobs (if any) stay as they are")
     yield
 
 
@@ -138,7 +151,8 @@ app = FastAPI(
     lifespan=lifespan,
     **_DOCS,
 )
-app.add_middleware(BodySizeLimitMiddleware)   # 413 JSON for an oversized body, before any route parses it
+app.add_middleware(BodySizeLimitMiddleware)
+app.add_middleware(SlowRouteLimitMiddleware)   # 503 + Retry-After when too many slow requests are running; login, /health and the rest are never counted   # 413 JSON for an oversized body, before any route parses it
 
 _QUERY_CANCELED = "57014"   # statement_timeout (or a cancel)
 _LOCK_NOT_AVAILABLE = "55P03"   # lock_timeout
@@ -1167,7 +1181,7 @@ class BulkAddCreatorsResponse(BaseModel):
 #
 
 @app.get("/health")
-def health():
+async def health():   # async on purpose: no worker thread and no database, so it answers even when every thread is busy
     return {"status": "ok"}
 
 
