@@ -61,3 +61,39 @@ def test_every_post_gets_its_figure_in_words_before_its_url_and_the_previous_lay
     from pipeline.helpers import prompts as P
     assert "never in parentheses" in P.PITCH_LAYOUT_RULE and "never a bare\n  number" in P.PITCH_LAYOUT_RULE
     assert PITCH_DEFAULT_PROMPT.replace(P.PITCH_LAYOUT_RULE, P._R2_LAYOUT_RULE) in PITCH_PREVIOUS_DEFAULT_PROMPTS
+
+
+PAST = "https://www.instagram.com/p/De97ECxtg-V/, https://www.instagram.com/p/De7BmS1ug5N/"
+CONTENT = "https://www.instagram.com/p/DfN-oawPdzj/, https://www.instagram.com/p/DfI8oucBjYl/"
+MODEL_ANSWER = """Hi,
+
+I make content about vinyl collecting and anniversary releases.
+
+A couple of examples of my music posts: a look back at The Killers' Hot Fuss got about 6,400 likes and comments (https://www.instagram.com/p/DfN-oawPdzj/), and an Outkast post got about 26,000 (https://www.instagram.com/p/DfI8oucBjYl/). Across my latest 20 posts, I averaged about 2,400 likes and comments per post.
+
+I've also made sponsored content for the Goo Goo Dolls, featuring the Blue Iris pressing (461 likes and comments: https://www.instagram.com/p/De97ECxtg-V/), and Qobuz, revisiting 2006 albums (700 likes and comments: https://www.instagram.com/p/De7BmS1ug5N/).
+
+Would you be open to discussing a paid partnership?
+
+Thanks,
+Brett"""
+
+
+def test_tidy_pitch_removes_brackets_around_figures_and_puts_paid_posts_first():
+    from pipeline.pitch_posts import tidy_pitch
+    out = tidy_pitch(MODEL_ANSWER, PAST, CONTENT)
+    assert "(" not in out and ")" not in out
+    assert "pressing, with 461 likes and comments: https://www.instagram.com/p/De97ECxtg-V/" in out
+    assert "Hot Fuss got about 6,400 likes and comments: https://www.instagram.com/p/DfN-oawPdzj/, and" in out
+    paragraphs = out.split("\n\n")
+    paid = next(i for i, p in enumerate(paragraphs) if "De97ECxtg-V" in p)
+    content = next(i for i, p in enumerate(paragraphs) if "DfN-oawPdzj" in p)
+    assert paid < content and paragraphs[0] == "Hi," and paragraphs[-1].endswith("Thanks,\nBrett")
+    assert tidy_pitch(out, PAST, CONTENT) == out                       # nothing left to fix
+
+
+def test_tidy_pitch_leaves_a_pitch_that_mixes_both_kinds_in_one_paragraph_in_order():
+    from pipeline.pitch_posts import tidy_pitch
+    mixed = "Hi,\n\nSee https://www.instagram.com/p/DfN-oawPdzj/ and https://www.instagram.com/p/De97ECxtg-V/.\n\nThanks,\nBrett"
+    assert tidy_pitch(mixed, PAST, CONTENT) == mixed
+    assert tidy_pitch("Plain (2006) text.", None, None) == "Plain (2006) text."

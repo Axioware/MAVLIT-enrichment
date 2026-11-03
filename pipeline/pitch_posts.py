@@ -210,3 +210,41 @@ def ensure_content_links(text: str, content_link: str | None) -> str:
     paragraphs = text.rstrip().split("\n\n")
     paragraphs.insert(max(len(paragraphs) - 2, 1), line + ".")
     return "\n\n".join(paragraphs)
+
+
+_URL = r"https?://[^\s()]+"
+_FIGURE_THEN_URL_IN_BRACKETS = re.compile(rf"\s*\(([^()\n]*?)\s*:\s*({_URL})\)")      # (461 likes and comments: URL)
+_URL_IN_BRACKETS = re.compile(rf"\s*\(({_URL})\)")                                     # likes and comments (URL)
+_BARE_FIGURE_IN_BRACKETS = re.compile(
+    r"\s*\(((?:(?:about|around|over|nearly) \d[\d.,]*[KkMm]?\+?|\d[\d.,]*[KkMm]\+?|\d[\d.,]*(?= (?:likes|views|comments)))(?: [A-Za-z+]+){0,4})\)"
+)   # (about 26K), (8K+ views); not (2006)
+
+
+def tidy_pitch(text: str, past_brand_partnership: str | None, content_link: str | None) -> str:
+    """
+    Two fixes the prompt asks for but the LLM sometimes ignores, made in code:
+      - a post's figure or URL in brackets becomes plain words:  "(461 likes and comments: URL)" -> ", with 461 likes and
+        comments: URL",  "comments (URL)" -> "comments: URL",  "(about 26K)" -> ", about 26K";
+      - the paragraph(s) about the past brand partnerships come BEFORE those about the relevant content (only when
+        no paragraph mixes the two kinds of post).
+    """
+    text = _FIGURE_THEN_URL_IN_BRACKETS.sub(lambda m: f", with {m.group(1)}: {m.group(2)}", text)
+    text = _URL_IN_BRACKETS.sub(lambda m: f": {m.group(1)}", text)
+    text = _BARE_FIGURE_IN_BRACKETS.sub(lambda m: f", {m.group(1)}", text)
+
+    def codes(value):
+        return {c for c in (post_code(e) for e in split_entries(value)) if c}
+
+    past, content = codes(past_brand_partnership), codes(content_link)
+    paragraphs = text.split("\n\n")
+    is_past = [any(c in p for c in past) for p in paragraphs]
+    is_content = [any(c in p for c in content) for p in paragraphs]
+    if not any(is_past) or not any(is_content) or any(a and b for a, b in zip(is_past, is_content)):
+        return text
+    first_content = is_content.index(True)
+    if is_past.index(True) > first_content:
+        moved = [p for p, flag in zip(paragraphs, is_past) if flag]
+        rest = [p for p, flag in zip(paragraphs, is_past) if not flag]
+        at = first_content - sum(is_past[:first_content])   # past paragraphs sit after the content ones, so none is before
+        paragraphs = rest[:at] + moved + rest[at:]
+    return "\n\n".join(paragraphs)

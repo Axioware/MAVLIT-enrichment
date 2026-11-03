@@ -15,7 +15,7 @@ from pipeline.brand_detail import _top_contact
 from pipeline.db import BrandRaw, CreatorInstagramPost, CreatorProfile, InstagramPost, Pitch, Prompt
 from pipeline.helpers.creator_gender import creator_match_gender
 from pipeline.helpers.social import normalize_handle
-from pipeline.pitch_posts import describe_entries, ensure_content_links, has_post_urls, resolve_post_details, split_entries
+from pipeline.pitch_posts import describe_entries, ensure_content_links, has_post_urls, resolve_post_details, split_entries, tidy_pitch
 from pipeline.helpers.gpt_llm import call_gpt_text, fill_template, llm_usage_scope, stream_gpt_text
 from pipeline.helpers.prompts import (
     PITCH_DEFAULT_PROMPT,
@@ -399,7 +399,7 @@ def generate_pitch(
         pitch_text = call_gpt_text(built["prompt"], context=f"pitch for creator_id={creator.id} brand={built['brand_name']}")
     if not pitch_text:
         raise RuntimeError("Pitch generation failed — LLM returned no content")
-    pitch_text = ensure_content_links(pitch_text, content_link)
+    pitch_text = ensure_content_links(tidy_pitch(pitch_text, past_brand_partnership, content_link), content_link)
     return _save_pitch(db, creator, built, pitch_text, is_custom=is_custom, **fields)
 
 
@@ -443,5 +443,5 @@ def stream_pitch(
     pitch_text = "".join(parts).strip()
     if not pitch_text:
         raise RuntimeError("Pitch generation failed — LLM returned no content")
-    pitch_text = ensure_content_links(pitch_text, content_link)   # the saved pitch (sent in "done") has every link
+    pitch_text = ensure_content_links(tidy_pitch(pitch_text, past_brand_partnership, content_link), content_link)   # the saved pitch (sent in "done") has every link
     yield "done", _save_pitch(db, creator, built, pitch_text, is_custom=is_custom, **fields)
