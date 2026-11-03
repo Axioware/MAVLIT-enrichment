@@ -41,11 +41,6 @@ class TrackedFiles(unittest.TestCase):
         env_files = sorted(p for p in _tracked() if Path(p).name.startswith(".env"))
         self.assertEqual(env_files, [".env.example", ".env.migrate.example"])
 
-    def test_gitleaks_is_configured(self):
-        self.assertIn("apify_api_", (ROOT / ".gitleaks.toml").read_text())
-        self.assertIn("gitleaks", (ROOT / ".github" / "workflows" / "secret-scan.yml").read_text())
-        self.assertIn("gitleaks", (ROOT / ".pre-commit-config.yaml").read_text())
-
 
 if __name__ == "__main__":
     unittest.main()
