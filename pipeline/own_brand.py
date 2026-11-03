@@ -466,8 +466,7 @@ def _followup_steps():
         ("brand_tier", lambda db, b: "tier already set" if (b.brand_tier or "").strip().lower() not in ("", "null") else None,
          lambda db, b: score_brand_tier(db, brand_raw_id=b.id)),
         ("post_sponsorship_scores", lambda db, b: None, lambda db, b: score_instagram_post_sponsorship(db, brand_raw_id=b.id)),   # only unscored posts
-        ("instagram_users", lambda db, b: None, lambda db, b: instagram_users(db, b.id)),   # only posts not yet processed
-        # Last: a brand with no website (new, or in brands_raw without one) gets it from its Instagram profile
+        # Then: a brand with no website (new, or in brands_raw without one) gets it from its Instagram profile
         # (the step that sets instagram_profile_checked), and only then its geo reach can be scored.
         ("website",
          lambda db, b: ("website already known" if (b.website or "").strip()
@@ -477,6 +476,8 @@ def _followup_steps():
          lambda db, b: ("geo reach already scored" if b.geo_reach_score is not None
                         else "no website to read, so geo reach cannot be scored" if not (b.website or "").strip() else None),
          lambda db, b: enrich_geo_reach(db, brand_id=b.id)),
+        # After geo reach: enrich_instagram_users only processes brands with a geo reach score of 0-40.
+        ("instagram_users", lambda db, b: _geo_gate(b), lambda db, b: instagram_users(db, b.id)),   # only posts not yet processed
         # The last three only run for a brand whose geo reach score is 0-40 (local / small reach, the range the
         # matching shows). Any other score, or none, stops here.
         ("initial_brand_score", lambda db, b: _geo_gate(b) or ("already scored" if has(db, InitialBrandScore, b.id) else None),

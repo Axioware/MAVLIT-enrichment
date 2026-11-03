@@ -75,6 +75,8 @@ logger = logging.getLogger(__name__)
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"
 # Only instagram_posts rows with a partnership (sponsorship) confidence at or above this are processed.
 _MIN_SPONSORSHIP_CONFIDENCE = 90
+_MIN_GEO_REACH_SCORE = 0    # same range as the matcher's geo hard filter (matcher.apply_brand_hard_filters)
+_MAX_GEO_REACH_SCORE = 40
 
 # Commenters (steps e-g in the module docstring) on/off. False = never collect,
 # scrape, store or link commenters — no extra Apify scrapes / LLM calls for
@@ -593,6 +595,9 @@ def enrich_instagram_users(
     (_MIN_SPONSORSHIP_CONFIDENCE)
     where is_users_scraped=False. Returns number of posts processed.
 
+    Only posts of brands with brands_raw.geo_reach_score between 0 and 40 are processed (the same range the matcher
+    shows; brands with no geo score yet wait until they have one). row_id bypasses this too.
+
     Pass row_id to target one specific instagram_posts row by its primary
     key (instagram_posts.id) — bypasses the is_users_scraped filter (so you
     can re-run/test a post that was already processed). Not to be confused
@@ -636,6 +641,10 @@ def enrich_instagram_users(
         )
     else:
         query = query.filter(InstagramPost.is_users_scraped == False)
+    if row_id is None:   # an explicit row is always processed; otherwise only brands the matcher can show
+        query = query.filter(InstagramPost.brand_raw_id.in_(
+            db.query(BrandRaw.id).filter(BrandRaw.geo_reach_score.between(_MIN_GEO_REACH_SCORE, _MAX_GEO_REACH_SCORE))
+        ))
     if beach_brands_only and row_id is None:
         query = query.filter(InstagramPost.brand_raw_id.in_(
             db.query(BrandRaw.id).filter(BrandRaw.beach_brands.is_(True))
