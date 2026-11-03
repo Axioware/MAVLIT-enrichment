@@ -188,6 +188,22 @@ def _figures(label: str, values: list[int]) -> str:
     return f"{label}: highest {_rounded(max(values))}, average {_rounded(statistics.mean(values))}, median {_rounded(statistics.median(values))}"
 
 
+def creator_usual_views(db: Session, creator: CreatorProfile) -> int | None:
+    """Median views of the reels / videos among the creator's latest saved posts (the "usual" views). None when unknown."""
+    handle = normalize_handle(creator.instagram_handle or "").lower()
+    if not handle:
+        return None
+    rows = (
+        db.query(CreatorInstagramPost.video_view_count)
+        .filter(CreatorInstagramPost.creator_profile_id == creator.id, func.lower(CreatorInstagramPost.instagram_handle) == handle)
+        .order_by(CreatorInstagramPost.timestamp.desc().nullslast())
+        .limit(_STATS_POSTS)
+        .all()
+    )
+    views = [v for (v,) in rows if isinstance(v, int) and v > 0]
+    return int(statistics.median(views)) if len(rows) >= _STATS_MIN_POSTS and len(views) >= _STATS_MIN_POSTS else None
+
+
 def creator_post_stats(db: Session, creator: CreatorProfile) -> str:
     """
     Views and engagement (likes + comments per post) of the creator's latest 20 saved Instagram posts, as one
@@ -293,8 +309,10 @@ def _build_pitch_prompt(
     # reused, only unknown ones are scraped). The stream endpoint resolves them first to show progress.
     if post_details is None:
         post_details = resolve_post_details(db, creator, past_brand_partnership, content_link)
-    past_text = describe_entries(db, creator, past_brand_partnership, post_details)
-    link_text = describe_entries(db, creator, content_link, post_details)
+    followers = creator.instagram_followers or creator.follower_count
+    usual_views = creator_usual_views(db, creator) if post_details else None
+    past_text = describe_entries(db, creator, past_brand_partnership, post_details, followers, usual_views)
+    link_text = describe_entries(db, creator, content_link, post_details, followers, usual_views)
     if post_details and PITCH_POSTS_RULE not in template:
         template = template.rstrip() + "\n\n" + PITCH_POSTS_RULE
     prompt = fill_template(

@@ -2,6 +2,8 @@
 from pipeline.helpers import prompts as P
 from pipeline.pitch_posts import describe_entries, split_entries
 
+# the default as it was before the comparison rule and the content/number examples were added
+BEFORE_EXAMPLES = P.PITCH_DEFAULT_PROMPT.replace(P.PITCH_COMPARISON_RULE, "").replace(P.PITCH_METRIC_EXAMPLES, "")
 LINKS = ("https://www.instagram.com/p/DeuON3BpcmB/,https://www.instagram.com/p/DeiF93ZOr4J/,"
          "https://www.instagram.com/p/DeenHsmOZJc/")
 
@@ -52,7 +54,7 @@ def test_post_statistics_are_in_the_prompt_and_the_previous_release_is_recognise
     old = next(x for x in P.PITCH_PREVIOUS_DEFAULT_PROMPTS if "when available and relevant" in x)
     assert "{creator_post_stats}" not in old
     # the release just before the statistics (links already required) is recognised too
-    assert d.replace(P.PITCH_STATS_LINE, "").replace(P.PITCH_STATS_RULE, "") in P.PITCH_PREVIOUS_DEFAULT_PROMPTS
+    assert BEFORE_EXAMPLES.replace(P.PITCH_STATS_LINE, "").replace(P.PITCH_STATS_RULE, "") in P.PITCH_PREVIOUS_DEFAULT_PROMPTS
 
 
 def test_word_range_follows_the_number_of_content_links():
@@ -68,7 +70,7 @@ def test_word_range_follows_the_number_of_content_links():
 def test_prompt_uses_the_range_placeholder_and_the_fixed_length_release_is_recognised():
     assert "approximately {pitch_word_range} words" in P.PITCH_DEFAULT_PROMPT
     assert "120 to 190 words" not in P.PITCH_DEFAULT_PROMPT
-    current_with_fixed = P.PITCH_DEFAULT_PROMPT.replace("{pitch_word_range}", "120 to 190")
+    current_with_fixed = BEFORE_EXAMPLES.replace("{pitch_word_range}", "120 to 190")
     assert current_with_fixed in P.PITCH_PREVIOUS_DEFAULT_PROMPTS
 
 
@@ -85,5 +87,5 @@ def test_per_post_figures_are_given_and_expected():
 
 
 def test_the_release_before_is_recognised_as_an_unedited_default():
-    prior = P.PITCH_DEFAULT_PROMPT.replace(P.PITCH_POSTS_RULE, P._PRIOR_PITCH_POSTS_RULE).replace(P.PITCH_STATS_RULE, P._PRIOR_PITCH_STATS_RULE)
+    prior = BEFORE_EXAMPLES.replace(P.PITCH_POSTS_RULE, P._PRIOR_PITCH_POSTS_RULE).replace(P.PITCH_STATS_RULE, P._PRIOR_PITCH_STATS_RULE)
     assert prior in P.PITCH_PREVIOUS_DEFAULT_PROMPTS and prior != P.PITCH_DEFAULT_PROMPT

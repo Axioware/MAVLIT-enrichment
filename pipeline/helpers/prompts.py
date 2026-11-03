@@ -1713,6 +1713,78 @@ PITCH_POSTS_RULE = """\
   unless the supplied information confirms that it was.
 """
 
+# Rules for the comparisons the code supplies next to a post's figures (multiples of the follower count / usual views, engagement rate).
+# Keep this constant separate for compatibility with prompt migration.
+PITCH_COMPARISON_RULE = """\
+- A post may also come with comparisons already worked out for you, such
+  as "views are about 2x their follower count", "views are about 3x their
+  usual views per reel" and an "engagement rate" as a share of followers.
+  These are supplied data, so the bans above on engagement rates apply
+  only to numbers you would calculate yourself. Never calculate a
+  comparison or a rate yourself.
+- When a post comes with a comparison, prefer it to a bare number: "8K+
+  views (about twice my follower count)" or "about 3x my usual views"
+  tells the brand more than the number alone. Copy the multiple as
+  supplied ("about 2x" may be written "about twice"). Use it for that post
+  only, and only one comparison per post.
+- Say what a figure measures. Use only the measures supplied for that
+  post (views, likes, comments, engagement, engagement rate, or a
+  comparison). If a measure is not supplied for it, do not mention it.
+"""
+
+# Examples of how to combine the creator's content with its numbers. They come from other creators, so only
+# their way of putting things may be followed.
+# Keep this constant separate for compatibility with prompt migration.
+PITCH_METRIC_EXAMPLES = """\
+EXAMPLES OF HOW TO COMBINE CONTENT WITH NUMBERS
+
+These show how to put a post and its number into a natural sentence.
+They come from other creators. Follow only their way of phrasing. Never
+copy their topics, numbers, or wording, and use only the measures
+supplied for the current creator's posts (the examples also mention
+shares, which you may only mention if shares are supplied). Where an
+example shows [Post 1], [Post 2] or [Post 3], write the matching supplied
+URL, once and unchanged, never the bracketed text. A comparison such as
+"twice my follower count" may be used only when it is supplied.
+
+Two posts, different kinds of content and numbers:
+"My recent content ranges from local weather updates to community-focused
+coverage. A reel covering King Tides reached 1.19 million views, while my
+coverage of coastal flooding generated an engagement rate of 8.4%:
+[Post 1] and [Post 2]."
+
+Two posts, the same niche:
+"I regularly create content highlighting local beach conditions and
+coastal activity. One of my recent updates on wave conditions reached over
+5 times my follower count, while another covering beach closures
+generated more than 12K shares: [Post 1] and [Post 2]."
+
+Two posts, different kinds of content:
+"From educational breakdowns of marine conditions to real-time local
+updates, my content consistently resonates with my audience. A recent
+explainer on wave activity reached 450K views, while my update on local
+flooding generated an 8.4% engagement rate: [Post 1] and [Post 2]."
+
+Three posts:
+"My content covers a variety of locally relevant topics, from beach safety
+and wave conditions to extreme weather updates. A recent reel on wave
+activity reached 1.19 million views, my King Tides coverage attracted 450K
+views, and a local flooding update generated an engagement rate of 8.4%:
+[Post 1], [Post 2], and [Post 3]."
+
+Who the creator is, then paid work with a number beside each post:
+"I post album pickups and pressing reviews for about 4K music fans who
+collect reissues. I've done paid posts for the Phoebe Bridgers Lost
+Weekend pressing, which pulled in 8K+ views (about twice my follower
+count), and the Goo Goo Dolls anniversary pressing, which got about 3x my
+usual views."
+
+Keep the numbers inside the sentence about their post, in plain words,
+like these. Do not stack several numbers on one post, and do not list
+statistics in a separate block.
+
+"""
+
 # The creator's story is optional.
 # Never fabricate a personal history with the brand.
 PITCH_STORY_RULE = """\
@@ -2026,7 +2098,7 @@ of content ideas tailored to the brand.
 Choose the most natural option for this email. Do not combine several
 requests or pressure the recipient to respond.
 
-""" + PITCH_PRODUCT_RULE + PITCH_VIEWS_RULE + PITCH_STATS_RULE + PITCH_POSTS_RULE + PITCH_STORY_RULE + PITCH_QUALITY_RULES + """\
+""" + PITCH_PRODUCT_RULE + PITCH_VIEWS_RULE + PITCH_STATS_RULE + PITCH_POSTS_RULE + PITCH_COMPARISON_RULE + PITCH_STORY_RULE + PITCH_QUALITY_RULES + """\
 FIXED RULES
 
 - Return ONLY the email body. Never include a subject line, "Subject:",
@@ -2057,7 +2129,7 @@ FIXED RULES
 - Do not include multiple calls to action or repeat the same selling point.
 - Do not sacrifice factual accuracy to make the pitch sound persuasive.
 
-""" + PITCH_EXAMPLE_BLOCK + """\
+""" + PITCH_METRIC_EXAMPLES + PITCH_EXAMPLE_BLOCK + """\
 Return the finished email body only, as plain text, with no Markdown.
 """
 
@@ -2101,23 +2173,25 @@ def _previous_pitch_defaults() -> tuple[str, ...]:
         PITCH_STORY_RULE,
     )
 
-    versions = []
+    # The release before the comparisons and the content/number examples is the base of every earlier variant.
+    base = PITCH_DEFAULT_PROMPT.replace(PITCH_COMPARISON_RULE, "").replace(PITCH_METRIC_EXAMPLES, "")
+    versions = [base]
     for keep in product((True, False), repeat=len(blocks)):
-        text = PITCH_DEFAULT_PROMPT
+        text = base
         for block, kept in zip(blocks, keep):
             if not kept:
                 text = text.replace(block, "")
-        if text != PITCH_DEFAULT_PROMPT and text not in versions:
+        if text != base and text not in versions:
             versions.append(text)
     # The release before every content link was required (and before the post statistics): the only one with the old wording.
-    without_stats = PITCH_DEFAULT_PROMPT.replace(PITCH_STATS_LINE, "").replace(PITCH_STATS_RULE, "")
+    without_stats = base.replace(PITCH_STATS_LINE, "").replace(PITCH_STATS_RULE, "")
     versions.append(without_stats.replace(_PITCH_LINKS_SECTION, _OLD_PITCH_LINKS_SECTION).replace(PITCH_POSTS_RULE, _OLD_PITCH_POSTS_RULE))
     # The release before the per-post figures and the creator statistics were expected in the email.
-    prior_rules = PITCH_DEFAULT_PROMPT.replace(PITCH_POSTS_RULE, _PRIOR_PITCH_POSTS_RULE).replace(PITCH_STATS_RULE, _PRIOR_PITCH_STATS_RULE)
+    prior_rules = base.replace(PITCH_POSTS_RULE, _PRIOR_PITCH_POSTS_RULE).replace(PITCH_STATS_RULE, _PRIOR_PITCH_STATS_RULE)
     versions.append(prior_rules)
     # The releases with a fixed "120 to 190 words" (before the length followed the number of content links).
     fixed_length = "- Write approximately 120 to 190 words in short paragraphs by default,"
-    for release in (PITCH_DEFAULT_PROMPT, without_stats, prior_rules):
+    for release in (base, without_stats, prior_rules):
         versions.append(release.replace("- Write approximately {pitch_word_range} words in short paragraphs by default,", fixed_length))
     return tuple(versions)
 

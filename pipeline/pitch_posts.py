@@ -110,11 +110,28 @@ def _scrape_posts(db: Session, creator: CreatorProfile, urls: dict[str, str]) ->
     return found
 
 
-def describe_entries(db: Session, creator: CreatorProfile, value: str | None, details: dict[str, dict]) -> str:
+def multiple_label(value: int, base: int | None) -> str | None:
+    """"about 2x" / "about 1.5x": value / base rounded DOWN to the nearest half, only from 1.5x up. None otherwise."""
+    if not base or base <= 0 or value <= 0 or value / base < 1.5:
+        return None
+    return f"about {int(value / base * 2) / 2:g}x"
+
+
+def describe_entries(
+    db: Session,
+    creator: CreatorProfile,
+    value: str | None,
+    details: dict[str, dict],
+    followers: int | None = None,
+    usual_views: int | None = None,
+) -> str:
     """
     The text the pitch LLM gets for one field: each entry as typed, except an Instagram post URL, which
-    becomes  <url> (post caption: "..."; views: N)  from `details` (short code -> caption / views).
-    One entry as it is; several as numbered lines. "" when the field is empty.
+    becomes  <url> (post caption: "..."; views: N; ...)  from `details` (short code -> caption / views / likes /
+    comments). With `followers` and `usual_views` (the median views of the creator's latest posts) a post's
+    views are also compared to them ("about 2x their follower count") and its engagement is given as a rate of
+    their followers, so the LLM never has to do that arithmetic. One entry as it is; several as numbered
+    lines. "" when the field is empty.
     """
     lines = []
     for entry in split_entries(value):
@@ -129,12 +146,18 @@ def describe_entries(db: Session, creator: CreatorProfile, value: str | None, de
             parts.append(f'post caption: "{caption[:_CAPTION_CHARS]}{"..." if len(caption) > _CAPTION_CHARS else ""}"')
         if isinstance(info.get("views"), int) and info["views"] > 0:
             parts.append(f"views: {info['views']:,}")
+            for label, base in (("their follower count", followers), ("their usual views per reel", usual_views)):
+                multiple = multiple_label(info["views"], base)
+                if multiple:
+                    parts.append(f"views are {multiple} {label}")
         likes, comments = info.get("likes"), info.get("comments")
         if isinstance(likes, int) and likes >= 0:   # Instagram reports -1 when the likes are hidden
             parts.append(f"likes: {likes:,}")
             if isinstance(comments, int) and comments >= 0:
                 parts.append(f"comments: {comments:,}")
                 parts.append(f"engagement (likes + comments): {likes + comments:,}")
+                if followers and followers > 0 and 0 < (likes + comments) / followers <= 1:
+                    parts.append(f"engagement rate (likes + comments, as % of followers): {(likes + comments) / followers * 100:.1f}%")
         lines.append(f"{_clean_url(entry)} ({'; '.join(parts)})" if parts else _clean_url(entry))
     if len(lines) <= 1:
         return lines[0] if lines else ""
