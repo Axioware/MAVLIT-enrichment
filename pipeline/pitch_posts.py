@@ -220,14 +220,34 @@ _BARE_FIGURE_IN_BRACKETS = re.compile(
 )   # (about 26K), (8K+ views); not (2006)
 
 
-def tidy_pitch(text: str, past_brand_partnership: str | None, content_link: str | None) -> str:
+_MEDIAN_CLAUSE = re.compile(r",?\s*(?:and\s+)?with a median of (?:about |around |roughly )?[\d][\d.,]*[KkMm]?(?=[.,;])", re.IGNORECASE)
+_CLOSING_QUESTION = re.compile(r"(?:^|(?<=[.!?])\s+)([^.!?\n]*\bpartnership[^.!?\n]*\?)\s*$")   # the old "...a paid partnership?" closing
+
+
+def tidy_pitch(
+    text: str, past_brand_partnership: str | None, content_link: str | None, brand_name: str | None = None
+) -> str:
     """
     Two fixes the prompt asks for but the LLM sometimes ignores, made in code:
       - a post's figure or URL in brackets becomes plain words:  "(461 likes and comments: URL)" -> ", with 461 likes and
         comments: URL",  "comments (URL)" -> "comments: URL",  "(about 26K)" -> ", about 26K";
+      - a "with a median of N" clause is dropped (many readers do not know the word);
+      - an old-style closing "...a paid partnership?" becomes "Would you be open to talking about how we could feature
+        <brand>'s products with my audience?" (when the brand name is known);
       - the paragraph(s) about the past brand partnerships come BEFORE those about the relevant content (only when
         no paragraph mixes the two kinds of post).
     """
+    text = _MEDIAN_CLAUSE.sub("", text)
+    if brand_name:
+        paragraphs = text.split("\n\n")
+        for i in range(len(paragraphs) - 1, -1, -1):
+            if "?" in paragraphs[i]:
+                paragraphs[i] = _CLOSING_QUESTION.sub(
+                    lambda m: m.group(0).replace(m.group(1), f"Would you be open to talking about how we could feature {brand_name}'s products with my audience?"),
+                    paragraphs[i].rstrip(),
+                )
+                break
+        text = "\n\n".join(paragraphs)
     text = _FIGURE_THEN_URL_IN_BRACKETS.sub(lambda m: f", with {m.group(1)}: {m.group(2)}", text)
     text = _URL_IN_BRACKETS.sub(lambda m: f": {m.group(1)}", text)
     text = _BARE_FIGURE_IN_BRACKETS.sub(lambda m: f", {m.group(1)}", text)

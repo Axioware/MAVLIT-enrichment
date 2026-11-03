@@ -3,7 +3,7 @@ from pipeline.helpers import prompts as P
 from pipeline.pitch_posts import describe_entries, split_entries
 
 # the default as it was before the comparison rule and the content/number examples were added
-BEFORE_EXAMPLES = (P.PITCH_DEFAULT_PROMPT.replace(P.PITCH_LAYOUT_RULE, "").replace(P.PITCH_POSTS_RULE, P._R1_POSTS_RULE)
+BEFORE_EXAMPLES = (P.PITCH_DEFAULT_PROMPT.replace(P.PITCH_CLOSING_RULE, "").replace(P.PITCH_LAYOUT_RULE, "").replace(P.PITCH_POSTS_RULE, P._R1_POSTS_RULE)
                    .replace(P.PITCH_COMPARISON_RULE, "").replace(P.PITCH_METRIC_EXAMPLES, ""))
 LINKS = ("https://www.instagram.com/p/DeuON3BpcmB/,https://www.instagram.com/p/DeiF93ZOr4J/,"
          "https://www.instagram.com/p/DeenHsmOZJc/")

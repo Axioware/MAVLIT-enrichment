@@ -1810,6 +1810,19 @@ PITCH_LAYOUT_RULE = """\
   number such as "about 26K".
 """
 
+# The closing question: about featuring the brand's products with the audience.
+# Keep this constant separate for compatibility with prompt migration.
+PITCH_CLOSING_RULE = """\
+- CLOSING QUESTION. This replaces any other closing suggestion above. End
+  with exactly this one question, filling in the brand name:
+  "Would you be open to talking about how we could feature {brand_name}'s
+  records with my audience?"
+  Replace "records" with the plain word for what the brand sells (for
+  example "products", "shoes", "supplements"), and use "products" when
+  unsure. If a recent product launch is supplied above, write "products"
+  instead. Do not mention a paid partnership in the closing question.
+"""
+
 # The creator's story is optional.
 # Never fabricate a personal history with the brand.
 PITCH_STORY_RULE = """\
@@ -2123,7 +2136,7 @@ of content ideas tailored to the brand.
 Choose the most natural option for this email. Do not combine several
 requests or pressure the recipient to respond.
 
-""" + PITCH_PRODUCT_RULE + PITCH_VIEWS_RULE + PITCH_STATS_RULE + PITCH_POSTS_RULE + PITCH_COMPARISON_RULE + PITCH_LAYOUT_RULE + PITCH_STORY_RULE + PITCH_QUALITY_RULES + """\
+""" + PITCH_PRODUCT_RULE + PITCH_VIEWS_RULE + PITCH_STATS_RULE + PITCH_POSTS_RULE + PITCH_COMPARISON_RULE + PITCH_LAYOUT_RULE + PITCH_CLOSING_RULE + PITCH_STORY_RULE + PITCH_QUALITY_RULES + """\
 FIXED RULES
 
 - Return ONLY the email body. Never include a subject line, "Subject:",
@@ -2208,15 +2221,16 @@ def _previous_pitch_defaults() -> tuple[str, ...]:
     )
 
     # The release before the comparisons and the content/number examples is the base of every earlier variant.
+    release3 = PITCH_DEFAULT_PROMPT.replace(PITCH_CLOSING_RULE, "")   # the release before the closing question
     release1 = (
-        PITCH_DEFAULT_PROMPT.replace(PITCH_LAYOUT_RULE, "")
+        release3.replace(PITCH_LAYOUT_RULE, "")
         .replace(PITCH_POSTS_RULE, _R1_POSTS_RULE)
         .replace(PITCH_COMPARISON_RULE, _R1_COMPARISON_RULE)
         .replace(PITCH_METRIC_EXAMPLES, _R1_METRIC_EXAMPLES)
     )
-    release2 = PITCH_DEFAULT_PROMPT.replace(PITCH_LAYOUT_RULE, _R2_LAYOUT_RULE)
+    release2 = release3.replace(PITCH_LAYOUT_RULE, _R2_LAYOUT_RULE)
     base = release1.replace(_R1_COMPARISON_RULE, "").replace(_R1_METRIC_EXAMPLES, "")
-    versions = [base, release1, release2]
+    versions = [base, release1, release2, release3]
     for keep in product((True, False), repeat=len(blocks)):
         text = base
         for block, kept in zip(blocks, keep):

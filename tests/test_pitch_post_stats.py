@@ -1,4 +1,4 @@
-"""creator_post_stats: highest / average / median views and engagement of the creator's latest saved posts."""
+"""creator_post_stats: highest / average views and engagement of the creator's latest saved posts."""
 import pytest
 
 from pipeline.pitching import creator_post_stats
@@ -28,9 +28,9 @@ def test_views_and_engagement_figures():
     text = creator_post_stats(FakeDb(rows), Creator())
     assert text.startswith("across their latest 6 posts")
     # views: 1000, 3000, 2000, 6000, 9999
-    assert "views per reel/video (5 with views): highest 9,999, average 4,400, median 3,000" in text
+    assert "views per reel/video (5 with views): highest 9,999, average 4,400" in text
     # engagement (the hidden-likes post is left out): 110, 220, 300, 440, 550
-    assert "engagement per post, likes + comments (5 posts): highest 550, average 324, median 300" in text
+    assert "engagement per post, likes + comments (5 posts): highest 550, average 324" in text
 
 
 def test_unknown_without_enough_posts_or_handle():

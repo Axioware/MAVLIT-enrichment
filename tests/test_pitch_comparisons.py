@@ -42,7 +42,7 @@ def test_default_prompt_has_the_examples_and_the_rule_and_the_old_default_still_
     assert PITCH_METRIC_EXAMPLES in PITCH_DEFAULT_PROMPT and PITCH_COMPARISON_RULE in PITCH_DEFAULT_PROMPT
     assert "Goo Goo Dolls anniversary pressing" in PITCH_DEFAULT_PROMPT
     from pipeline.helpers import prompts as P
-    release1 = (PITCH_DEFAULT_PROMPT.replace(P.PITCH_LAYOUT_RULE, "").replace(P.PITCH_POSTS_RULE, P._R1_POSTS_RULE)
+    release1 = (PITCH_DEFAULT_PROMPT.replace(P.PITCH_CLOSING_RULE, "").replace(P.PITCH_LAYOUT_RULE, "").replace(P.PITCH_POSTS_RULE, P._R1_POSTS_RULE)
                 .replace(PITCH_COMPARISON_RULE, P._R1_COMPARISON_RULE).replace(PITCH_METRIC_EXAMPLES, P._R1_METRIC_EXAMPLES))
     base = release1.replace(P._R1_COMPARISON_RULE, "").replace(P._R1_METRIC_EXAMPLES, "")
     assert base in PITCH_PREVIOUS_DEFAULT_PROMPTS and release1 in PITCH_PREVIOUS_DEFAULT_PROMPTS
@@ -60,7 +60,7 @@ def test_layout_rule_orders_paid_before_content_and_bans_bracketed_figures():
 def test_every_post_gets_its_figure_in_words_before_its_url_and_the_previous_layout_still_upgrades():
     from pipeline.helpers import prompts as P
     assert "never in parentheses" in P.PITCH_LAYOUT_RULE and "never a bare\n  number" in P.PITCH_LAYOUT_RULE
-    assert PITCH_DEFAULT_PROMPT.replace(P.PITCH_LAYOUT_RULE, P._R2_LAYOUT_RULE) in PITCH_PREVIOUS_DEFAULT_PROMPTS
+    assert PITCH_DEFAULT_PROMPT.replace(P.PITCH_CLOSING_RULE, "").replace(P.PITCH_LAYOUT_RULE, P._R2_LAYOUT_RULE) in PITCH_PREVIOUS_DEFAULT_PROMPTS
 
 
 PAST = "https://www.instagram.com/p/De97ECxtg-V/, https://www.instagram.com/p/De7BmS1ug5N/"
@@ -97,3 +97,21 @@ def test_tidy_pitch_leaves_a_pitch_that_mixes_both_kinds_in_one_paragraph_in_ord
     mixed = "Hi,\n\nSee https://www.instagram.com/p/DfN-oawPdzj/ and https://www.instagram.com/p/De97ECxtg-V/.\n\nThanks,\nBrett"
     assert tidy_pitch(mixed, PAST, CONTENT) == mixed
     assert tidy_pitch("Plain (2006) text.", None, None) == "Plain (2006) text."
+
+
+def test_tidy_pitch_drops_the_median_clause_and_rewrites_an_old_closing_question():
+    from pipeline.pitch_posts import tidy_pitch
+    text = ("Hi,\n\nAcross my latest 20 posts, engagement averaged about 2,400 likes and comments per post, with a median of about 600.\n\n"
+            "Would you be open to discussing a paid partnership?\n\nBrett")
+    out = tidy_pitch(text, None, None, "Vertigo Vinyl")
+    assert "median" not in out and "per post.\n\n" in out
+    assert out.endswith("Would you be open to talking about how we could feature Vertigo Vinyl's products with my audience?\n\nBrett")
+    keep = "Hi,\n\nWould you be open to talking about how we could feature Vertigo Vinyl's records with my audience?\n\nBrett"
+    assert tidy_pitch(keep, None, None, "Vertigo Vinyl") == keep          # the model's own noun is kept
+    assert tidy_pitch(text, None, None) .count("paid partnership") == 1    # no brand name known: left as written
+
+
+def test_closing_rule_is_in_the_default_and_the_previous_release_still_upgrades():
+    from pipeline.helpers import prompts as P
+    assert P.PITCH_CLOSING_RULE in P.PITCH_DEFAULT_PROMPT and "feature {brand_name}'s" in P.PITCH_CLOSING_RULE
+    assert P.PITCH_DEFAULT_PROMPT.replace(P.PITCH_CLOSING_RULE, "") in P.PITCH_PREVIOUS_DEFAULT_PROMPTS

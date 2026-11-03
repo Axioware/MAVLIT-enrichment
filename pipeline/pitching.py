@@ -185,7 +185,7 @@ def _rounded(value: float) -> str:
 
 
 def _figures(label: str, values: list[int]) -> str:
-    return f"{label}: highest {_rounded(max(values))}, average {_rounded(statistics.mean(values))}, median {_rounded(statistics.median(values))}"
+    return f"{label}: highest {_rounded(max(values))}, average {_rounded(statistics.mean(values))}"
 
 
 def creator_usual_views(db: Session, creator: CreatorProfile) -> int | None:
@@ -207,7 +207,7 @@ def creator_usual_views(db: Session, creator: CreatorProfile) -> int | None:
 def creator_post_stats(db: Session, creator: CreatorProfile) -> str:
     """
     Views and engagement (likes + comments per post) of the creator's latest 20 saved Instagram posts, as one
-    line for the pitch prompt: highest / average / median of each. Views count video posts that have a view
+    line for the pitch prompt: highest / average of each (no median: many readers do not know the word). Views count video posts that have a view
     count; a post whose likes are hidden is left out of the engagement figures. "unknown" when the creator has
     no Instagram handle or fewer than 5 saved posts.
     """
@@ -399,7 +399,7 @@ def generate_pitch(
         pitch_text = call_gpt_text(built["prompt"], context=f"pitch for creator_id={creator.id} brand={built['brand_name']}")
     if not pitch_text:
         raise RuntimeError("Pitch generation failed — LLM returned no content")
-    pitch_text = ensure_content_links(tidy_pitch(pitch_text, past_brand_partnership, content_link), content_link)
+    pitch_text = ensure_content_links(tidy_pitch(pitch_text, past_brand_partnership, content_link, built['brand_name']), content_link)
     return _save_pitch(db, creator, built, pitch_text, is_custom=is_custom, **fields)
 
 
@@ -443,5 +443,5 @@ def stream_pitch(
     pitch_text = "".join(parts).strip()
     if not pitch_text:
         raise RuntimeError("Pitch generation failed — LLM returned no content")
-    pitch_text = ensure_content_links(tidy_pitch(pitch_text, past_brand_partnership, content_link), content_link)   # the saved pitch (sent in "done") has every link
+    pitch_text = ensure_content_links(tidy_pitch(pitch_text, past_brand_partnership, content_link, built['brand_name']), content_link)   # the saved pitch (sent in "done") has every link
     yield "done", _save_pitch(db, creator, built, pitch_text, is_custom=is_custom, **fields)
