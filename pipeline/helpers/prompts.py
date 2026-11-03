@@ -1802,6 +1802,12 @@ PITCH_LAYOUT_RULE = """\
 - FIGURES IN PLAIN WORDS. Put a figure inside the sentence, for example
   "which earned about 700 likes and comments". Never put figures in
   parentheses or brackets, and never in a list.
+- Give every post its figure BEFORE its URL, in words, and name what it
+  measures every time, even when two posts share one sentence: "my Hot
+  Fuss post, which earned about 6.4K likes and comments: URL, and my
+  OutKast post, which earned about 26K likes and comments: URL". Never
+  write a figure after a URL, never in parentheses, and never a bare
+  number such as "about 26K".
 """
 
 # The creator's story is optional.
@@ -2181,6 +2187,9 @@ _R1_COMPARISON_RULE = '- A post may also come with comparisons already worked ou
 _R1_METRIC_EXAMPLES = 'EXAMPLES OF HOW TO COMBINE CONTENT WITH NUMBERS\n\nThese show how to put a post and its number into a natural sentence.\nThey come from other creators. Follow only their way of phrasing. Never\ncopy their topics, numbers, or wording, and use only the measures\nsupplied for the current creator\'s posts (the examples also mention\nshares, which you may only mention if shares are supplied). Where an\nexample shows [Post 1], [Post 2] or [Post 3], write the matching supplied\nURL, once and unchanged, never the bracketed text. A comparison such as\n"twice my follower count" may be used only when it is supplied.\n\nTwo posts, different kinds of content and numbers:\n"My recent content ranges from local weather updates to community-focused\ncoverage. A reel covering King Tides reached 1.19 million views, while my\ncoverage of coastal flooding generated an engagement rate of 8.4%:\n[Post 1] and [Post 2]."\n\nTwo posts, the same niche:\n"I regularly create content highlighting local beach conditions and\ncoastal activity. One of my recent updates on wave conditions reached over\n5 times my follower count, while another covering beach closures\ngenerated more than 12K shares: [Post 1] and [Post 2]."\n\nTwo posts, different kinds of content:\n"From educational breakdowns of marine conditions to real-time local\nupdates, my content consistently resonates with my audience. A recent\nexplainer on wave activity reached 450K views, while my update on local\nflooding generated an 8.4% engagement rate: [Post 1] and [Post 2]."\n\nThree posts:\n"My content covers a variety of locally relevant topics, from beach safety\nand wave conditions to extreme weather updates. A recent reel on wave\nactivity reached 1.19 million views, my King Tides coverage attracted 450K\nviews, and a local flooding update generated an engagement rate of 8.4%:\n[Post 1], [Post 2], and [Post 3]."\n\nWho the creator is, then paid work with a number beside each post:\n"I post album pickups and pressing reviews for about 4K music fans who\ncollect reissues. I\'ve done paid posts for the Phoebe Bridgers Lost\nWeekend pressing, which pulled in 8K+ views (about twice my follower\ncount), and the Goo Goo Dolls anniversary pressing, which got about 3x my\nusual views."\n\nKeep the numbers inside the sentence about their post, in plain words,\nlike these. Do not stack several numbers on one post, and do not list\nstatistics in a separate block.\n\n'
 
 
+_R2_LAYOUT_RULE = '- PARAGRAPH ORDER. After the opening and the creator/brand fit, write the\n  PAID PARTNERSHIP paragraph first, then the RELEVANT CONTENT paragraph,\n  then the closing question.\n  * Paid partnership paragraph: only when past brand partnerships are\n    supplied. Present them as the creator\'s recent paid or sponsored\n    work, each with its own figure.\n  * Relevant content paragraph: only when content links are supplied.\n    Present them as examples of the kind of content the creator makes,\n    not as recent or paid work, each with its own figure.\n  * Never mix the two kinds of post in one paragraph. If only one field\n    is supplied, write only that paragraph.\n- FIGURES IN PLAIN WORDS. Put a figure inside the sentence, for example\n  "which earned about 700 likes and comments". Never put figures in\n  parentheses or brackets, and never in a list.\n'   # the layout rule before figures were required in words, before the URL
+
+
 def _previous_pitch_defaults() -> tuple[str, ...]:
     """Return prior default-prompt combinations with optional blocks removed."""
     from itertools import product
@@ -2205,8 +2214,9 @@ def _previous_pitch_defaults() -> tuple[str, ...]:
         .replace(PITCH_COMPARISON_RULE, _R1_COMPARISON_RULE)
         .replace(PITCH_METRIC_EXAMPLES, _R1_METRIC_EXAMPLES)
     )
+    release2 = PITCH_DEFAULT_PROMPT.replace(PITCH_LAYOUT_RULE, _R2_LAYOUT_RULE)
     base = release1.replace(_R1_COMPARISON_RULE, "").replace(_R1_METRIC_EXAMPLES, "")
-    versions = [base, release1]
+    versions = [base, release1, release2]
     for keep in product((True, False), repeat=len(blocks)):
         text = base
         for block, kept in zip(blocks, keep):

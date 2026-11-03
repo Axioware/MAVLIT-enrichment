@@ -55,3 +55,9 @@ def test_layout_rule_orders_paid_before_content_and_bans_bracketed_figures():
     assert PITCH_LAYOUT_RULE.index("Paid partnership paragraph") < PITCH_LAYOUT_RULE.index("Relevant content paragraph")
     assert "Never put figures in\n  parentheses or brackets" in PITCH_LAYOUT_RULE
     assert "(about twice" not in PITCH_DEFAULT_PROMPT and '"(about 45K views)"' not in PITCH_DEFAULT_PROMPT
+
+
+def test_every_post_gets_its_figure_in_words_before_its_url_and_the_previous_layout_still_upgrades():
+    from pipeline.helpers import prompts as P
+    assert "never in parentheses" in P.PITCH_LAYOUT_RULE and "never a bare\n  number" in P.PITCH_LAYOUT_RULE
+    assert PITCH_DEFAULT_PROMPT.replace(P.PITCH_LAYOUT_RULE, P._R2_LAYOUT_RULE) in PITCH_PREVIOUS_DEFAULT_PROMPTS
