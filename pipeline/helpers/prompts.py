@@ -1701,8 +1701,8 @@ PITCH_POSTS_RULE = """\
   comments). Describe the content only using the supplied caption.
 - For every supplied post that comes with figures, give its most
   impressive supplied figure or two (views, likes or engagement) in a few
-  words right beside that post, for example "(about 45K views)" or
-  "(around 3,000 likes)". Round naturally and make clear the figure
+  words right beside that post, for example "which got about 45K views"
+  or "with around 3,000 likes". Round naturally and make clear the figure
   belongs to that particular post. Never present it as typical or average
   performance. Skip a figure that is missing, and never invent one.
 - Keep every supplied post URL in the email, each once and unchanged, so
@@ -1723,7 +1723,7 @@ PITCH_COMPARISON_RULE = """\
   only to numbers you would calculate yourself. Never calculate a
   comparison or a rate yourself.
 - When a post comes with a comparison, prefer it to a bare number: "8K+
-  views (about twice my follower count)" or "about 3x my usual views"
+  views, about twice my follower count" or "about 3x my usual views"
   tells the brand more than the number alone. Copy the multiple as
   supplied ("about 2x" may be written "about twice"). Use it for that post
   only, and only one comparison per post.
@@ -1775,14 +1775,33 @@ views, and a local flooding update generated an engagement rate of 8.4%:
 Who the creator is, then paid work with a number beside each post:
 "I post album pickups and pressing reviews for about 4K music fans who
 collect reissues. I've done paid posts for the Phoebe Bridgers Lost
-Weekend pressing, which pulled in 8K+ views (about twice my follower
-count), and the Goo Goo Dolls anniversary pressing, which got about 3x my
+Weekend pressing, which pulled in 8K+ views, about twice my follower
+count, and the Goo Goo Dolls anniversary pressing, which got about 3x my
 usual views."
 
 Keep the numbers inside the sentence about their post, in plain words,
 like these. Do not stack several numbers on one post, and do not list
 statistics in a separate block.
 
+"""
+
+# Paragraph order and plain-words figures: paid partnerships first, then the relevant content.
+# Keep this constant separate for compatibility with prompt migration.
+PITCH_LAYOUT_RULE = """\
+- PARAGRAPH ORDER. After the opening and the creator/brand fit, write the
+  PAID PARTNERSHIP paragraph first, then the RELEVANT CONTENT paragraph,
+  then the closing question.
+  * Paid partnership paragraph: only when past brand partnerships are
+    supplied. Present them as the creator's recent paid or sponsored
+    work, each with its own figure.
+  * Relevant content paragraph: only when content links are supplied.
+    Present them as examples of the kind of content the creator makes,
+    not as recent or paid work, each with its own figure.
+  * Never mix the two kinds of post in one paragraph. If only one field
+    is supplied, write only that paragraph.
+- FIGURES IN PLAIN WORDS. Put a figure inside the sentence, for example
+  "which earned about 700 likes and comments". Never put figures in
+  parentheses or brackets, and never in a list.
 """
 
 # The creator's story is optional.
@@ -2098,7 +2117,7 @@ of content ideas tailored to the brand.
 Choose the most natural option for this email. Do not combine several
 requests or pressure the recipient to respond.
 
-""" + PITCH_PRODUCT_RULE + PITCH_VIEWS_RULE + PITCH_STATS_RULE + PITCH_POSTS_RULE + PITCH_COMPARISON_RULE + PITCH_STORY_RULE + PITCH_QUALITY_RULES + """\
+""" + PITCH_PRODUCT_RULE + PITCH_VIEWS_RULE + PITCH_STATS_RULE + PITCH_POSTS_RULE + PITCH_COMPARISON_RULE + PITCH_LAYOUT_RULE + PITCH_STORY_RULE + PITCH_QUALITY_RULES + """\
 FIXED RULES
 
 - Return ONLY the email body. Never include a subject line, "Subject:",
@@ -2156,6 +2175,12 @@ _PRIOR_PITCH_POSTS_RULE = "- A past partnership or content link may include an I
 _PRIOR_PITCH_STATS_RULE = '- The performance line above is supplied data. Its figures (average and\n  median views, highest, average and median engagement, where engagement\n  is likes plus comments per post) may be used, so the ban above on\n  average views and engagement figures does not apply to those exact\n  numbers. Use at most one or two of them, only when they strengthen the\n  pitch, rounded naturally.\n- Say what each figure measures, for example "my posts average about X\n  likes and comments" or "the median reel gets about Y views". Do not\n  present the highest figure as typical, and never turn these numbers into\n  an engagement rate, a prediction, or a guarantee.\n- If the line says "unknown", omit it.\n'
 
 
+# The texts of the release before the paragraph order and the plain-words rule (a stored unedited copy of it is upgraded).
+_R1_POSTS_RULE = '- A past partnership or content link may include an Instagram URL, post\n  caption, view count, likes, comments and engagement (likes plus\n  comments). Describe the content only using the supplied caption.\n- For every supplied post that comes with figures, give its most\n  impressive supplied figure or two (views, likes or engagement) in a few\n  words right beside that post, for example "(about 45K views)" or\n  "(around 3,000 likes)". Round naturally and make clear the figure\n  belongs to that particular post. Never present it as typical or average\n  performance. Skip a figure that is missing, and never invent one.\n- Keep every supplied post URL in the email, each once and unchanged, so\n  the brand can inspect the creator\'s work. Never leave one out.\n- Do not invent campaign results, brand relationships, product usage,\n  endorsements, or content details that are not supplied.\n- Do not imply that a normal content example was a paid partnership\n  unless the supplied information confirms that it was.\n'
+_R1_COMPARISON_RULE = '- A post may also come with comparisons already worked out for you, such\n  as "views are about 2x their follower count", "views are about 3x their\n  usual views per reel" and an "engagement rate" as a share of followers.\n  These are supplied data, so the bans above on engagement rates apply\n  only to numbers you would calculate yourself. Never calculate a\n  comparison or a rate yourself.\n- When a post comes with a comparison, prefer it to a bare number: "8K+\n  views (about twice my follower count)" or "about 3x my usual views"\n  tells the brand more than the number alone. Copy the multiple as\n  supplied ("about 2x" may be written "about twice"). Use it for that post\n  only, and only one comparison per post.\n- Say what a figure measures. Use only the measures supplied for that\n  post (views, likes, comments, engagement, engagement rate, or a\n  comparison). If a measure is not supplied for it, do not mention it.\n'
+_R1_METRIC_EXAMPLES = 'EXAMPLES OF HOW TO COMBINE CONTENT WITH NUMBERS\n\nThese show how to put a post and its number into a natural sentence.\nThey come from other creators. Follow only their way of phrasing. Never\ncopy their topics, numbers, or wording, and use only the measures\nsupplied for the current creator\'s posts (the examples also mention\nshares, which you may only mention if shares are supplied). Where an\nexample shows [Post 1], [Post 2] or [Post 3], write the matching supplied\nURL, once and unchanged, never the bracketed text. A comparison such as\n"twice my follower count" may be used only when it is supplied.\n\nTwo posts, different kinds of content and numbers:\n"My recent content ranges from local weather updates to community-focused\ncoverage. A reel covering King Tides reached 1.19 million views, while my\ncoverage of coastal flooding generated an engagement rate of 8.4%:\n[Post 1] and [Post 2]."\n\nTwo posts, the same niche:\n"I regularly create content highlighting local beach conditions and\ncoastal activity. One of my recent updates on wave conditions reached over\n5 times my follower count, while another covering beach closures\ngenerated more than 12K shares: [Post 1] and [Post 2]."\n\nTwo posts, different kinds of content:\n"From educational breakdowns of marine conditions to real-time local\nupdates, my content consistently resonates with my audience. A recent\nexplainer on wave activity reached 450K views, while my update on local\nflooding generated an 8.4% engagement rate: [Post 1] and [Post 2]."\n\nThree posts:\n"My content covers a variety of locally relevant topics, from beach safety\nand wave conditions to extreme weather updates. A recent reel on wave\nactivity reached 1.19 million views, my King Tides coverage attracted 450K\nviews, and a local flooding update generated an engagement rate of 8.4%:\n[Post 1], [Post 2], and [Post 3]."\n\nWho the creator is, then paid work with a number beside each post:\n"I post album pickups and pressing reviews for about 4K music fans who\ncollect reissues. I\'ve done paid posts for the Phoebe Bridgers Lost\nWeekend pressing, which pulled in 8K+ views (about twice my follower\ncount), and the Goo Goo Dolls anniversary pressing, which got about 3x my\nusual views."\n\nKeep the numbers inside the sentence about their post, in plain words,\nlike these. Do not stack several numbers on one post, and do not list\nstatistics in a separate block.\n\n'
+
+
 def _previous_pitch_defaults() -> tuple[str, ...]:
     """Return prior default-prompt combinations with optional blocks removed."""
     from itertools import product
@@ -2169,13 +2194,19 @@ def _previous_pitch_defaults() -> tuple[str, ...]:
         PITCH_VIEWS_RULE,
         PITCH_STATS_LINE,
         PITCH_STATS_RULE,
-        PITCH_POSTS_RULE,
+        _R1_POSTS_RULE,
         PITCH_STORY_RULE,
     )
 
     # The release before the comparisons and the content/number examples is the base of every earlier variant.
-    base = PITCH_DEFAULT_PROMPT.replace(PITCH_COMPARISON_RULE, "").replace(PITCH_METRIC_EXAMPLES, "")
-    versions = [base]
+    release1 = (
+        PITCH_DEFAULT_PROMPT.replace(PITCH_LAYOUT_RULE, "")
+        .replace(PITCH_POSTS_RULE, _R1_POSTS_RULE)
+        .replace(PITCH_COMPARISON_RULE, _R1_COMPARISON_RULE)
+        .replace(PITCH_METRIC_EXAMPLES, _R1_METRIC_EXAMPLES)
+    )
+    base = release1.replace(_R1_COMPARISON_RULE, "").replace(_R1_METRIC_EXAMPLES, "")
+    versions = [base, release1]
     for keep in product((True, False), repeat=len(blocks)):
         text = base
         for block, kept in zip(blocks, keep):
@@ -2185,9 +2216,9 @@ def _previous_pitch_defaults() -> tuple[str, ...]:
             versions.append(text)
     # The release before every content link was required (and before the post statistics): the only one with the old wording.
     without_stats = base.replace(PITCH_STATS_LINE, "").replace(PITCH_STATS_RULE, "")
-    versions.append(without_stats.replace(_PITCH_LINKS_SECTION, _OLD_PITCH_LINKS_SECTION).replace(PITCH_POSTS_RULE, _OLD_PITCH_POSTS_RULE))
+    versions.append(without_stats.replace(_PITCH_LINKS_SECTION, _OLD_PITCH_LINKS_SECTION).replace(_R1_POSTS_RULE, _OLD_PITCH_POSTS_RULE))
     # The release before the per-post figures and the creator statistics were expected in the email.
-    prior_rules = base.replace(PITCH_POSTS_RULE, _PRIOR_PITCH_POSTS_RULE).replace(PITCH_STATS_RULE, _PRIOR_PITCH_STATS_RULE)
+    prior_rules = base.replace(_R1_POSTS_RULE, _PRIOR_PITCH_POSTS_RULE).replace(PITCH_STATS_RULE, _PRIOR_PITCH_STATS_RULE)
     versions.append(prior_rules)
     # The releases with a fixed "120 to 190 words" (before the length followed the number of content links).
     fixed_length = "- Write approximately 120 to 190 words in short paragraphs by default,"
