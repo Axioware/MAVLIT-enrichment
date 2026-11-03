@@ -2126,7 +2126,6 @@ PITCH_PREVIOUS_DEFAULT_PROMPTS = _previous_pitch_defaults()
 
 
 #  rate_intelligence.py
-
 RATE_INTEL_PROMPT_NAME = "rate_intelligence_estimate"
 RATE_INTEL_DEFAULT_PROMPT = """\
 You are a creator-economy rate consultant. A creator is negotiating one Instagram sponsorship deliverable with a brand and wants a fair market rate range, in USD, for ONE unit of that deliverable (one Reel, one Story, one post or one Live).
