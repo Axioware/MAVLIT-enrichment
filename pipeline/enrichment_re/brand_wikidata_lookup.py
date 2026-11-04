@@ -48,6 +48,7 @@ _HEADERS = {
     "Accept": "application/sparql-results+json",
     "User-Agent": "MAVLIT-enrichment/1.0 (https://github.com/axioware/MAVLIT-enrichment)",
 }
+_SPARQL_TIMEOUT = 90   # a 50-handle reverse lookup can take over 30s when WDQS is busy
 _BATCH_SIZE  = 50
 _RETRY_WAIT  = 65
 
@@ -111,6 +112,16 @@ def _website_score(url: str) -> int:
     return 1
 
 
+def _is_transient(exc: Exception) -> bool:
+    """Timeouts, network errors, 429 and 5xx from WDQS — worth retrying, not a verdict on the brand."""
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        return code == 429 or code >= 500
+    return False
+
+
 def _fetch_by_instagram_handles(handles: list[str]) -> dict[str, dict]:
     """
     Reverse SPARQL lookup: given bare Instagram usernames, find the
@@ -134,7 +145,7 @@ SELECT ?ig ?entity ?entityLabel ?entityDescription ?website ?instanceOfLabel WHE
                 _SPARQL_URL,
                 params={"query": sparql, "format": "json"},
                 headers=_HEADERS,
-                timeout=30,
+                timeout=_SPARQL_TIMEOUT,
             )
             if resp.status_code == 429:
                 wait = int(resp.headers.get("Retry-After", _RETRY_WAIT))
@@ -143,7 +154,8 @@ SELECT ?ig ?entity ?entityLabel ?entityDescription ?website ?instanceOfLabel WHE
                 continue
             resp.raise_for_status()
             break
-        except httpx.HTTPStatusError:
+        except (httpx.HTTPStatusError, httpx.TransportError):
+            # TransportError = read/connect timeout, dropped connection, DNS...
             if attempt == 2:
                 raise
             time.sleep(10 * (attempt + 1))
@@ -284,7 +296,16 @@ def enrich_brand_wikidata_lookup(db: Session, limit: int = 50, brand_id: int | N
         batch = handles[i : i + _BATCH_SIZE]
         try:
             found = _fetch_by_instagram_handles(batch)
-        except Exception:
+        except Exception as exc:
+            if _is_transient(exc):
+                # Wikidata/network trouble says nothing about these brands — leave
+                # them unchecked so the next run retries them (marking them
+                # checked would silently turn a timeout into "no match" forever).
+                logger.warning(
+                    "Brand Wikidata lookup batch %d hit a temporary error (%s) — left unchecked, retry next run",
+                    i, type(exc).__name__,
+                )
+                continue
             logger.exception("Brand Wikidata lookup batch %d failed — marking skipped", i)
             for h in batch:
                 for brand in handle_map[h]:
