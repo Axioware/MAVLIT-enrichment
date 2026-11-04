@@ -260,9 +260,13 @@ def _collect_commenter_records(posts: list[dict], n_per_post: int = 5) -> list[d
 
 #  Apify helpers 
 
-def _scrape_posts(username: str, n: int = 5) -> list[dict] | None:
+def _scrape_posts(username: str, n: int = 5, since: str | None = None) -> list[dict] | None:
     """
-    Scrape n posts for a profile. addParentData=True embeds profile fields
+    Scrape up to n posts for a profile. since ("YYYY-MM-DD") adds the actor's
+    onlyPostsNewerThan, so it stops at the first post older than that date
+    and only the new posts are fetched (and billed).
+
+    addParentData=True embeds profile fields
     (fullName, biography, externalUrl, followersCount, businessAddress, etc.)
     into every post item so one call gets both posts AND profile data.
 
@@ -272,15 +276,18 @@ def _scrape_posts(username: str, n: int = 5) -> list[dict] | None:
     callers need in order to avoid marking a row fully processed off the
     back of a call that never actually ran.
     """
+    run_input = {
+        "addParentData": True,
+        "directUrls":    [f"https://www.instagram.com/{username}/"],
+        "resultsType":   "posts",
+        "resultsLimit":  n,
+    }
+    if since:
+        run_input["onlyPostsNewerThan"] = since
     items = run_apify_actor(
         _ACTOR_ID,
-        {
-            "addParentData": True,
-            "directUrls":    [f"https://www.instagram.com/{username}/"],
-            "resultsType":   "posts",
-            "resultsLimit":  n,
-        },
-        label=f"IGUsers @{username} (n={n})",
+        run_input,
+        label=f"IGUsers @{username} (n={n}{f', since={since}' if since else ''})",
         require_success=True,
     )
     return None if items is None else items[:n]

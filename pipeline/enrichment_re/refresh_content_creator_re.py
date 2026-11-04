@@ -15,9 +15,13 @@ A creator is eligible when ALL of:
 
 Oldest currenttime first. Each eligible creator is run through the same
 flow as content_creator_re.py (enrich_content_creator_re), with
-skip_seen_posts=True: the latest 40 posts are scraped and upserted, but
-only posts not already stored for that creator go to the brand_check LLM,
-and commenters are collected only for newly confirmed partnership posts.
+skip_seen_posts=True: Apify is asked only for posts NEWER than the latest
+post already stored for that creator in instagram_users (onlyPostsNewerThan,
+max POSTS_REFRESH_MAX = 60, newest first), so no old post is scraped or paid
+for again. A creator with no stored post falls back to a plain 40-post scrape.
+Only posts not already stored go to the brand_check LLM, and commenters are
+collected only for newly confirmed partnership posts. No new posts is a
+normal success (currenttime is still reset).
 
 After a creator is processed successfully its currenttime is set to now().
 If its Apify scrape fails, currenttime is left unchanged so the creator is

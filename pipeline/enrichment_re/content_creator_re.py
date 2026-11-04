@@ -49,7 +49,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from sqlalchemy import or_, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -91,6 +91,42 @@ logger = logging.getLogger(__name__)
 # Override per call with enrich_content_creator_re(..., scrape_commenters=True)
 # or --scrape-commenters on the command line.
 SCRAPE_COMMENTERS = False
+
+# First scrape of a creator: their latest POSTS_FIRST_SCRAPE posts.
+POSTS_FIRST_SCRAPE = 40
+# Refresh (skip_seen_posts=True): only posts newer than the creator's latest
+# stored post, capped at this many (the newest ones win if there are more).
+POSTS_REFRESH_MAX = 60
+
+
+def _latest_post_dates(db: Session, usernames: list[str]) -> dict[str, str]:
+    """
+    {username: "YYYY-MM-DD"} of the newest post already stored in
+    instagram_users for each creator. post_timestamp is ISO text, so the
+    lexicographic max is the newest one. Creators with no stored post (or an
+    unreadable timestamp) are left out — they fall back to a plain first scrape.
+    """
+    if not usernames:
+        return {}
+    rows = (
+        db.query(InstagramUser.username, func.max(InstagramUser.post_timestamp))
+        .filter(
+            InstagramUser.username.in_(usernames),
+            InstagramUser.user_type == "contentcreatorRE",
+            InstagramUser.post_timestamp.isnot(None),
+        )
+        .group_by(InstagramUser.username)
+        .all()
+    )
+    out: dict[str, str] = {}
+    for username, ts in rows:
+        day = (ts or "")[:10]
+        try:
+            datetime.strptime(day, "%Y-%m-%d")
+        except ValueError:
+            continue
+        out[username] = day
+    return out
 
 
 def _ensure_partnership_evidence_table() -> None:
@@ -382,6 +418,15 @@ def enrich_content_creator_re(
     processed = 0
     all_confirmed_brand_ids: set[int] = set()
 
+    # Refresh runs: scrape only what is newer than the latest stored post.
+    # The cutoff is the DAY of that post (the actor takes a date), so a few
+    # same-day posts may come back again — seen_post_ids drops them later.
+    latest_day: dict[str, str] = {}
+    if skip_seen_posts:
+        latest_day = _latest_post_dates(
+            db, [u for u in (normalize_handle(r.username or "") for r in rows) if u],
+        )
+
     # Rows with no username can't be scraped — mark them done up front.
     scrapable: list[tuple[ContentCreatorRE, str]] = []
     for row in rows:
@@ -410,7 +455,12 @@ def enrich_content_creator_re(
     futures = {}
     for row, username in scrapable:
         logger.info("Content creator RE: scraping @%s", username)
-        futures[pool.submit(_scrape_posts, username, 40)] = (row, username)
+        since = latest_day.get(username)
+        if since:
+            logger.info("Content creator RE: @%s — only posts since %s (max %d)", username, since, POSTS_REFRESH_MAX)
+            futures[pool.submit(_scrape_posts, username, POSTS_REFRESH_MAX, since)] = (row, username)
+        else:
+            futures[pool.submit(_scrape_posts, username, POSTS_FIRST_SCRAPE)] = (row, username)
     try:
         for future in as_completed(futures):
             row, username = futures[future]
@@ -426,7 +476,10 @@ def enrich_content_creator_re(
                 time.sleep(0.5)
                 continue
             if not raw_posts:
-                logger.warning("Content creator RE: no posts returned for @%s", username)
+                logger.warning(
+                    "Content creator RE: no %sposts returned for @%s",
+                    "new " if username in latest_day else "", username,
+                )
                 row.is_scraped = True
                 row.currenttime = datetime.now(timezone.utc)  # last scraped (refresh_content_creator_re.py uses it)
                 db.commit()
