@@ -63,6 +63,15 @@ Run from the project root:
     python -m pipeline.enrichment_re.discover_collaborator_creators --beach-brands-only --dry-run
     python -m pipeline.enrichment_re.discover_collaborator_creators --beach-brands-only
 
+--v2 is the short flow: Branded Content check -> username-only LLM check, and
+that is where it ends. A brand goes to brands_raw exactly as above; a creator is
+saved to content_creator_re right away with an EMPTY niche (NULL) and
+is_scraped=False. No 5-post Apify scrape and no second profile/niche LLM call.
+Everything else (which rows are read, retries, collaborators_checked) is the same.
+
+    python -m pipeline.enrichment_re.discover_collaborator_creators --v2 --limit 50
+    python -m pipeline.enrichment_re.discover_collaborator_creators --v2 --dry-run
+
 --beach-brands-only limits the run to instagram_users rows (creators) that were
 found through a brand with brands_raw.beach_brands = true — i.e. rows linked to
 such a brand in brand_instagram_users (written by instagram_users.py).
@@ -384,7 +393,7 @@ def _classify_niche(username: str, posts: list[dict]) -> tuple[str | None, str |
     return "creator", niche if niche in NICHES else "Other"
 
 
-def _save_creator(db: Session, username: str, niche: str) -> None:
+def _save_creator(db: Session, username: str, niche: str | None) -> None:
     db.add(ContentCreatorRE(
         username=username,
         niche=niche,
@@ -415,10 +424,15 @@ def _mark_rows_checked(db: Session, row_ids: list[int]) -> None:
         db.commit()
 
 
-def _process_username(db: Session, username: str, summary: dict, tag: str) -> bool:
+NO_NICHE = "(no niche)"   # summary key for creators saved by --v2 with an empty niche
+
+
+def _process_username(db: Session, username: str, summary: dict, tag: str, v2: bool = False) -> bool:
     """
     Branded Content check first, then classify and save. Returns False when
-    the username should be retried next run.
+    the username should be retried next run. v2=True stops after the
+    username-only check: a creator is saved to content_creator_re with an
+    empty niche, with no Apify scrape and no profile/niche LLM call.
     """
     # Step 1 — Branded Content Library gate, for every username: only accounts
     # with at least one branded-content post in the checker's date window go on.
@@ -455,6 +469,12 @@ def _process_username(db: Session, username: str, summary: dict, tag: str) -> bo
         logger.info("%s: brand (username check) — %s", tag, "added to brands_raw" if added else "already in brands_raw")
         return True
 
+    if v2:
+        _save_creator(db, username, None)
+        summary["saved"][NO_NICHE] = summary["saved"].get(NO_NICHE, 0) + 1
+        logger.info("%s: creator (username check) — saved with empty niche (v2)", tag)
+        return True
+
     # Step 3 — creators: scrape 5 posts, then the profile check confirms
     # creator vs brand and picks the niche. Creators -> content_creator_re,
     # brands -> brands_raw.
@@ -488,7 +508,7 @@ def _process_username(db: Session, username: str, summary: dict, tag: str) -> bo
 def run(
     db: Session, limit: int, dry_run: bool = False, skip_row_ids: set[int] | None = None,
     niche: str | None = None, gender: str | None = None, user_type: str | None = None,
-    beach_brands_only: bool = False,
+    beach_brands_only: bool = False, v2: bool = False,
 ) -> dict:
     _ensure_columns(db)
     usernames, rows = _collect_work(db, limit, skip_row_ids, niche, gender, user_type, beach_brands_only)
@@ -507,15 +527,15 @@ def run(
         for username in usernames:
             logger.info("DRY RUN would classify @%s", username)
         return summary
-    if not OPENAI_KEY or not APIFY_TOKEN:
-        logger.error("OPENAI_KEY and APIFY_TOKEN must both be set — nothing processed")
+    if not OPENAI_KEY or (not v2 and not APIFY_TOKEN):   # v2 never calls Apify
+        logger.error("%s must be set — nothing processed", "OPENAI_KEY" if v2 else "OPENAI_KEY and APIFY_TOKEN both")
         return summary
 
     failed: set[str] = set()
     for index, username in enumerate(usernames, start=1):
         tag = f"[{index}/{len(usernames)}] @{username}"
         try:
-            ok = _process_username(db, username, summary, tag)
+            ok = _process_username(db, username, summary, tag, v2=v2)
         except LLMUnavailableError:
             # OpenAI is out of credits / unavailable. Everything not finished
             # (this username and the rest) counts as failed, so no row that
@@ -549,7 +569,7 @@ def run(
 def run_all(
     db: Session, batch_size: int = 10,
     niche: str | None = None, gender: str | None = None, user_type: str | None = None,
-    beach_brands_only: bool = False,
+    beach_brands_only: bool = False, v2: bool = False,
 ) -> dict:
     """
     Process every remaining row, batch_size rows at a time, marking rows
@@ -565,7 +585,7 @@ def run_all(
         batch_no += 1
         logger.info("===== batch %d =====", batch_no)
         summary = run(db, batch_size, skip_row_ids=skip_row_ids, niche=niche, gender=gender, user_type=user_type,
-                      beach_brands_only=beach_brands_only)
+                      beach_brands_only=beach_brands_only, v2=v2)
         if not summary["usernames"]:
             break
         skip_row_ids |= summary["failed_row_ids"]
@@ -573,7 +593,7 @@ def run_all(
             total[key] += summary[key]
         for saved_niche, count in summary["saved"].items():
             total["saved"][saved_niche] = total["saved"].get(saved_niche, 0) + count
-        if not OPENAI_KEY or not APIFY_TOKEN:
+        if not OPENAI_KEY or (not v2 and not APIFY_TOKEN):
             break
     return total
 
@@ -605,6 +625,11 @@ def main() -> int:
         "--beach-brands-only", action="store_true", dest="beach_brands_only",
         help="Only rows (creators) found through a brand with brands_raw.beach_brands = true.",
     )
+    parser.add_argument(
+        "--v2", action="store_true",
+        help="Short flow: Branded Content check + username LLM check only. Creators are saved to "
+             "content_creator_re with an empty niche; no 5-post Apify scrape, no profile/niche LLM call.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="List the usernames that would be processed; no LLM/Apify/writes.")
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
@@ -622,13 +647,13 @@ def main() -> int:
         if args.limit is not None:
             summary = run(db, args.limit, dry_run=args.dry_run,
                           niche=args.niche, gender=args.gender, user_type=args.user_type,
-                          beach_brands_only=args.beach_brands_only)
+                          beach_brands_only=args.beach_brands_only, v2=args.v2)
         elif args.dry_run:  # list everything, write nothing
             summary = run(db, 10**9, dry_run=True, niche=args.niche, gender=args.gender, user_type=args.user_type,
-                          beach_brands_only=args.beach_brands_only)
+                          beach_brands_only=args.beach_brands_only, v2=args.v2)
         else:
             summary = run_all(db, niche=args.niche, gender=args.gender, user_type=args.user_type,
-                              beach_brands_only=args.beach_brands_only)
+                              beach_brands_only=args.beach_brands_only, v2=args.v2)
     finally:
         db.close()
 
