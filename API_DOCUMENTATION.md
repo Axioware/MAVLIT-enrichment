@@ -470,8 +470,8 @@ All five pages also load `/posthog-init.js` for analytics. The API base is impli
 
 #### `POST /early-access`
 - **Auth:** none (public; the landing page's "Join the founding creators" form calls it as `/api/mavlit/early-access`).
-- **Body:** `{ email, handle, platform: instagram|tiktok|youtube|substack|other, niche: music|health|food|beauty|fitness|other, followers: under10k|10k-50k|50k-200k|200k-500k|500k+, website: "" }`. `website` is a hidden honeypot field; a request that fills it is accepted but not saved.
-- **Behaviour:** the email is lower-cased and the handle loses a leading `@`. One row per email in `early_access_signups` (a repeat sign-up updates the row); the response is the same `{ "ok": true }` (201) for a new and a repeat email. Invalid values return 422; more than 10 sign-ups per IP per hour return 429 (in-memory counter, per process).
+- **Body:** `{ email, handle, platform: instagram|tiktok|youtube|other, niche: [music|health|fitness|beauty, ...] (one or more; a single string is accepted too), followers: under10k|10k-50k|50k-200k|200k-500k|500k+, website: "" }`. `website` is a hidden honeypot field; a request that fills it is accepted but not saved.
+- **Behaviour:** the email is lower-cased and the handle loses a leading `@`. One row per email in `early_access_signups` (a repeat sign-up updates the row); the niches are saved comma separated in a fixed order (`music, beauty`); the response is the same `{ "ok": true }` (201) for a new and a repeat email. Invalid values return 422; more than 10 sign-ups per IP per hour return 429 (in-memory counter, per process).
 - **Admin:** SQLAdmin > Early Access Sign-ups.
 
 ## External services

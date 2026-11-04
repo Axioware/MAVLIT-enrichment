@@ -949,8 +949,8 @@ class EarlyAccessSignup(Base):
     id         = Column(Integer, primary_key=True)
     email      = Column(Text, nullable=False, unique=True)   # stored lower case
     handle     = Column(Text, nullable=False)                # the creator's handle, without the @
-    platform   = Column(Text, nullable=False)                # instagram | tiktok | youtube | substack | other
-    niche      = Column(Text, nullable=False)                # music | health | food | beauty | fitness | other
+    platform   = Column(Text, nullable=False)                # instagram | tiktok | youtube | other
+    niche      = Column(Text, nullable=False)                # one or more of music | health | fitness | beauty, comma separated ("music, beauty")
     followers  = Column(Text, nullable=False)                # under10k | 10k-50k | 50k-200k | 200k-500k | 500k+
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
