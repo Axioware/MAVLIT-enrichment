@@ -760,6 +760,11 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
         return 0
 
     logger.info("Brand Instagram profile lookup: processing %d brand(s)", len(brands))
+    # End the read transaction before the slow Apify / web / LLM work: the API
+    # engine (SessionLocal) closes a connection left idle in a transaction for
+    # 60 s, which killed this run on its first brand. Loaded rows stay usable
+    # (expire_on_commit=False).
+    db.commit()
     processed = 0
 
     try:
@@ -771,6 +776,7 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
                 processed += 1
                 continue
 
+            db.commit()   # no transaction held open across the Apify scrape
             profile = _scrape_profile(handle)
             if profile is None:
                 logger.warning(
