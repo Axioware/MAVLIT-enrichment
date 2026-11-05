@@ -35,6 +35,7 @@ class CreatorPostsResponse(BaseModel):
     shown: int = 0                          # how many are in `posts` (fewer than total when searching)
     min_keep: int                           # posts that always stay: nothing is deleted at or below this number
     can_delete: bool
+    instagram_handle: str | None = None     # the Instagram username the saved posts belong to (null when there are none)
     posts: list[CreatorPostItem]
 
 
@@ -70,7 +71,9 @@ def _item(row: CreatorInstagramPost) -> CreatorPostItem:
 def _response(db: Session, creator_id: int, search: str | None = None, partnership_only: bool = False) -> CreatorPostsResponse:
     total = posts_query(db, creator_id).count()   # the delete rule always looks at ALL posts, not at the search result
     rows = list_posts(db, creator_id, search, partnership_only)
-    return CreatorPostsResponse(total=total, shown=len(rows), min_keep=MIN_POSTS, can_delete=total > MIN_POSTS, posts=[_item(r) for r in rows])
+    handle = posts_query(db, creator_id).with_entities(CreatorInstagramPost.instagram_handle).order_by(CreatorInstagramPost.id.desc()).limit(1).scalar() if total else None
+    return CreatorPostsResponse(total=total, shown=len(rows), min_keep=MIN_POSTS, can_delete=total > MIN_POSTS, instagram_handle=handle,
+                                posts=[_item(r) for r in rows])
 
 
 @router.get("", response_model=CreatorPostsResponse)

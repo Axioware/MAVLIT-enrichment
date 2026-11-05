@@ -460,6 +460,19 @@ class WithDatabase(unittest.TestCase):
         return {"full_name": "Name", "creator_handle": "h", "age": 30, "gender": "female", "primary_platform": "instagram", "follower_count": 20000,
                 "content_niche": "Beauty", "instagram_handle": "h", "instagram_followers": 20000, "instagram_description": "d", "instagram_primary_niche": "Beauty"}
 
+    def test_the_save_before_fetch_profile_details_is_accepted_for_an_incomplete_profile_and_ranks_nothing(self):
+        # A new creator: name, age, gender, Instagram username and niche are filled in, no follower count / description yet.
+        body = {"full_name": "Name", "creator_handle": "h", "age": 30, "gender": "female", "primary_platform": "instagram",
+                "content_niche": "Beauty", "instagram_handle": "h", "instagram_primary_niche": "Beauty", "instagram_description_mode": "generate"}
+        a = self.client()
+        self.assertEqual(a.put("/creator-profile/me", json=body).status_code, 200)
+        self.assertEqual(self.value("SELECT instagram_handle FROM creator_profiles WHERE id = :c", c=self.ids["a"]), "h")
+        self.assertEqual((self.started, self.locks()), ([], []), "nothing to rank yet")
+        self.assertEqual(self.value("SELECT llm_v3_ranking_status FROM creator_profiles WHERE id = :c", c=self.ids["a"]), "idle")
+        # Without the generate mode (or without the username) an incomplete profile is still refused.
+        self.assertEqual(a.put("/creator-profile/me", json={**body, "instagram_description_mode": "manual"}).status_code, 422)
+        self.assertEqual(a.put("/creator-profile/me", json={**body, "instagram_handle": ""}).status_code, 422)
+
     def test_a_profile_save_queues_one_signals_job_and_skips_it_while_a_ranking_runs(self):
         a = self.client()
         self.assertEqual(a.put("/creator-profile/me", json=self.profile_body()).status_code, 200)

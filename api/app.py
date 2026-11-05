@@ -1841,6 +1841,19 @@ def _run_creator_signals_job(creator_id: int) -> None:
     _run_llm_v3_ranking_job(creator_id)
 
 
+def _is_generation_prerequisite_save(payload: dict) -> bool:
+    """
+    The save the profile page makes right before "Fetch profile details with MAVLIT" for a creator who has not finished
+    onboarding: description mode "generate" with the creator details, Instagram username and niche present, but no
+    follower count or description yet (the generation fills those in). The profile stays incomplete after it.
+    """
+    def has(key: str) -> bool:
+        return bool(str(payload.get(key) or "").strip())
+    return (payload.get("instagram_description_mode") == "generate" and payload.get("age") is not None
+            and has("full_name") and has("gender") and has("primary_platform") and has("instagram_handle")
+            and (has("content_niche") or has("instagram_primary_niche")))
+
+
 @app.put("/creator-profile/me", response_model=CreatorProfileResponse)
 def upsert_my_creator_profile(
     body: CreatorProfileRequest,
@@ -1858,7 +1871,8 @@ def upsert_my_creator_profile(
         payload = body.model_dump()
         payload["brand_preferences"] = (payload.get("brand_preferences") or "").strip() or None
         payload["pitch_style_preferences"] = (payload.get("pitch_style_preferences") or "").strip() or None
-        if not is_profile_complete(payload):
+        complete = is_profile_complete(payload)
+        if not complete and not _is_generation_prerequisite_save(payload):
             raise HTTPException(
                 status_code=422,
                 detail="Complete the required onboarding fields before continuing: full name, age, gender, primary platforms, Instagram username, follower count, primary niche, and at least one creator description.",
@@ -1868,7 +1882,9 @@ def upsert_my_creator_profile(
         if (row.instagram_description_status or "idle") in {"queued", "running"} or (row.youtube_description_status or "idle") in {"queued", "running"}:
             raise HTTPException(status_code=409, detail="A description is still being generated. Wait for it to finish before saving your profile.")
         bind = db.get_bind()
-        ranking_locks = _try_ranking_locks(db, row.id)   # [] when this creator's ranking is already running, or the job queue is full
+        # [] when this creator's ranking is already running, or the job queue is full - and for a profile that is still
+        # incomplete (the save before "Fetch profile details with MAVLIT"): there is nothing to rank yet.
+        ranking_locks = _try_ranking_locks(db, row.id) if complete else []
         previous_handle = row.instagram_handle
         for field, value in payload.items():
             setattr(row, field, value)
