@@ -245,9 +245,9 @@ def generate_instagram_description(
     the user's old saved posts are emptied (once the new username's posts were fetched) and the table is filled
     again with the new ones, so posts of two usernames never pile up.
 
-    The username's posts come from creator_instagram_posts when it was scraped before (no Apify run: the saved
-    captions, bio, follower count and view counts are used); a username with no saved posts is new, so Apify
-    scrapes its latest 20 posts, which are saved there for the user (creator_id). One LLM call then returns the
+    The username's posts come from creator_instagram_posts when a full set (_POSTS_LIMIT) was scraped before (no
+    Apify run: the saved captions, bio, follower count and view counts are used); a username with fewer saved posts
+    (none, or only a few) gets Apify scraping its latest 20 posts, which are saved there for the user (creator_id). One LLM call then returns the
     description, audience estimate, sub-niches and audience description.
     """
     handle = normalize_handle(username)
@@ -257,15 +257,19 @@ def generate_instagram_description(
         raise ValueError("Instagram niche is required")
 
     items = _saved_items(db, handle)
-    scraped = not items
-    if scraped:
-        items = _scrape_handle(handle, _POSTS_LIMIT)
-        if items is None:
-            raise RuntimeError("Instagram content could not be fetched")   # the old posts stay as they were
-        record_apify_scrape("instagram", handle, _POSTS_LIMIT, len(items[:_POSTS_LIMIT]))
-        items = items[:_POSTS_LIMIT]
-    else:
+    if len(items) >= _POSTS_LIMIT:
         logger.info("Instagram @%s: using %d saved post(s), no Apify run", handle, len(items))
+    else:
+        # Fewer saved posts than a full run (none, or only a few: posts added by link, others deleted) is not
+        # enough to describe the creator - scrape the latest posts. Saved posts are kept if the scrape fails.
+        fresh = _scrape_handle(handle, _POSTS_LIMIT)
+        if fresh is None:
+            if not items:
+                raise RuntimeError("Instagram content could not be fetched")   # the old posts stay as they were
+            logger.warning("Instagram @%s: scrape failed, using the %d saved post(s)", handle, len(items))
+        else:
+            record_apify_scrape("instagram", handle, _POSTS_LIMIT, len(fresh[:_POSTS_LIMIT]))
+            items = fresh[:_POSTS_LIMIT]
     if creator_id is not None:
         from pipeline.creator_posts import clear_posts, username_changed   # lazy: creator_posts imports pitch_posts, which imports this module
         if username_changed(previous_handle, handle):
