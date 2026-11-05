@@ -662,8 +662,11 @@ def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None,
         if url == origin and locale_swap is None:
             for candidate in _us_locale_variants(landed):
                 us_html, us_landed = _fetch_page_with_url(candidate)
-                us_seg = _locale_segment(candidate)
-                if us_html and (_locale_segment(us_landed) or "").lower() == (us_seg or "").lower():
+                # First path segment of the candidate (a bare "/us/" or "/en/" is not a full locale
+                # segment, so _locale_segment() returns None for it).
+                us_seg = urlparse(candidate).path.strip("/").split("/")[0]
+                landed_seg = urlparse(us_landed).path.strip("/").split("/")[0] if us_html else ""
+                if us_html and us_seg and landed_seg.lower() == us_seg.lower():
                     locale_swap = (_locale_segment(landed), us_seg)
                     logger.info("geo_reach: %s redirected to %s — using the US version %s", url, landed, us_landed)
                     html, url = us_html, us_landed
