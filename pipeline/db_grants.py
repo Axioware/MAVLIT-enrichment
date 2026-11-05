@@ -99,7 +99,7 @@ ADMIN = {
     "creator_brand_llm_v3_rankings": None,
     "creator_instagram_posts": (False, False, True),
     "creator_niches": (True, True, True),
-    "creator_profiles": (True, True, False),   # admin can create and edit, not delete (api/app.py CreatorProfileAdmin)
+    "creator_profiles": (True, True, True),    # admin can create, edit and delete a creator (api/app.py CreatorProfileAdmin.delete_model)
     "early_access_signups": (False, True, True),
     "facebook_branded_content_checks": (True, True, True),
     "initial_brand_score": (True, True, True),

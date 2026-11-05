@@ -19,8 +19,8 @@ applied to production: run everything on a staging copy first.
 |---|---|
 | SELECT, INSERT | `apify_usage`, `llm_usage`, `contact_reveals` (the daily cap on brand-contact reveals) |
 | SELECT, INSERT, DELETE | `creator_brand_llm_rankings`, `creator_brand_llm_v3_rankings`, `login_failures` (failed-login lockout), `feature_locks` (one in-flight pitch per user) |
-| SELECT, INSERT, UPDATE | `creator_profiles` (the admin view can create and edit but no longer delete), `feature_usage` (per-user daily caps on LLM / Apify features) |
-| SELECT, INSERT, UPDATE, DELETE | the other 24 |
+| SELECT, INSERT, UPDATE | `feature_usage` (per-user daily caps on LLM / Apify features) |
+| SELECT, INSERT, UPDATE, DELETE | the other 25, `creator_profiles` among them (the admin view can create, edit and delete a creator) |
 
 Never granted: ownership, superuser, CREATE, TRUNCATE, REFERENCES, TRIGGER, and every object not listed (the 57 `bak_*` copies,
 `llm_model_test_rankings`, `v3cmp_*`, anything else). INSERT always comes with SELECT (`INSERT ... RETURNING`). No

@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
 from sqladmin.filters import AllUniqueStringValuesFilter, OperationColumnFilter
-from sqlalchemy import String, cast, or_, text
+from sqlalchemy import String, cast, delete, or_, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session, aliased, object_session
@@ -819,7 +819,7 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
     column_exclude_list = [CreatorProfile.embedding, CreatorProfile.password_hash]
     column_details_exclude_list = [CreatorProfile.embedding, CreatorProfile.password_hash]   # the detail page lists every column unless told otherwise
     can_export = False    # would export every creator's email
-    can_delete = False
+    can_delete = True     # removes the creator and their data (delete_model below)
     column_searchable_list = [CreatorProfile.email, CreatorProfile.full_name, CreatorProfile.creator_handle, CreatorProfile.content_niche]
     column_sortable_list    = [c.name for c in CreatorProfile.__table__.columns if c.name not in ("embedding", "password_hash")]
     column_default_sort    = [(CreatorProfile.id, True)]
@@ -837,6 +837,24 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
     form_labels      = {"password_hash": "Password"}
     form_widget_args = {"password_hash": {"placeholder": "Leave blank to keep the current password"}}
     page_size = 15
+
+    # Tables that point at creator_profiles.id WITHOUT ON DELETE CASCADE: their rows go first. The cascading
+    # tables (creator_instagram_posts, contact_reveals, feature_usage, feature_locks, own_brand_jobs) go with the
+    # creator on their own. llm_usage has no foreign key: its cost rows deliberately outlive a deleted creator.
+    _DELETE_FIRST = (CreatorBrandLlmRanking, CreatorBrandLlmV3Ranking, SavedBrand, Pitch, RateEstimate, ContractReview)
+
+    def _delete_creator(self, pk) -> None:
+        with self.session_maker() as session:
+            creator = session.get(CreatorProfile, int(pk))
+            if creator is None:
+                return
+            for model in self._DELETE_FIRST:
+                session.execute(delete(model).where(model.creator_profile_id == creator.id))
+            session.delete(creator)
+            session.commit()   # one transaction: either the creator and their data are gone, or nothing changed
+
+    async def delete_model(self, request, pk) -> None:
+        await anyio.to_thread.run_sync(self._delete_creator, pk)
 
     async def on_model_change(self, data: dict, model, is_created: bool, request) -> None:
         plaintext = (data.get("password_hash") or "").strip()

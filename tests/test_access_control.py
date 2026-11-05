@@ -90,7 +90,7 @@ class AdminViews(unittest.TestCase):
             self.assertNotIn(name, creators._details_prop_names)
             self.assertNotIn(name, creators._export_prop_names)
         self.assertFalse(creators.can_export)
-        self.assertFalse(creators.can_delete)
+        self.assertTrue(creators.can_delete)   # admin may delete a creator (CreatorProfileAdmin.delete_model removes their data too)
         self.assertFalse(contacts.can_export)
         self.assertTrue(creators.can_create and creators.can_edit)   # accounts are still provisioned and edited there
 
