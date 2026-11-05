@@ -3,10 +3,10 @@ pipeline/enrichment_re/brand_instagram_profile.py
 
 RUN CONDITIONS — a brands_raw row is processed (batch mode) only when ALL hold:
   1. instagram_handle is set.
-  2. brand_tier is one of lower-range / midlower-range / midhigher-range.
-     NOT run for: brand_tier NULL / empty (not classified yet — run
-     pipeline/enrichment/brand_tier.py first), the text 'null', higher-range
-     or extreme.
+  2. brand_tier is one of lower-range / midlower-range / midhigher-range /
+     higher-range. NOT run for: brand_tier NULL / empty (not classified yet —
+     run pipeline/enrichment/brand_tier.py first), the text 'null', or
+     extreme.
   3. refferls is not true (refferls = true brands are never processed; NULL
      and false are).
   4. instagram_profile_checked = false (not processed before).
@@ -115,7 +115,7 @@ logger = logging.getLogger(__name__)
 # skipped; brands not in test_creator_brand_partnership_posts at all (e.g.
 # Facebook Branded Content finds) are still processed.
 _MIN_PARTNERSHIP_CONFIDENCE = 90
-_ELIGIBLE_BRAND_TIERS = ("lower-range", "midlower-range", "midhigher-range")
+_ELIGIBLE_BRAND_TIERS = ("lower-range", "midlower-range", "midhigher-range", "higher-range")
 
 _ACTOR_ID = "shu8hvrXbJbY3Eb9W"  # same Instagram scraper used across the pipeline
 # Full browser-like header set — link-in-bio hosts (Linktree in particular,
@@ -716,7 +716,7 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
 
     Batch mode (no brand_id) processes every row with instagram_handle set,
     brand_tier in _ELIGIBLE_BRAND_TIERS (lower-range / midlower-range /
-    midhigher-range — never NULL, higher-range or extreme), refferls not true
+    midhigher-range / higher-range — never NULL or extreme), refferls not true
     and instagram_profile_checked=False — named or bare, whether or not
     brand_wikidata_lookup.py has run on it yet — EXCEPT brands that are in
     test_creator_brand_partnership_posts only with sponsorship_confidence
@@ -734,8 +734,7 @@ def enrich_brand_instagram_profile(db: Session, limit: int = 50, brand_id: int |
 
     query = db.query(BrandRaw).filter(
         BrandRaw.instagram_handle.isnot(None),
-        # Only the tiers a creator can realistically reach. Excludes NULL /
-        # 'null' (not classified yet), higher-range and extreme (Fortune-500 /
+        # Excludes NULL / 'null' (not classified yet) and extreme (Fortune-500 /
         # household-name brands) — see brand_tier.py.
         BrandRaw.brand_tier.in_(_ELIGIBLE_BRAND_TIERS),
         BrandRaw.refferls.isnot(True),   # never referral brands (NULL / False still run)

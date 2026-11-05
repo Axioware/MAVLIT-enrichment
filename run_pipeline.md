@@ -83,7 +83,7 @@ db = SessionLocal()
 enrich_instagram_posts(db, limit=100, beach_brands_only=True, workers=4)
 db.close()
 "
-# The usual run conditions still apply (tier lower/midlower/midhigher-range, refferls false,
+# The usual run conditions still apply (tier lower/midlower/midhigher/higher-range (not extreme), refferls false,
 # geo_reach_score 0-40, not instagram_checked) — so run brand_tier.py and geo_reach.py first.
 
 ## to run youtube_sponsorship.py (daily limited run)
@@ -537,7 +537,7 @@ python3 -m pipeline.enrichment.geo_reach.geo_reach --brand-id 5318
 python3 -m pipeline.enrichment.geo_reach.geo_reach --limit 1 --creator-niche Fitness
 
 or (only brands with beach_brands = true — the usual geo_reach run conditions still apply:
-tier lower/midlower/midhigher-range, refferls false, website set, no geo score yet)
+tier lower/midlower/midhigher/higher-range (not extreme), refferls false, website set, no geo score yet)
 
 python3 -m pipeline.enrichment.geo_reach.geo_reach --beach-brands-only
 

@@ -74,9 +74,9 @@ RUN CONDITIONS — a brands_raw row is scored only when ALL hold:
   2. geo_reach_country_codes is empty / null / [] / {}.
   3. website is set.
   4. refferls = false.
-  5. brand_tier is lower-range, midlower-range or midhigher-range. NOT run
-     for an empty tier (NULL / the text 'null' — run
-     pipeline/enrichment/brand_tier.py first), higher-range or extreme.
+  5. brand_tier is lower-range, midlower-range, midhigher-range or
+     higher-range. NOT run for an empty tier (NULL / the text 'null' — run
+     pipeline/enrichment/brand_tier.py first) or extreme.
   6. Partnership evidence is not weak — EITHER the brand has a
      test_creator_brand_partnership_posts row with sponsorship_confidence
      >= 90 (any post date), OR it has no row in that table at all. A brand
@@ -130,9 +130,9 @@ _FINAL_EXCERPT_CHARS = 1500   # per read page, passed to the final decision call
 # Brands with a confirmed (>= 90) creator partnership post (any date), or
 # with no partnership post row at all.
 _MIN_PARTNERSHIP_CONFIDENCE = 90
-# Only tiers a creator can realistically reach (brand_tier.py). Excludes an
-# empty tier (not classified yet), higher-range and extreme.
-_ELIGIBLE_BRAND_TIERS = ("lower-range", "midlower-range", "midhigher-range")
+# Tiers allowed to continue (brand_tier.py). Excludes an empty tier (not
+# classified yet) and extreme (Fortune-500 / household-name brands).
+_ELIGIBLE_BRAND_TIERS = ("lower-range", "midlower-range", "midhigher-range", "higher-range")
 
 # Tags that never carry useful body copy
 _NOISE_TAGS = ["script", "style", "nav", "header", "footer", "noscript", "iframe", "form", "aside", "svg", "template"]
@@ -765,8 +765,8 @@ def enrich_geo_reach(
     refferls=False, and at least one test_creator_brand_partnership_posts
     row (any creator, any post date) with sponsorship_confidence >= 90, or
     no test_creator_brand_partnership_posts row at all.
-    Only brands with brand_tier lower-range / midlower-range / midhigher-range
-    run — an empty tier, higher-range and extreme are skipped. See "RUN
+    Only brands with brand_tier lower-range / midlower-range / midhigher-range /
+    higher-range run — an empty tier and extreme are skipped. See "RUN
     CONDITIONS" in the module docstring.
 
     beach_brands_only=True limits the run to brands with
@@ -799,7 +799,7 @@ def enrich_geo_reach(
         BrandRaw.website.isnot(None),
         BrandRaw.website != "",
         BrandRaw.refferls.is_(False),
-        # Classified and reachable only: never an empty tier, higher-range or extreme (brand_tier.py).
+        # Classified only: never an empty tier or extreme (brand_tier.py).
         BrandRaw.brand_tier.in_(_ELIGIBLE_BRAND_TIERS),
         or_(
             # a confirmed partnership post (confidence >= 90, any date) ...
