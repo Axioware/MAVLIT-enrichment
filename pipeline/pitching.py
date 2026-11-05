@@ -32,6 +32,34 @@ from pipeline.helpers.prompts import (
 
 logger = logging.getLogger(__name__)
 
+# Added to the prompt template (also to an edited stored copy): the email always names the creator's Instagram
+# username, written without an @.
+PITCH_HANDLE_RULE = """\
+INSTAGRAM USERNAME
+
+The creator's Instagram username is {creator_handle}. Mention it in the email exactly like that, WITHOUT an @ sign
+(for example in the closing line or the signature).
+"""
+
+
+def creator_instagram_username(creator: CreatorProfile) -> str:
+    """The creator's Instagram username as a bare name: no @, no URL."""
+    return normalize_handle(creator.instagram_handle or creator.creator_handle or "")
+
+
+def ensure_instagram_username(pitch_text: str, username: str) -> str:
+    """
+    The pitch names the creator's Instagram username, never with an @: "@name" becomes "name" and, when the email does not
+    mention the username at all, a closing "Instagram: name" line is added. Unchanged when the creator has no username.
+    """
+    if not username:
+        return pitch_text
+    name = re.escape(username)
+    pitch_text = re.sub(rf"@+({name})(?![\w.])", r"\1", pitch_text, flags=re.IGNORECASE)
+    if not re.search(rf"(?<![\w.@])({name})(?![\w.])", pitch_text, flags=re.IGNORECASE):
+        pitch_text = pitch_text.rstrip() + f"\n\nInstagram: {username}"
+    return pitch_text
+
 
 def _get_pitch_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == PITCH_PROMPT_NAME).first()
@@ -290,7 +318,9 @@ def _build_pitch_prompt(
         brand_followers = _brand_instagram_followers(db, brand.id)
         partners_text = _partner_creators_text(partner_creators(db, brand.id, creator))
 
-    template = _get_pitch_prompt(db)
+    template = _get_pitch_prompt(db).replace("@{creator_handle}", "{creator_handle}")   # the username goes in without an @
+    if PITCH_HANDLE_RULE not in template:
+        template = template.rstrip() + "\n\n" + PITCH_HANDLE_RULE
     style = (creator.pitch_style_preferences or "").strip()
     if style and "{pitch_style_preferences}" not in template:
         # an edited stored copy without the placeholder: still honour the creator's preferences
@@ -323,7 +353,7 @@ def _build_pitch_prompt(
         pitch_style_preferences=style or "none",
         product_reference=(product_reference or "").strip() or "none provided",
         creator_name=creator.full_name or "unknown",
-        creator_handle=creator.instagram_handle or creator.creator_handle or "unknown",
+        creator_handle=creator_instagram_username(creator) or "unknown",
         creator_niche=creator.content_niche or "unknown",
         creator_sub_niches=", ".join(creator.instagram_sub_niches or []) or "none provided",
         creator_follower_count=f"{creator.follower_count:,}" if creator.follower_count else "unknown",
@@ -400,6 +430,7 @@ def generate_pitch(
     if not pitch_text:
         raise RuntimeError("Pitch generation failed — LLM returned no content")
     pitch_text = ensure_content_links(tidy_pitch(pitch_text, past_brand_partnership, content_link, built['brand_name']), content_link)
+    pitch_text = ensure_instagram_username(pitch_text, creator_instagram_username(creator))
     return _save_pitch(db, creator, built, pitch_text, is_custom=is_custom, **fields)
 
 
@@ -444,4 +475,5 @@ def stream_pitch(
     if not pitch_text:
         raise RuntimeError("Pitch generation failed — LLM returned no content")
     pitch_text = ensure_content_links(tidy_pitch(pitch_text, past_brand_partnership, content_link, built['brand_name']), content_link)   # the saved pitch (sent in "done") has every link
+    pitch_text = ensure_instagram_username(pitch_text, creator_instagram_username(creator))   # ... and the username, without an @
     yield "done", _save_pitch(db, creator, built, pitch_text, is_custom=is_custom, **fields)
