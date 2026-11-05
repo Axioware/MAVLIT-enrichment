@@ -29,6 +29,7 @@ from sqlalchemy.sql import Select
 
 from api.advisory import router as advisory_router
 from api.early_access import router as early_access_router
+from api.invites import router as invites_router
 from api.auth import (
     get_completed_user,
     get_current_user,
@@ -74,6 +75,7 @@ from pipeline.db import (
     BrandProfile,
     BrandRaw,
     ContentCreatorRE,
+    AccountInvite,
     ContractReview,
     EarlyAccessSignup,
     CreatorBrandLlmRanking,
@@ -189,6 +191,7 @@ app.include_router(creator_posts_router)
 app.include_router(dashboard_api_router)
 app.include_router(advisory_router)
 app.include_router(early_access_router)
+app.include_router(invites_router)
 
 # Lets a separate frontend app (different domain, see FRONTEND_ORIGINS in
 # config.py) call this API with credentials (cookies) from the browser.
@@ -697,6 +700,27 @@ class EarlyAccessSignupAdmin(ModelView, model=EarlyAccessSignup):
     page_size = 25
 
 
+class AccountInviteAdmin(ModelView, model=AccountInvite):
+    """
+    The invitation links made by pipeline/early_access_invites.py: who was invited, when the link expires and when it was used. Read-only
+    (the links are made from the command line); the token itself is never stored, only its hash, which is not shown here either.
+    """
+    name         = "Account Invite"
+    name_plural  = "Account Invites"
+    icon         = "fa-solid fa-envelope-open-text"
+    column_list  = [AccountInvite.id, AccountInvite.created_at, AccountInvite.email, AccountInvite.expires_at, AccountInvite.used_at]
+    column_details_list = [AccountInvite.id, AccountInvite.created_at, AccountInvite.email, AccountInvite.expires_at, AccountInvite.used_at]
+    column_labels = {AccountInvite.created_at: "Invited", AccountInvite.expires_at: "Expires", AccountInvite.used_at: "Used"}
+    column_searchable_list = [AccountInvite.email]
+    column_sortable_list = [AccountInvite.id, AccountInvite.created_at, AccountInvite.email, AccountInvite.expires_at, AccountInvite.used_at]
+    column_default_sort  = [(AccountInvite.id, True)]
+    can_create = False
+    can_edit   = False
+    can_delete = False
+    can_export = False   # a list of emails
+    page_size = 25
+
+
 class RateEstimateAdmin(ModelView, model=RateEstimate):
     """
     Rate Intelligence estimates AND their log: one row per request from Deal Tools - who (MAVLIT user id + the Instagram
@@ -964,6 +988,7 @@ admin.add_view(PitchAdmin)
 admin.add_view(OwnBrandJobAdmin)
 admin.add_view(RateEstimateAdmin)
 admin.add_view(EarlyAccessSignupAdmin)
+admin.add_view(AccountInviteAdmin)
 admin.add_view(ContractReviewAdmin)
 for _view in admin.views:
     if getattr(_view, "can_export", False):

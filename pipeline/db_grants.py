@@ -47,6 +47,7 @@ ORDER = "SIUD"
 # Evidence per table: reads and writes found by tracing the 55 modules reachable from api.app, plus the write counters
 # production showed in the read-only audit. "" = no runtime route or job touches it (CLI scripts only).
 CODE = {
+    "account_invites": "SIU",                     # api/invites.py: the early-access invitation link (read, mark used) and the account created from it
     "apify_usage": "SI",                          # gpt_llm.record_apify_scrape
     "brand_contacts": "SIU",                      # apollo_contacts in the own-brand job; prod: 8312 ins / 8352 upd
     "brand_instagram_users": "SI",                # instagram_users / signals
@@ -86,6 +87,7 @@ CODE = {
 # --- what SQLAdmin allows (can_create, can_edit, can_delete); None = no admin view ---------------------------------------
 # tests/test_db_grants.py compares this with the live ModelView flags, so a change there fails until this is updated.
 ADMIN = {
+    "account_invites": (False, False, False),   # a read-only admin page: who was invited, when the link expires / was used
     "apify_usage": None,
     "brand_contacts": (True, True, True),
     "brand_instagram_users": (True, True, True),

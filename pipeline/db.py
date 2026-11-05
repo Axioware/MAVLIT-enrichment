@@ -956,6 +956,22 @@ class EarlyAccessSignup(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class AccountInvite(Base):
+    """
+    The invitation sent to someone who joined the early-access list: a single-use link that lets them choose their password and
+    create their account. Only the SHA-256 of the token is stored (the token itself exists only in the email). One row per email: inviting
+    again replaces the token. The link stops working once used (used_at) or after expires_at.
+    """
+    __tablename__ = "account_invites"
+
+    id         = Column(Integer, primary_key=True)
+    email      = Column(Text, nullable=False, unique=True)         # stored lower case
+    token_hash = Column(Text, nullable=False, unique=True)         # sha256 hex of the token
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    used_at    = Column(TIMESTAMP(timezone=True))
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class Pitch(Base):
     """
     A creator's outreach pitch for a brand — either an existing brands_raw
