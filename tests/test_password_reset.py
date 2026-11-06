@@ -85,9 +85,9 @@ class AgainstPostgres(unittest.TestCase):
                 conn.execute(text("INSERT INTO creator_profiles (email, password_hash, is_active) VALUES (:e, :h, :a)"),
                              {"e": email, "h": hash_password(OLD), "a": active})
 
-    def ask(self, email="ali@example.test"):
+    def ask(self, email="ali@example.test", expect="ok"):
         response = self.client.post("/auth/forgot-password", json={"email": email})
-        self.assertEqual((response.status_code, response.json()), (200, {"status": "ok"}))   # the same answer for every email
+        self.assertEqual((response.status_code, response.json()), (200, {"status": expect}))
         return response
 
     def token_from_mail(self):
@@ -98,13 +98,16 @@ class AgainstPostgres(unittest.TestCase):
         with self.engine.connect() as conn:
             return conn.execute(text("SELECT count(*) FROM password_reset_tokens")).scalar_one()
 
-    def test_an_account_gets_one_email_with_a_link_and_others_get_nothing_but_the_same_answer(self):
+    def test_a_registered_account_gets_one_email_and_other_addresses_are_told_and_get_nothing(self):
         self.ask("ali@example.test")
         self.assertEqual(len(self.sent), 1)
         self.assertEqual(self.sent[0]["To"], "ali@example.test")
-        for nobody in ("nobody@example.test", "off@example.test", "not an email"):   # unknown, deactivated, malformed
-            self.ask(nobody)
-        self.assertEqual((len(self.sent), self.rows()), (1, 1))
+        self.ask("ALI@example.test")   # case does not matter
+        self.ask("nobody@example.test", "not_registered")
+        self.ask("off@example.test", "inactive")
+        self.ask("not an email", "invalid_email")
+        self.assertEqual([m["To"] for m in self.sent], ["ali@example.test", "ali@example.test"])   # nothing went to the others
+        self.assertEqual(self.rows(), 1)                                                          # and no link was made for them
 
     def test_the_token_is_stored_only_as_a_hash(self):
         self.ask()
@@ -166,8 +169,10 @@ class AgainstPostgres(unittest.TestCase):
         self.assertEqual(self.client.post("/auth/password-reset", json={"token": token, "password": NEW}).status_code, 410)
 
     def test_one_address_is_mailed_at_most_three_times_an_hour(self):
-        for _ in range(5):
+        for _ in range(3):
             self.ask()
+        self.ask(expect="limited")
+        self.ask(expect="limited")
         self.assertEqual(len(self.sent), 3)
 
 

@@ -1,6 +1,6 @@
 """
-"Forgot password?": POST /auth/forgot-password emails a single-use link (it always answers the same, whether or not the email has an
-account), GET /auth/password-reset/{token} says whether the link still works, POST /auth/password-reset sets the new password and ends
+"Forgot password?": POST /auth/forgot-password emails a single-use link to a registered email and says so; for an email with no account
+it sends nothing and says the account is not registered (so the visitor can correct the address or join the waiting list). GET /auth/password-reset/{token} says whether the link still works, POST /auth/password-reset sets the new password and ends
 every session of that account. Public (no login). Only the SHA-256 of the token is stored (table password_reset_tokens).
 """
 import hashlib
@@ -53,21 +53,26 @@ class ForgotPasswordRequest(BaseModel):
 
 @router.post("/forgot-password")
 def forgot_password(body: ForgotPasswordRequest, request: Request, background: BackgroundTasks, db: Session = Depends(get_db)):
-    """Always {"status": "ok"}: nobody can find out which emails have an account. The mail is sent in the background."""
+    """
+    {"status": ...}: "ok" (a link was emailed, in the background), "not_registered" (no account with this email: nothing is sent),
+    "inactive" (the account is deactivated: nothing is sent), "limited" (this address was mailed 3 times in the last hour: nothing more
+    is sent), "invalid_email". Too many requests from one address answer HTTP 429.
+    """
     email, ip = body.email.strip().lower(), client_ip(request)
     if not _EMAIL.match(email):
-        return {"status": "ok"}
+        return {"status": "invalid_email"}
     wait = login_limits.hits_locked_for_seconds(db, f"forgot-ip:{ip}", _PER_IP, _WINDOW_MINUTES)
     if wait:
         raise HTTPException(status_code=429, detail="Too many requests. Please try again later.", headers={"Retry-After": str(wait)})
     login_limits.record_failure(db, f"forgot-ip:{ip}", ip)   # commits; every request counts
-    if login_limits.hits_locked_for_seconds(db, f"forgot:{email}", _PER_EMAIL, _WINDOW_MINUTES):
-        return {"status": "ok"}                               # this address was asked for a lot already: nothing more is sent
-    login_limits.record_failure(db, f"forgot:{email}", ip)
-
     user = db.query(CreatorProfile).filter(CreatorProfile.email == email).first()
-    if user is None or not user.is_active:
-        return {"status": "ok"}
+    if user is None:
+        return {"status": "not_registered"}
+    if not user.is_active:
+        return {"status": "inactive"}
+    if login_limits.hits_locked_for_seconds(db, f"forgot:{email}", _PER_EMAIL, _WINDOW_MINUTES):
+        return {"status": "limited"}                          # this address was mailed a lot already: nothing more is sent
+    login_limits.record_failure(db, f"forgot:{email}", ip)
     token = secrets.token_urlsafe(32)
     values = {"email": email, "token_hash": _hash(token), "expires_at": datetime.now(timezone.utc) + timedelta(minutes=RESET_MINUTES), "used_at": None}
     db.execute(pg_insert(PasswordResetToken).values(**values).on_conflict_do_update(
