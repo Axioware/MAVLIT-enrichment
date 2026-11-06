@@ -12,6 +12,7 @@ Who gets an invite: early_access_signups rows that have no account yet. Inviting
 Run, giving the email(s) to invite as arguments - only those people are invited and emailed:
     python -m pipeline.early_access_invites new@example.com                   # token + email, sent by SMTP
     python -m pipeline.early_access_invites a@x.com b@y.com --days 7
+    python -m pipeline.early_access_invites new@example.com --name Ali       # greets "Hi Ali," (without --name: "Hi there,")
     python -m pipeline.early_access_invites new@example.com --no-send        # token + .eml file in ./invites/, nothing sent
     python -m pipeline.early_access_invites                                  # no email given: only LISTS the sign-ups without an account
     python -m pipeline.early_access_invites --all                            # every sign-up without an account (explicit, sends to all)
@@ -50,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://app.mavlit.com"
 DEFAULT_DAYS = 30
-SUBJECT = "Your MAVLIT early access is ready"
+SUBJECT = "Welcome to MAVLIT - set up your account"
 
 
 def make_token() -> str:
@@ -65,23 +66,46 @@ def invite_link(token: str, base_url: str = DEFAULT_BASE_URL) -> str:
     return f"{base_url.rstrip('/')}/set-password?token={token}"
 
 
-def build_message(email: str, link: str, days: int, sender: str | None = None) -> EmailMessage:
-    """The invitation email (plain text and HTML)."""
+def build_message(email: str, link: str, days: int, sender: str | None = None, first_name: str | None = None) -> EmailMessage:
+    """The invitation email (plain text and HTML). Greets by first name when one is given, else "Hi there,"."""
+    name = (first_name or "").strip().split(" ")[0] if first_name and first_name.strip() else ""
+    greeting = f"Hi {name}," if name else "Hi there,"
     text = (
-        "Hi,\n\n"
-        "Thanks for joining the MAVLIT founding creators. Your access is ready.\n\n"
-        f"Choose your password and sign in here:\n{link}\n\n"
-        f"This link works once and expires in {days} days. If you did not ask for early access, you can ignore this email.\n\n"
-        "The MAVLIT team\n"
+        f"{greeting}\n\n"
+        "Welcome to MAVLIT! 🎉\n\n"
+        "We're excited to have you as one of our founding creators.\n\n"
+        "Your MAVLIT account is ready, and you're just one step away from getting started.\n\n"
+        "SET UP YOUR ACCOUNT\n\n"
+        f"Choose your password:\n{link}\n\n"
+        f"This link can be used once and stays valid for {days} days.\n\n"
+        "Once you've created your password, you'll be able to log in and explore MAVLIT, discover brands that align with your content, "
+        "and find new partnership opportunities.\n\n"
+        "A LITTLE ABOUT MAVLIT\n\n"
+        "We're building a smarter way for creators and brands to connect. We're glad to have you as part of the journey from the beginning.\n\n"
+        "If you have any questions or need help getting started, simply reply to this email. We'd love to hear from you.\n\n"
+        "Welcome aboard!\n\n"
+        "The MAVLIT Team\n"
+        "https://mavlit.com\n"
     )
+    safe_link = html.escape(link)
     page = (
-        '<div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;color:#111">'
-        "<p>Hi,</p><p>Thanks for joining the MAVLIT founding creators. Your access is ready.</p>"
-        f'<p><a href="{html.escape(link)}" style="display:inline-block;background:#5b5bd6;color:#fff;text-decoration:none;'
-        'padding:12px 22px;border-radius:10px;font-weight:bold">Choose your password</a></p>'
-        f'<p style="font-size:13px;color:#555">Or paste this link into your browser:<br>{html.escape(link)}</p>'
-        f'<p style="font-size:13px;color:#555">This link works once and expires in {days} days. '
-        "If you did not ask for early access, you can ignore this email.</p><p>The MAVLIT team</p></div>"
+        '<div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.55;font-size:15px">'
+        f"<p>{html.escape(greeting)}</p>"
+        "<p>Welcome to MAVLIT! 🎉</p>"
+        "<p>We're excited to have you as one of our founding creators.</p>"
+        "<p>Your MAVLIT account is ready, and you're just one step away from getting started.</p>"
+        '<p style="margin:26px 0 8px"><strong>Set up your account</strong></p>'
+        f'<p style="margin:0 0 12px"><a href="{safe_link}" style="display:inline-block;background:#5b5bd6;color:#fff;text-decoration:none;'
+        'padding:12px 24px;border-radius:10px;font-weight:bold">Choose Your Password</a></p>'
+        f'<p style="font-size:13px;color:#555;margin:0 0 4px">Or paste this link into your browser:<br>{safe_link}</p>'
+        f'<p style="font-size:13px;color:#555;margin:0 0 20px">This link can be used once and stays valid for {days} days.</p>'
+        "<p>Once you've created your password, you'll be able to log in and explore MAVLIT, discover brands that align with your content, "
+        "and find new partnership opportunities.</p>"
+        '<p style="margin:26px 0 8px"><strong>A little about MAVLIT</strong></p>'
+        "<p>We're building a smarter way for creators and brands to connect. We're glad to have you as part of the journey from the beginning.</p>"
+        "<p>If you have any questions or need help getting started, simply reply to this email. We'd love to hear from you.</p>"
+        "<p>Welcome aboard!</p>"
+        '<p>The MAVLIT Team<br><a href="https://mavlit.com" style="color:#5b5bd6">https://mavlit.com</a></p></div>'
     )
     message = EmailMessage()
     message["Subject"] = SUBJECT
@@ -137,14 +161,14 @@ def send_by_smtp(messages: list[EmailMessage]) -> int:
     return sent
 
 
-def invite(db: Session, emails: list[str], days: int, base_url: str, out_dir: Path | None, sender: str | None):
+def invite(db: Session, emails: list[str], days: int, base_url: str, out_dir: Path | None, sender: str | None, first_name: str | None = None):
     """Makes and stores one token per email. Returns [(email, link, message)]."""
     made = []
     for email in emails:
         token = make_token()
         store_invite(db, email, token, days)
         link = invite_link(token, base_url)
-        message = build_message(email, link, days, sender)
+        message = build_message(email, link, days, sender, first_name)
         if out_dir is not None:
             out_dir.mkdir(parents=True, exist_ok=True)
             (out_dir / f"{email.replace('/', '_')}.eml").write_bytes(bytes(message))
@@ -156,6 +180,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s")
     parser = argparse.ArgumentParser(description="Create early-access invitation links and email them to the given addresses.")
     parser.add_argument("emails", nargs="*", help="the email(s) to invite; only these get a token and an email")
+    parser.add_argument("--name", help="the person's first name for the greeting (only with a single email; otherwise the mail says \"Hi there,\")")
     parser.add_argument("--all", action="store_true", help="invite every Early Access sign-up that has no account yet (sends to all of them)")
     parser.add_argument("--no-send", action="store_true", help="make the tokens and the .eml files but do not send anything")
     parser.add_argument("--days", type=int, default=DEFAULT_DAYS, help=f"days the link works (default {DEFAULT_DAYS})")
@@ -166,6 +191,8 @@ def main() -> None:
         parser.error("--days must be at least 1")
     if args.all and args.emails:
         parser.error("give either email addresses or --all, not both")
+    if args.name and len(args.emails) != 1:
+        parser.error("--name needs exactly one email address")
 
     db = BatchSessionLocal()
     try:
@@ -185,7 +212,7 @@ def main() -> None:
             print("Nobody to invite.")
             return
         sender = os.environ.get("MAIL_FROM", "").strip() or None
-        made = invite(db, emails, args.days, args.base_url, Path(args.out_dir), sender)
+        made = invite(db, emails, args.days, args.base_url, Path(args.out_dir), sender, args.name)
         print(f"{len(made)} invitation(s) created, valid {args.days} days (emails also saved in {args.out_dir}/):")
         for email, link, _ in made:
             print(f"  {email}\n    {link}")

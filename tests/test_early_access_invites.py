@@ -33,13 +33,25 @@ class EmailAndToken(unittest.TestCase):
 
     def test_the_email_carries_the_link_in_text_and_html(self):
         link = inv.invite_link("TOKEN123")
-        message = inv.build_message("new@example.test", link, 14, "MAVLIT <hello@mavlit.com>")
+        message = inv.build_message("new@example.test", link, 30, "MAVLIT <hello@mavlit.com>", "Ali Ahmed")
         self.assertEqual(message["To"], "new@example.test")
         self.assertEqual(message["Subject"], inv.SUBJECT)
+        self.assertTrue(message["Date"] and message["Message-ID"].endswith("@mavlit.com>"))
         text_part, html_part = message.get_body(("plain",)).get_content(), message.get_body(("html",)).get_content()
-        self.assertIn(link, text_part)
-        self.assertIn("14 days", text_part)
-        self.assertIn(link, html_part)
+        for part in (text_part, html_part):
+            self.assertIn(link, part)
+            self.assertIn("Welcome to MAVLIT!", part)
+            self.assertIn("founding creators", part)
+            self.assertIn("30 days", part)
+            self.assertIn("The MAVLIT Team", part)
+            self.assertIn("https://mavlit.com", part)
+            self.assertNotIn("{{", part)
+        self.assertTrue(text_part.startswith("Hi Ali,\n"))
+        self.assertIn("Choose Your Password", html_part)
+
+    def test_the_greeting_falls_back_when_there_is_no_name(self):
+        message = inv.build_message("new@example.test", inv.invite_link("T"), 30)
+        self.assertTrue(message.get_body(("plain",)).get_content().startswith("Hi there,\n"))
 
 
 @unittest.skipUnless(TEST_URL, "set MAVLIT_TEST_PG_URL to a disposable local PostgreSQL database to run these tests")
