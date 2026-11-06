@@ -66,7 +66,7 @@ def invite_link(token: str, base_url: str = DEFAULT_BASE_URL) -> str:
     return f"{base_url.rstrip('/')}/set-password?token={token}"
 
 
-# The look of the email follows mavlit.com: violet #7c3aed, near-black #0d0d14 / #13131e, muted #8080a0, Inter (Arial where it is not installed).
+# The look of the email follows mavlit.com (its dark theme): page #0d0d14, card #13131e, violet #7c3aed, muted #8080a0, Inter (Arial where it is not installed).
 BRAND_VIOLET = "#7c3aed"
 SUPPORT_EMAIL = os.environ.get("SUPPORT_EMAIL", "contact@mavlit.com").strip() or "contact@mavlit.com"
 LOGO_PATH = Path(__file__).resolve().parent / "email_assets" / "mavlit-logo.png"   # the MAVLIT mark (violet square, white peak), sent inline
@@ -104,7 +104,7 @@ def _html_body(greeting: str, link: str, days: int, with_logo: bool) -> str:
     brand = (
         '<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>'
         + (f'<td style="padding-right:12px;vertical-align:middle">{logo}</td>' if logo else "")
-        + f'<td style="vertical-align:middle;font-family:{font};font-size:26px;font-weight:700;letter-spacing:-0.5px;color:#0d0d14">MAVLIT</td>'
+        + f'<td style="vertical-align:middle;font-family:{font};font-size:26px;font-weight:700;letter-spacing:-0.5px;color:#ffffff">MAVLIT</td>'
         "</tr></table>"
     )
     button = (
@@ -116,15 +116,15 @@ def _html_body(greeting: str, link: str, days: int, with_logo: bool) -> str:
         f'font-family:{font};font-size:16px;font-weight:700;line-height:20px;text-decoration:none;padding:15px 36px;border-radius:12px;'
         f'border:1px solid {BRAND_VIOLET}">{BUTTON_TEXT}</a><!--<![endif]-->'
     )
-    p = f'style="margin:0 0 16px;font-family:{font};font-size:16px;line-height:25px;color:#3b3b4f"'
+    p = f'style="margin:0 0 16px;font-family:{font};font-size:16px;line-height:25px;color:#c9c9d8"'
     return f"""<!DOCTYPE html>
 <html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
-<meta name="color-scheme" content="light only">
-<meta name="supported-color-schemes" content="light only">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
 <title>Welcome to MAVLIT</title>
 <!--[if mso]><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
 <style>
@@ -137,14 +137,14 @@ def _html_body(greeting: str, link: str, days: int, with_logo: bool) -> str:
   }}
 </style>
 </head>
-<body style="margin:0;padding:0;background-color:#f1f2f6">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#f1f2f6;font-size:1px;line-height:1px">Your MAVLIT account is ready. Set your password to get started.&#8199;&#847;&#8199;&#847;&#8199;&#847;</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f1f2f6" style="background-color:#f1f2f6">
+<body style="margin:0;padding:0;background-color:#0d0d14">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#0d0d14;font-size:1px;line-height:1px">Your MAVLIT account is ready. Set your password to get started.&#8199;&#847;&#8199;&#847;&#8199;&#847;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0d0d14" style="background-color:#0d0d14">
 <tr><td align="center" style="padding:32px 12px">
-  <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="max-width:560px;background-color:#ffffff;border-radius:16px;border:1px solid #e6e7ee">
+  <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#13131e" style="max-width:560px;background-color:#13131e;border-radius:16px;border:1px solid #26263a">
     <tr><td class="pad" align="center" style="padding:36px 40px 8px">{brand}</td></tr>
     <tr><td class="pad" align="center" style="padding:20px 40px 0">
-      <h1 class="h1" style="margin:0;font-family:{font};font-size:30px;line-height:36px;font-weight:800;letter-spacing:-0.5px;color:#0d0d14">Welcome to MAVLIT!</h1>
+      <h1 class="h1" style="margin:0;font-family:{font};font-size:30px;line-height:36px;font-weight:800;letter-spacing:-0.5px;color:#ffffff">Welcome to MAVLIT!</h1>
     </td></tr>
     <tr><td class="pad" style="padding:22px 40px 0">
       <p {p}>{html.escape(greeting)}</p>
@@ -153,25 +153,25 @@ def _html_body(greeting: str, link: str, days: int, with_logo: bool) -> str:
     </td></tr>
     <tr><td class="pad" align="center" style="padding:10px 40px 6px">{button}</td></tr>
     <tr><td class="pad" align="center" style="padding:16px 40px 0">
-      <p style="margin:0 0 6px;font-family:{font};font-size:13px;line-height:19px;color:#6b6b80">Button not working? Copy and paste this link into your browser:</p>
-      <p style="margin:0;font-family:{font};font-size:13px;line-height:19px;word-break:break-all"><a href="{safe_link}" target="_blank" style="color:{BRAND_VIOLET};text-decoration:underline">{safe_link}</a></p>
+      <p style="margin:0 0 6px;font-family:{font};font-size:13px;line-height:19px;color:#9a9ab5">Button not working? Copy and paste this link into your browser:</p>
+      <p style="margin:0;font-family:{font};font-size:13px;line-height:19px;word-break:break-all"><a href="{safe_link}" target="_blank" style="color:#a78bfa;text-decoration:underline">{safe_link}</a></p>
       <p style="margin:10px 0 0;font-family:{font};font-size:12px;line-height:18px;color:#8080a0">This link can be used once and stays valid for {days} days.</p>
     </td></tr>
     <tr><td class="pad" style="padding:28px 40px 0">
       <p {p}>Once you've created your password, you'll be able to log in and explore MAVLIT, discover brands that align with your content, and find new partnership opportunities.</p>
-      <p style="margin:6px 0 8px;font-family:{font};font-size:16px;line-height:25px;font-weight:700;color:#0d0d14">A little about MAVLIT</p>
+      <p style="margin:6px 0 8px;font-family:{font};font-size:16px;line-height:25px;font-weight:700;color:#ffffff">A little about MAVLIT</p>
       <p {p}>We're building a smarter way for creators and brands to connect. We're glad to have you as part of the journey from the beginning.</p>
       <p {p}>If you have any questions or need help getting started, simply reply to this email. We'd love to hear from you.</p>
-      <p style="margin:0 0 4px;font-family:{font};font-size:16px;line-height:25px;color:#3b3b4f">Welcome aboard!</p>
-      <p style="margin:0;font-family:{font};font-size:16px;line-height:25px;font-weight:700;color:#0d0d14">The MAVLIT Team</p>
+      <p style="margin:0 0 4px;font-family:{font};font-size:16px;line-height:25px;color:#c9c9d8">Welcome aboard!</p>
+      <p style="margin:0;font-family:{font};font-size:16px;line-height:25px;font-weight:700;color:#ffffff">The MAVLIT Team</p>
     </td></tr>
-    <tr><td class="pad" style="padding:30px 40px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-top:1px solid #ececf2;font-size:0;line-height:0">&nbsp;</td></tr></table></td></tr>
+    <tr><td class="pad" style="padding:30px 40px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-top:1px solid #26263a;font-size:0;line-height:0">&nbsp;</td></tr></table></td></tr>
     <tr><td class="pad" align="center" style="padding:6px 40px 32px">
-      <p style="margin:0 0 4px;font-family:{font};font-size:12px;line-height:18px;color:#8080a0"><strong style="color:#0d0d14">MAVLIT</strong> &middot; <a href="https://mavlit.com" target="_blank" style="color:#8080a0;text-decoration:underline">mavlit.com</a></p>
+      <p style="margin:0 0 4px;font-family:{font};font-size:12px;line-height:18px;color:#8080a0"><strong style="color:#ffffff">MAVLIT</strong> &middot; <a href="https://mavlit.com" target="_blank" style="color:#8080a0;text-decoration:underline">mavlit.com</a></p>
       <p style="margin:0;font-family:{font};font-size:12px;line-height:18px;color:#8080a0">Need help? Reply to this email or write to <a href="mailto:{SUPPORT_EMAIL}" style="color:#8080a0;text-decoration:underline">{SUPPORT_EMAIL}</a></p>
     </td></tr>
   </table>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px"><tr><td align="center" style="padding:16px 20px 0;font-family:{font};font-size:11px;line-height:16px;color:#9a9ab0">You're receiving this because you joined the MAVLIT early-access list.</td></tr></table>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px"><tr><td align="center" style="padding:16px 20px 0;font-family:{font};font-size:11px;line-height:16px;color:#6e6e88">You're receiving this because you joined the MAVLIT early-access list.</td></tr></table>
 </td></tr>
 </table>
 </body>
