@@ -100,18 +100,23 @@ def sub_niches_from_result(result: dict, options: list[str]) -> list[str]:
     return picked[:_SUB_NICHES_MAX]
 
 
-def highest_views_from_items(items: list[dict]) -> int | None:
-    """
-    The most views on any scraped reel / video post: the maximum of Apify's videoViewCount over the posts.
-    The play count (videoPlayCount) is not used. None when no post has a view count (image-only posts, or
-    views hidden), so a value the creator typed is not overwritten.
-    """
+def _highest_count(items: list[dict], key: str) -> int | None:
     best = None
     for item in items:
-        value = item.get("videoViewCount")
+        value = item.get(key)
         if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
             best = int(value) if best is None else max(best, int(value))
     return best
+
+
+def highest_views_from_items(items: list[dict]) -> int | None:
+    """
+    The most views on any scraped reel / video post: the maximum of Apify's videoViewCount over the posts. When the account hides its
+    view counts (no post has one), the highest play count (videoPlayCount) is used instead. None when neither exists (image-only posts),
+    so a value the creator typed is not overwritten.
+    """
+    views = _highest_count(items, "videoViewCount")
+    return views if views is not None else _highest_count(items, "videoPlayCount")
 
 
 def followers_from_items(items: list[dict]) -> int | None:
