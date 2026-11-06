@@ -147,6 +147,12 @@ class TopContact(BaseModel):
     linkedin_url:    str | None = None   # the contact's LinkedIn profile, when Apollo gave one
 
 
+class SocialLinks(BaseModel):
+    instagram: str | None = None   # full https addresses of the brand's own pages; null when not known
+    facebook:  str | None = None
+    youtube:   str | None = None
+
+
 class BrandDetailResponse(BaseModel):
     brand_id: int
     name: str | None = None
@@ -160,6 +166,7 @@ class BrandDetailResponse(BaseModel):
     sponsorship_activity_score: float | None = None
     top_contact: TopContact | None = None
     other_contacts: list[TopContact] = []   # the brand's other enriched contacts with an email, best rank first
+    social_links: SocialLinks = SocialLinks()
 
 
 def brand_detail_to_response(detail: dict) -> BrandDetailResponse:
@@ -176,6 +183,7 @@ def brand_detail_to_response(detail: dict) -> BrandDetailResponse:
         sponsorship_activity_score=detail["sponsorship_activity_score"],
         top_contact=TopContact(**detail["top_contact"]) if detail["top_contact"] else None,
         other_contacts=[TopContact(**c) for c in detail.get("other_contacts", [])],
+        social_links=SocialLinks(**detail.get("social_links", {})),
     )
 
 

@@ -11,7 +11,9 @@ recomputing them:
   - BrandNiche for the long, Shopify-scraped description
 """
 
+import re
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -90,6 +92,47 @@ def _top_contact(db: Session, brand_raw_id: int) -> dict | None:
     return _contacts(db, brand_raw_id)[0]
 
 
+# The brand's own social pages, shown as logos in the contact panel. Stored values are full URLs (instagram_handle, facebook_page,
+# youtube_channel_id); a bare handle / channel id is turned into one. Only https links to the platform itself are ever returned.
+_SOCIAL_HOSTS = {
+    "instagram": ("instagram.com",),
+    "facebook": ("facebook.com", "fb.com"),
+    "youtube": ("youtube.com", "youtu.be"),
+}
+_BARE_NAME = re.compile(r"^@?[A-Za-z0-9._-]{1,100}$")
+
+
+def _social_url(platform: str, raw: str | None) -> str | None:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    if not re.match(r"^https?://", value, re.IGNORECASE):
+        if platform == "instagram" and _BARE_NAME.match(value):
+            value = f"https://www.instagram.com/{value.lstrip('@')}"
+        elif platform == "facebook" and _BARE_NAME.match(value):
+            value = f"https://www.facebook.com/{value.lstrip('@')}"
+        elif platform == "youtube" and re.match(r"^UC[\w-]{20,}$", value):
+            value = f"https://www.youtube.com/channel/{value}"
+        elif platform == "youtube" and value.startswith("@") and _BARE_NAME.match(value):
+            value = f"https://www.youtube.com/{value}"
+        else:
+            return None
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower().removeprefix("www.").removeprefix("m.")
+    if parsed.scheme not in ("http", "https") or not any(host == h or host.endswith("." + h) for h in _SOCIAL_HOSTS[platform]):
+        return None
+    return "https://" + (parsed.netloc.lower()) + parsed.path.rstrip("/") + (f"?{parsed.query}" if parsed.query else "")
+
+
+def brand_social_links(brand: BrandRaw) -> dict:
+    """{"instagram": url | None, "facebook": url | None, "youtube": url | None} for the brand's pages that are known."""
+    return {
+        "instagram": _social_url("instagram", brand.instagram_handle),
+        "facebook": _social_url("facebook", brand.facebook_page),
+        "youtube": _social_url("youtube", brand.youtube_channel_id),
+    }
+
+
 def get_brand_detail(db: Session, brand_raw_id: int) -> dict | None:
     brand = db.query(BrandRaw).filter(BrandRaw.id == brand_raw_id).first()
     if not brand:
@@ -150,4 +193,5 @@ def get_brand_detail(db: Session, brand_raw_id: int) -> dict | None:
         "sponsorship_activity_score": profile.sponsorship_activity_score if profile else None,
         "top_contact": top_contact,
         "other_contacts": other_contacts,
+        "social_links": brand_social_links(brand),
     }
