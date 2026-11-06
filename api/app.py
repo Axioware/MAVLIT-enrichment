@@ -30,6 +30,7 @@ from sqlalchemy.sql import Select
 from api.advisory import router as advisory_router
 from api.early_access import router as early_access_router
 from api.invites import router as invites_router
+from api.password_reset import router as password_reset_router
 from api.auth import (
     get_completed_user,
     get_current_user,
@@ -192,6 +193,7 @@ app.include_router(dashboard_api_router)
 app.include_router(advisory_router)
 app.include_router(early_access_router)
 app.include_router(invites_router)
+app.include_router(password_reset_router)
 
 # Lets a separate frontend app (different domain, see FRONTEND_ORIGINS in
 # config.py) call this API with credentials (cookies) from the browser.

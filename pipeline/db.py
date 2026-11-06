@@ -972,6 +972,21 @@ class AccountInvite(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
+class PasswordResetToken(Base):
+    """
+    The single-use link behind "Forgot password?": api/password_reset.py makes it, emails it and accepts it. Only the SHA-256 of the
+    token is stored. One row per account email (asking again replaces the token); it stops working once used or after expires_at.
+    """
+    __tablename__ = "password_reset_tokens"
+
+    id         = Column(Integer, primary_key=True)
+    email      = Column(Text, nullable=False, unique=True)         # the account's email, lower case
+    token_hash = Column(Text, nullable=False, unique=True)         # sha256 hex of the token
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    used_at    = Column(TIMESTAMP(timezone=True))
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class Pitch(Base):
     """
     A creator's outreach pitch for a brand — either an existing brands_raw
