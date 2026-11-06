@@ -19,6 +19,7 @@ from sqlalchemy.pool import NullPool  # noqa: E402
 from pipeline import early_access_invites as inv  # noqa: E402
 
 PASSWORD = "a long enough password"
+SIX = "abc123"
 
 
 class EmailAndToken(unittest.TestCase):
@@ -130,8 +131,9 @@ class AgainstPostgres(unittest.TestCase):
 
     def test_choosing_a_password_creates_the_account_uses_the_link_and_the_login_works(self):
         token = self.issue()
-        short = self.client.post("/auth/invite/accept", json={"token": token, "password": "short"})
+        short = self.client.post("/auth/invite/accept", json={"token": token, "password": "abcde"})   # 5 characters
         self.assertEqual(short.status_code, 422)
+        self.assertIn("at least 6", short.json()["detail"])
         ok = self.client.post("/auth/invite/accept", json={"token": token, "password": PASSWORD})
         self.assertEqual((ok.status_code, ok.json()), (200, {"status": "ok", "email": "new@example.test"}))
         login = self.client.post("/auth/login", json={"email": "new@example.test", "password": PASSWORD})

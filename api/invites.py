@@ -16,12 +16,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api import attempt_limits
-from api.auth import MIN_PASSWORD_LENGTH
 from pipeline.db import AccountInvite, CreatorProfile, get_db
 from pipeline.helpers.passwords import hash_password
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth/invite", tags=["invites"])
+
+# The password chosen on the invitation page. (Changing a password later in the app still needs api.auth.MIN_PASSWORD_LENGTH.)
+MIN_INVITE_PASSWORD_LENGTH = 6
 
 
 def hash_token(token: str) -> str:
@@ -70,8 +72,8 @@ class AcceptInviteRequest(BaseModel):
 def accept_invite(body: AcceptInviteRequest, request: Request, db: Session = Depends(get_db)):
     """Creates the account with the chosen password and uses up the link. The page signs the person in afterwards with the normal login."""
     attempt_limits.check("invite", request)
-    if len(body.password) < MIN_PASSWORD_LENGTH:
-        raise HTTPException(status_code=422, detail=f"Choose a password of at least {MIN_PASSWORD_LENGTH} characters.")
+    if len(body.password) < MIN_INVITE_PASSWORD_LENGTH:
+        raise HTTPException(status_code=422, detail=f"Choose a password of at least {MIN_INVITE_PASSWORD_LENGTH} characters.")
     try:
         password_hash = hash_password(body.password)
     except ValueError as exc:   # longer than bcrypt's 72 bytes
