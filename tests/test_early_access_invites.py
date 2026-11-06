@@ -48,7 +48,12 @@ class EmailAndToken(unittest.TestCase):
             self.assertIn("https://mavlit.com", part)
             self.assertNotIn("{{", part)
         self.assertTrue(text_part.startswith("Hi Ali,\n"))
-        self.assertIn("Choose Your Password", html_part)
+        self.assertIn("Set Up My Account", html_part)
+        self.assertIn("Set Up My Account", text_part)
+        self.assertIn("contact@mavlit.com", html_part)
+        self.assertIn("cid:mavlit-logo", html_part)   # the logo is attached inline
+        self.assertIn("bgcolor", html_part)   # table-based layout
+        self.assertEqual([p.get_content_type() for p in message.walk()].count("image/png"), 1)
 
     def test_the_greeting_falls_back_when_there_is_no_name(self):
         message = inv.build_message("new@example.test", inv.invite_link("T"), 30)

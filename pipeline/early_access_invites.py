@@ -66,17 +66,23 @@ def invite_link(token: str, base_url: str = DEFAULT_BASE_URL) -> str:
     return f"{base_url.rstrip('/')}/set-password?token={token}"
 
 
-def build_message(email: str, link: str, days: int, sender: str | None = None, first_name: str | None = None) -> EmailMessage:
-    """The invitation email (plain text and HTML). Greets by first name when one is given, else "Hi there,"."""
-    name = (first_name or "").strip().split(" ")[0] if first_name and first_name.strip() else ""
-    greeting = f"Hi {name}," if name else "Hi there,"
-    text = (
+# The look of the email follows mavlit.com: violet #7c3aed, near-black #0d0d14 / #13131e, muted #8080a0, Inter (Arial where it is not installed).
+BRAND_VIOLET = "#7c3aed"
+SUPPORT_EMAIL = os.environ.get("SUPPORT_EMAIL", "contact@mavlit.com").strip() or "contact@mavlit.com"
+LOGO_PATH = Path(__file__).resolve().parent / "email_assets" / "mavlit-logo.png"   # the MAVLIT mark (violet square, white peak), sent inline
+LOGO_CID = "mavlit-logo"
+BUTTON_TEXT = "Set Up My Account"
+_FONT = "Inter,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
+
+
+def _text_body(greeting: str, link: str, days: int) -> str:
+    return (
         f"{greeting}\n\n"
         "Welcome to MAVLIT! 🎉\n\n"
         "We're excited to have you as one of our founding creators.\n\n"
         "Your MAVLIT account is ready, and you're just one step away from getting started.\n\n"
         "SET UP YOUR ACCOUNT\n\n"
-        f"Choose your password:\n{link}\n\n"
+        f"{BUTTON_TEXT}:\n{link}\n\n"
         f"This link can be used once and stays valid for {days} days.\n\n"
         "Once you've created your password, you'll be able to log in and explore MAVLIT, discover brands that align with your content, "
         "and find new partnership opportunities.\n\n"
@@ -85,28 +91,99 @@ def build_message(email: str, link: str, days: int, sender: str | None = None, f
         "If you have any questions or need help getting started, simply reply to this email. We'd love to hear from you.\n\n"
         "Welcome aboard!\n\n"
         "The MAVLIT Team\n"
-        "https://mavlit.com\n"
+        "https://mavlit.com\n\n"
+        f"Need help? Reply to this email or write to {SUPPORT_EMAIL}.\n"
     )
-    safe_link = html.escape(link)
-    page = (
-        '<div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.55;font-size:15px">'
-        f"<p>{html.escape(greeting)}</p>"
-        "<p>Welcome to MAVLIT! 🎉</p>"
-        "<p>We're excited to have you as one of our founding creators.</p>"
-        "<p>Your MAVLIT account is ready, and you're just one step away from getting started.</p>"
-        '<p style="margin:26px 0 8px"><strong>Set up your account</strong></p>'
-        f'<p style="margin:0 0 12px"><a href="{safe_link}" style="display:inline-block;background:#5b5bd6;color:#fff;text-decoration:none;'
-        'padding:12px 24px;border-radius:10px;font-weight:bold">Choose Your Password</a></p>'
-        f'<p style="font-size:13px;color:#555;margin:0 0 4px">Or paste this link into your browser:<br>{safe_link}</p>'
-        f'<p style="font-size:13px;color:#555;margin:0 0 20px">This link can be used once and stays valid for {days} days.</p>'
-        "<p>Once you've created your password, you'll be able to log in and explore MAVLIT, discover brands that align with your content, "
-        "and find new partnership opportunities.</p>"
-        '<p style="margin:26px 0 8px"><strong>A little about MAVLIT</strong></p>'
-        "<p>We're building a smarter way for creators and brands to connect. We're glad to have you as part of the journey from the beginning.</p>"
-        "<p>If you have any questions or need help getting started, simply reply to this email. We'd love to hear from you.</p>"
-        "<p>Welcome aboard!</p>"
-        '<p>The MAVLIT Team<br><a href="https://mavlit.com" style="color:#5b5bd6">https://mavlit.com</a></p></div>'
+
+
+def _html_body(greeting: str, link: str, days: int, with_logo: bool) -> str:
+    """Table-based layout with inline CSS (Gmail, Outlook, Apple Mail); a <style> block only adds the small-screen padding."""
+    safe_link, font = html.escape(link, quote=True), _FONT
+    logo = (f'<img src="cid:{LOGO_CID}" width="44" height="44" alt="MAVLIT" style="display:block;border:0;outline:none;border-radius:10px">'
+            if with_logo else "")
+    brand = (
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>'
+        + (f'<td style="padding-right:12px;vertical-align:middle">{logo}</td>' if logo else "")
+        + f'<td style="vertical-align:middle;font-family:{font};font-size:26px;font-weight:700;letter-spacing:-0.5px;color:#0d0d14">MAVLIT</td>'
+        "</tr></table>"
     )
+    button = (
+        # Outlook (Word engine) gets a real rounded VML button; every other client gets the padded link.
+        f'<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{safe_link}" '
+        f'style="height:50px;v-text-anchor:middle;width:240px;" arcsize="22%" stroke="f" fillcolor="{BRAND_VIOLET}"><w:anchorlock/>'
+        f'<center style="color:#ffffff;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">{BUTTON_TEXT}</center></v:roundrect><![endif]-->'
+        f'<!--[if !mso]><!--><a href="{safe_link}" target="_blank" style="display:inline-block;background-color:{BRAND_VIOLET};color:#ffffff;'
+        f'font-family:{font};font-size:16px;font-weight:700;line-height:20px;text-decoration:none;padding:15px 36px;border-radius:12px;'
+        f'border:1px solid {BRAND_VIOLET}">{BUTTON_TEXT}</a><!--<![endif]-->'
+    )
+    p = f'style="margin:0 0 16px;font-family:{font};font-size:16px;line-height:25px;color:#3b3b4f"'
+    return f"""<!DOCTYPE html>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light only">
+<meta name="supported-color-schemes" content="light only">
+<title>Welcome to MAVLIT</title>
+<!--[if mso]><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
+<style>
+  body {{ margin:0; padding:0; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }}
+  table, td {{ border-collapse:collapse; mso-table-lspace:0pt; mso-table-rspace:0pt; }}
+  @media only screen and (max-width:620px) {{
+    .card {{ border-radius:0 !important; }}
+    .pad {{ padding-left:22px !important; padding-right:22px !important; }}
+    .h1 {{ font-size:26px !important; line-height:32px !important; }}
+  }}
+</style>
+</head>
+<body style="margin:0;padding:0;background-color:#f1f2f6">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#f1f2f6;font-size:1px;line-height:1px">Your MAVLIT account is ready. Set your password to get started.&#8199;&#847;&#8199;&#847;&#8199;&#847;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f1f2f6" style="background-color:#f1f2f6">
+<tr><td align="center" style="padding:32px 12px">
+  <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="max-width:560px;background-color:#ffffff;border-radius:16px;border:1px solid #e6e7ee">
+    <tr><td class="pad" align="center" style="padding:36px 40px 8px">{brand}</td></tr>
+    <tr><td class="pad" align="center" style="padding:20px 40px 0">
+      <h1 class="h1" style="margin:0;font-family:{font};font-size:30px;line-height:36px;font-weight:800;letter-spacing:-0.5px;color:#0d0d14">Welcome to MAVLIT!</h1>
+    </td></tr>
+    <tr><td class="pad" style="padding:22px 40px 0">
+      <p {p}>{html.escape(greeting)}</p>
+      <p {p}>We're excited to have you as one of our founding creators. 🎉</p>
+      <p {p}>Your MAVLIT account is ready, and you're just one step away from getting started.</p>
+    </td></tr>
+    <tr><td class="pad" align="center" style="padding:10px 40px 6px">{button}</td></tr>
+    <tr><td class="pad" align="center" style="padding:16px 40px 0">
+      <p style="margin:0 0 6px;font-family:{font};font-size:13px;line-height:19px;color:#6b6b80">Button not working? Copy and paste this link into your browser:</p>
+      <p style="margin:0;font-family:{font};font-size:13px;line-height:19px;word-break:break-all"><a href="{safe_link}" target="_blank" style="color:{BRAND_VIOLET};text-decoration:underline">{safe_link}</a></p>
+      <p style="margin:10px 0 0;font-family:{font};font-size:12px;line-height:18px;color:#8080a0">This link can be used once and stays valid for {days} days.</p>
+    </td></tr>
+    <tr><td class="pad" style="padding:28px 40px 0">
+      <p {p}>Once you've created your password, you'll be able to log in and explore MAVLIT, discover brands that align with your content, and find new partnership opportunities.</p>
+      <p style="margin:6px 0 8px;font-family:{font};font-size:16px;line-height:25px;font-weight:700;color:#0d0d14">A little about MAVLIT</p>
+      <p {p}>We're building a smarter way for creators and brands to connect. We're glad to have you as part of the journey from the beginning.</p>
+      <p {p}>If you have any questions or need help getting started, simply reply to this email. We'd love to hear from you.</p>
+      <p style="margin:0 0 4px;font-family:{font};font-size:16px;line-height:25px;color:#3b3b4f">Welcome aboard!</p>
+      <p style="margin:0;font-family:{font};font-size:16px;line-height:25px;font-weight:700;color:#0d0d14">The MAVLIT Team</p>
+    </td></tr>
+    <tr><td class="pad" style="padding:30px 40px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-top:1px solid #ececf2;font-size:0;line-height:0">&nbsp;</td></tr></table></td></tr>
+    <tr><td class="pad" align="center" style="padding:6px 40px 32px">
+      <p style="margin:0 0 4px;font-family:{font};font-size:12px;line-height:18px;color:#8080a0"><strong style="color:#0d0d14">MAVLIT</strong> &middot; <a href="https://mavlit.com" target="_blank" style="color:#8080a0;text-decoration:underline">mavlit.com</a></p>
+      <p style="margin:0;font-family:{font};font-size:12px;line-height:18px;color:#8080a0">Need help? Reply to this email or write to <a href="mailto:{SUPPORT_EMAIL}" style="color:#8080a0;text-decoration:underline">{SUPPORT_EMAIL}</a></p>
+    </td></tr>
+  </table>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px"><tr><td align="center" style="padding:16px 20px 0;font-family:{font};font-size:11px;line-height:16px;color:#9a9ab0">You're receiving this because you joined the MAVLIT early-access list.</td></tr></table>
+</td></tr>
+</table>
+</body>
+</html>
+"""
+
+
+def build_message(email: str, link: str, days: int, sender: str | None = None, first_name: str | None = None) -> EmailMessage:
+    """The invitation email: plain text and HTML (with the MAVLIT mark attached inline). Greets by first name when given, else "Hi there,"."""
+    name = first_name.strip().split(" ")[0] if first_name and first_name.strip() else ""
+    greeting = f"Hi {name}," if name else "Hi there,"
+    logo = LOGO_PATH.read_bytes() if LOGO_PATH.exists() else None
     message = EmailMessage()
     message["Subject"] = SUBJECT
     message["To"] = email
@@ -114,8 +191,10 @@ def build_message(email: str, link: str, days: int, sender: str | None = None, f
         message["From"] = sender
     message["Date"] = formatdate(localtime=False)                 # a mail without Date / Message-ID looks like bulk mail to spam filters
     message["Message-ID"] = make_msgid(domain=(sender or "mavlit.com").rsplit("@", 1)[-1].strip("> ") or "mavlit.com")
-    message.set_content(text)
-    message.add_alternative(page, subtype="html")
+    message.set_content(_text_body(greeting, link, days))
+    message.add_alternative(_html_body(greeting, link, days, with_logo=logo is not None), subtype="html")
+    if logo is not None:
+        message.get_payload()[1].add_related(logo, "image", "png", cid=f"<{LOGO_CID}>", filename="mavlit-logo.png", disposition="inline")
     return message
 
 
