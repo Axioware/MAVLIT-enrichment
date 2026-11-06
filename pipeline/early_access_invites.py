@@ -31,6 +31,7 @@ import smtplib
 import sys
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
 from pathlib import Path
 
 if __package__ in (None, ""):
@@ -87,6 +88,8 @@ def build_message(email: str, link: str, days: int, sender: str | None = None) -
     message["To"] = email
     if sender:
         message["From"] = sender
+    message["Date"] = formatdate(localtime=False)                 # a mail without Date / Message-ID looks like bulk mail to spam filters
+    message["Message-ID"] = make_msgid(domain=(sender or "mavlit.com").rsplit("@", 1)[-1].strip("> ") or "mavlit.com")
     message.set_content(text)
     message.add_alternative(page, subtype="html")
     return message
