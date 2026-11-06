@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from api.client_ip import client_ip
-from pipeline.db import EarlyAccessSignup, get_db
+from pipeline.db import CreatorProfile, EarlyAccessSignup, get_db
 
 # Public (no login): the landing page's "Join the founding creators" form.
 router = APIRouter(tags=["early-access"])
@@ -67,10 +67,14 @@ def join_early_access(request: Request, body: EarlyAccessRequest, db: Session = 
         return {"ok": True}
     if _too_many(request):
         raise HTTPException(status_code=429, detail="Too many sign-ups from this address. Please try again later.")
+    # One sign-up per email: an email that already has an account, or already filled in this form, is told so.
+    if db.query(CreatorProfile.id).filter(CreatorProfile.email == body.email).first() is not None:
+        raise HTTPException(status_code=409, detail="You already have a MAVLIT account with this email. Sign in at app.mavlit.com.")
+    already = HTTPException(status_code=409, detail="You've already filled in this form with this email. We'll email you when it's your turn.")
     values = {"email": body.email, "handle": body.handle, "platform": body.platform, "niche": ", ".join(n for n in _NICHES if n in body.niche), "followers": body.followers}
-    stmt = pg_insert(EarlyAccessSignup).values(**values).on_conflict_do_update(
-        index_elements=[EarlyAccessSignup.email], set_={k: v for k, v in values.items() if k != "email"},
-    )
-    db.execute(stmt)
+    inserted = db.execute(pg_insert(EarlyAccessSignup).values(**values).on_conflict_do_nothing(index_elements=[EarlyAccessSignup.email])
+                          .returning(EarlyAccessSignup.id)).scalar()
     db.commit()
-    return {"ok": True}   # the same answer for a new and a repeat email
+    if inserted is None:   # a row with this email exists (two submissions at once end here too): the first one stays as it was
+        raise already
+    return {"ok": True}

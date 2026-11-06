@@ -409,8 +409,9 @@ class TwoCreators(unittest.TestCase):
         import api.early_access as early
         early._recent.clear()
         client = self.TestClient(self.api_app.app, raise_server_exceptions=False)
-        body = {"email": "x@example.test", "handle": "x", "platform": "instagram", "niche": "beauty", "followers": "under10k"}
-        statuses = [client.post("/early-access", json=body, headers={"X-Forwarded-For": f"10.0.0.{i}"}).status_code for i in range(12)]
+        body = {"handle": "x", "platform": "instagram", "niche": "beauty", "followers": "under10k"}
+        statuses = [client.post("/early-access", json={**body, "email": f"x{i}@example.test"}, headers={"X-Forwarded-For": f"10.0.0.{i}"}).status_code
+                    for i in range(12)]   # a different email each time: a repeated email is answered 409
         self.assertEqual(statuses[:10], [201] * 10)
         self.assertEqual(statuses[10:], [429, 429])
         early._recent.clear()
