@@ -2571,6 +2571,14 @@ A creator is BEACH-RELATED when their niche, sub-niches, tags, description, prof
 - The flag only adds evidence about what the brand sells. It never overrides the PREFERENCE, SPECIALIZED MISMATCH or OPPOSITE GENDER rules.
 """
 
+LLM_BRAND_RANKING_V3_OLD_REASON_FORMAT = "one short sentence naming the content fit and the strongest match signal"
+LLM_BRAND_RANKING_V3_REASON_FORMAT = "one short sentence, written to the creator in the second person (you / your), naming the content fit and the strongest match signal"
+LLM_BRAND_RANKING_V3_REASON_NOTE = """\
+HOW TO WRITE EACH "reason"
+The reason is shown to the creator themselves ("Why it's a match"), so speak TO them: use "you" and "your". Never write "the creator", "the creator's" or "this creator".
+e.g. "Its DIY-ready vivid hair color matches your dye transformations; the strongest signal is partnerships with similar creators near your size."
+"""
+
 LLM_BRAND_RANKING_V3_DEFAULT_PROMPT = """\
 You are ranking brands for a content creator on a creator-brand sponsorship matching platform.
 
@@ -2653,7 +2661,11 @@ RULES
 - If a brand has very little information, score cautiously.
 - Use only the information provided.
 
+HOW TO WRITE EACH "reason"
+The reason is shown to the creator themselves ("Why it's a match"), so speak TO them: use "you" and "your". Never write "the creator", "the creator's" or "this creator".
+e.g. "Its DIY-ready vivid hair color matches your dye transformations; the strongest signal is partnerships with similar creators near your size."
+
 Reply ONLY with this JSON object, no extra text:
-{"rankings": [{"id": 123, "confidence": 0, "reason": "one short sentence naming the content fit and the strongest match signal"}]}
+{"rankings": [{"id": 123, "confidence": 0, "reason": "one short sentence, written to the creator in the second person (you / your), naming the content fit and the strongest match signal"}]}
 Include every brand id from the list exactly once.
 """

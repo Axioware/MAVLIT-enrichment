@@ -115,7 +115,7 @@ from pipeline.helpers.passwords import hash_password
 from pipeline.helpers.db import escape_like
 from pipeline.matching.llm_ranking_v2 import rank_brands_with_llm
 from pipeline.matching.llm_ranking_v3 import MIN_MATCH_CONFIDENCE, rank_brands_with_llm_v3
-from pipeline.matching.match_text import generate_match_reasons
+from pipeline.matching.match_text import address_creator, generate_match_reasons
 from pipeline.matching.matcher import apply_brand_hard_filters, get_matches
 from pipeline.migrations import run_migrations
 from pipeline.seed import run_seed
@@ -2068,7 +2068,7 @@ def _ai_matches_response(db, user_id: int, version: str) -> LlmMatchesResponse:
             latest_product=brand.latest_product,
             rank=ranking.rank,
             confidence=ranking.confidence,
-            reason=ranking.reason,
+            reason=address_creator(ranking.reason),   # rows ranked before the reasons spoke to the creator are fixed on the way out
             reasons=ranking.reasons if ranking.reasons is not None else live_reasons.get(brand.id, []),
         )
         for ranking, brand in rows

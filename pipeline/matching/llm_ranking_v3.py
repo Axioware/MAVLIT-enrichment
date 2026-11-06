@@ -46,7 +46,10 @@ from pipeline.helpers.gpt_llm import scoped
 from pipeline.helpers.prompts import (
     LLM_BRAND_RANKING_V3_BEACH_NOTE,
     LLM_BRAND_RANKING_V3_DEFAULT_PROMPT,
+    LLM_BRAND_RANKING_V3_OLD_REASON_FORMAT,
     LLM_BRAND_RANKING_V3_PROMPT_NAME,
+    LLM_BRAND_RANKING_V3_REASON_FORMAT,
+    LLM_BRAND_RANKING_V3_REASON_NOTE,
 )
 from pipeline.matching.llm_ranking_v2 import (
     _BATCH_SIZE,
@@ -56,7 +59,7 @@ from pipeline.matching.llm_ranking_v2 import (
     _creator_fields,
     _rank_batch,
 )
-from pipeline.matching.match_text import generate_match_reasons
+from pipeline.matching.match_text import address_creator, generate_match_reasons
 from pipeline.matching.matcher import hard_filtered_brands
 
 logger = logging.getLogger(__name__)
@@ -82,7 +85,22 @@ def _creator_gender_label(value: str | None) -> str:
 
 def _get_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == LLM_BRAND_RANKING_V3_PROMPT_NAME).first()
-    return _with_beach_note(row.content if row else LLM_BRAND_RANKING_V3_DEFAULT_PROMPT)
+    return _with_reason_voice(_with_beach_note(row.content if row else LLM_BRAND_RANKING_V3_DEFAULT_PROMPT))
+
+
+def _with_reason_voice(template: str) -> str:
+    """
+    The "reason" of every match speaks to the creator ("your size"), not about "the creator". Applied to the prompt in use (the default, or a
+    copy stored in /admin that still has the old wording): the JSON format line is updated, or the guidance added before the final instruction.
+    """
+    if LLM_BRAND_RANKING_V3_OLD_REASON_FORMAT in template:
+        template = template.replace(LLM_BRAND_RANKING_V3_OLD_REASON_FORMAT, LLM_BRAND_RANKING_V3_REASON_FORMAT)
+    if "second person" in template or "speak TO them" in template:
+        return template
+    marker = "Reply ONLY with this JSON object"
+    if marker in template:
+        return template.replace(marker, LLM_BRAND_RANKING_V3_REASON_NOTE + "\n" + marker, 1)
+    return template + "\n\n" + LLM_BRAND_RANKING_V3_REASON_NOTE
 
 
 def _with_beach_note(template: str) -> str:
@@ -163,7 +181,7 @@ def rank_brands_with_llm_v3(db: Session, creator_id: int) -> int:
             creator_profile_id=creator_id,
             brand_raw_id=brand_id,
             confidence=confidence,
-            reason=reason or None,
+            reason=address_creator(reason) or None,   # whatever the model wrote, it speaks to the creator
             reasons=taglines[brand_id],
             rank=rank,
         )

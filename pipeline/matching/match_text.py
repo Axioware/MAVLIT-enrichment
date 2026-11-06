@@ -9,6 +9,7 @@ Returns one recent-sponsorship reason selected from the three sponsorship
 conditions, with the highest-scoring applicable condition taking precedence.
 """
 
+import re
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -579,3 +580,27 @@ def generate_match_reasons(
     if reasons is None:
         reasons = collect_match_reasons(creator, brand, profile, db)
     return [text for _, text, _ in reasons[:max_reasons]]
+
+
+# "Why it's a match" is shown to the creator, so it has to speak to them ("your size"), never about "the creator".
+_CREATOR_POSSESSIVE = re.compile(r"\b(the|this) creator(?:\u2019|')s\b", re.IGNORECASE)
+_CREATOR_WITH_VERB = re.compile(
+    r"\b(?:the|this) creator (is|has|does|was|can|could|will|would|should|may|might|must|already|also|likely)\b", re.IGNORECASE)
+_CREATOR_PLAIN = re.compile(r"\b(?:the|this) creator\b(?!s)", re.IGNORECASE)
+_VERB_FOR_YOU = {"is": "are", "has": "have", "does": "do", "was": "were"}
+
+
+def _match_case(original: str, replacement: str) -> str:
+    return replacement.capitalize() if original[:1].isupper() else replacement
+
+
+def address_creator(text: str | None) -> str | None:
+    """
+    Rewrites a sentence about "the creator" so it speaks to them: "near the creator's size" -> "near your size", "match the creator's
+    content" -> "match your content", "the creator is" -> "you are". Text that already speaks to the creator is left alone.
+    """
+    if not text:
+        return text
+    text = _CREATOR_POSSESSIVE.sub(lambda m: _match_case(m.group(0), "your"), text)
+    text = _CREATOR_WITH_VERB.sub(lambda m: _match_case(m.group(0), "you " + _VERB_FOR_YOU.get(m.group(1).lower(), m.group(1).lower())), text)
+    return _CREATOR_PLAIN.sub(lambda m: _match_case(m.group(0), "you"), text)
