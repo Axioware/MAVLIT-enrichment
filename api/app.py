@@ -67,7 +67,9 @@ from config import (
     POSTHOG_PROJECT_TOKEN,
 )
 from pipeline.creator_content.instagram_description import (
+    DescriptionError,
     generate_instagram_description,
+    is_valid_instagram_username,
 )
 from pipeline.creator_content.youtube_description import generate_youtube_description
 from pipeline.db import (
@@ -121,6 +123,7 @@ from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.gpt_llm import llm_usage_scope
 from pipeline.helpers.passwords import hash_password
 from pipeline.helpers.db import escape_like
+from pipeline.helpers.social import normalize_handle
 from pipeline.matching.llm_ranking_v2 import rank_brands_with_llm
 from pipeline.matching.llm_ranking_v3 import MIN_MATCH_CONFIDENCE, rank_brands_with_llm_v3
 from pipeline.matching.match_text import address_creator, generate_match_reasons
@@ -1333,6 +1336,8 @@ def _safe_error(exc: Exception) -> str:
         return BATCH_BUSY_MESSAGE
     if isinstance(exc, DBAPIError) and getattr(exc.orig, "pgcode", None) == _QUERY_CANCELED:
         return "database timeout"
+    if isinstance(exc, DescriptionError):
+        return exc.public_message   # written for the creator (e.g. "Instagram username not found ...")
     return type(exc).__name__
 
 
@@ -1916,6 +1921,8 @@ def generate_my_creator_description(
             raise HTTPException(status_code=400, detail="Platform must be instagram or youtube")
         if not body.username.strip():
             raise HTTPException(status_code=400, detail=f"{platform.title()} username is required")
+        if platform == "instagram" and not is_valid_instagram_username(normalize_handle(body.username)):
+            raise HTTPException(status_code=422, detail="An Instagram username can only contain letters, numbers, periods and underscores (no spaces), up to 30 characters.")
         if not body.niche.strip():
             raise HTTPException(status_code=400, detail=f"{platform.title()} niche is required")
 

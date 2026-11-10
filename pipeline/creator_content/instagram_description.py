@@ -33,6 +33,32 @@ logger = logging.getLogger(__name__)
 
 _POSTS_LIMIT = 20
 
+# An Instagram username: letters, numbers, periods and underscores, at most 30 characters, no spaces.
+_INSTAGRAM_USERNAME = re.compile(r"^[A-Za-z0-9._]{1,30}$")
+
+
+def is_valid_instagram_username(handle: str) -> bool:
+    return bool(_INSTAGRAM_USERNAME.match(handle or ""))
+
+
+class DescriptionError(RuntimeError):
+    """A generation failure whose text is safe and useful to show the creator (it is stored as the job's error)."""
+
+    def __init__(self, public_message: str):
+        super().__init__(public_message)
+        self.public_message = public_message
+
+
+# The page shows this sentence, and recognises it by its start to let the creator correct the username.
+USERNAME_NOT_FOUND_MESSAGE = "Instagram username not found. You may have typed the wrong username, or the account is private."
+
+
+class InstagramUsernameNotFound(DescriptionError):
+    """The scrape worked but there is no such account (or it is private): nothing to read."""
+
+    def __init__(self):
+        super().__init__(USERNAME_NOT_FOUND_MESSAGE)
+
 
 def _get_description_prompt(db: Session) -> str:
     """
@@ -270,11 +296,17 @@ def generate_instagram_description(
         fresh = _scrape_handle(handle, _POSTS_LIMIT)
         if fresh is None:
             if not items:
-                raise RuntimeError("Instagram content could not be fetched")   # the old posts stay as they were
+                # the old posts stay as they were
+                raise DescriptionError("Instagram could not be read right now. Please try again in a minute.")
             logger.warning("Instagram @%s: scrape failed, using the %d saved post(s)", handle, len(items))
         else:
             record_apify_scrape("instagram", handle, _POSTS_LIMIT, len(fresh[:_POSTS_LIMIT]))
-            items = fresh[:_POSTS_LIMIT]
+            # The scraper answers a username that does not exist (or is private) with an empty result or an "error" placeholder item.
+            real = [item for item in fresh if not item.get("error") and (item.get("id") or item.get("metaData") or item.get("biography"))]
+            if not real:
+                logger.info("Instagram @%s: no account or no readable content (%d placeholder item(s))", handle, len(fresh))
+                raise InstagramUsernameNotFound()
+            items = real[:_POSTS_LIMIT]
     if creator_id is not None:
         from pipeline.creator_posts import clear_posts, username_changed   # lazy: creator_posts imports pitch_posts, which imports this module
         if username_changed(previous_handle, handle):
@@ -293,7 +325,7 @@ def generate_instagram_description(
     if not bio and items:
         bio = (items[0].get("biography") or "").strip()
     if not bio and not captions:
-        raise RuntimeError("Instagram profile has no bio or captions to analyze")
+        raise DescriptionError("This Instagram profile has no bio or captions to describe. Add a bio or post captions, then try again.")
 
     caption_text = "\n\n".join(f"Post {index}: {caption}" for index, caption in enumerate(captions, 1))
     options = sub_niche_options(db, niche)
@@ -306,7 +338,7 @@ def generate_instagram_description(
     result = call_gpt_json(prompt, context=f"creator Instagram @{handle}")
     description = (result.get("description") or "").strip()
     if not description:
-        raise RuntimeError("The LLM did not return a creator description")
+        raise DescriptionError("MAVLIT could not write the description this time. Please try again.")
 
     return {"description": description, "posts_analyzed": len(captions), "bio_found": bool(bio),
             "followers_count": followers, "highest_views": highest_views_from_items(items[:_POSTS_LIMIT]), "sub_niches": sub_niches_from_result(result, options),
