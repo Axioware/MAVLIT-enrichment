@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -18,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqladmin import Admin, ModelView
+from sqladmin import Admin, BaseView, ModelView, expose
 from sqladmin.authentication import AuthenticationBackend
 from sqladmin.filters import AllUniqueStringValuesFilter, OperationColumnFilter
 from sqlalchemy import String, cast, delete, or_, text
@@ -846,6 +847,84 @@ class CreatorBrandLlmV3RankingAdmin(ModelView, model=CreatorBrandLlmV3Ranking):
     page_size  = 25
 
 
+class SendInviteAdmin(BaseView):
+    """
+    "Send Invitation": a form where staff type an email and click Send. It does what `python -m pipeline.early_access_invites <email>` does:
+    makes the single-use link (only its hash is stored in account_invites) and emails the welcome message. An email that already has an
+    account is refused; inviting the same email again replaces the earlier link. The page lists the latest invitations.
+    """
+    name = "Send Invitation"
+    icon = "fa-solid fa-paper-plane"
+
+    @staticmethod
+    def _recent(db) -> list[dict]:
+        now = datetime.now(timezone.utc)
+        rows = db.query(AccountInvite).order_by(AccountInvite.id.desc()).limit(10).all()
+        has_account = {e for (e,) in db.query(CreatorProfile.email).filter(CreatorProfile.email.in_([r.email for r in rows]))} if rows else set()
+        def status(r):
+            if r.used_at is not None or r.email in has_account:
+                return "Account created"
+            return "Expired" if r.expires_at <= now else "Waiting"
+        return [{"email": r.email, "created": r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "", "status": status(r)} for r in rows]
+
+    @staticmethod
+    def _send(email: str, first_name: str | None, days: int) -> tuple[str, str]:
+        """(kind, message). Runs in a worker thread: it writes to the database and talks to the mail server."""
+        from pipeline import early_access_invites as invites
+        from pipeline import mailer
+        db = SessionLocal()
+        try:
+            todo, skipped = invites.people_for_emails(db, [email])
+            if skipped:
+                return "warning", f"{email} already has a MAVLIT account, so no invitation was sent."
+            sender = (os.environ.get("MAIL_FROM") or "").strip() or None
+            base_url = (os.environ.get("APP_BASE_URL") or invites.DEFAULT_BASE_URL).strip()
+            made = invites.invite(db, todo, days, base_url, None, sender, first_name)
+        finally:
+            db.close()
+        try:
+            mailer.send_by_smtp([message for _email, _link, message in made])
+        except RuntimeError:
+            return "danger", "The link was created but email sending is not set up on the server (SMTP_HOST / MAIL_FROM). Nothing was sent."
+        except Exception:
+            logger.exception("Admin invitation: the email could not be sent")
+            return "danger", "The link was created but the email could not be sent. Check the mail settings and try again (a new send replaces the link)."
+        logger.info("Admin invitation sent (valid %d days)", days)
+        return "success", f"Invitation sent to {email}. The link works once and expires in {days} days."
+
+    @expose("/send-invite", methods=["GET", "POST"], identity="send-invite")
+    async def send_invite(self, request: Request):
+        form = {"email": "", "first_name": "", "days": str(invites_default_days())}
+        result = None
+        if request.method == "POST":
+            data = await request.form()
+            form = {"email": str(data.get("email") or "").strip().lower(), "first_name": str(data.get("first_name") or "").strip()[:60],
+                    "days": str(data.get("days") or "").strip() or form["days"]}
+            if not _EMAIL_FORMAT.match(form["email"]) or len(form["email"]) > 254:
+                result = {"kind": "danger", "text": "Enter a valid email address."}
+            elif not (form["days"].isdigit() and 1 <= int(form["days"]) <= 365):
+                result = {"kind": "danger", "text": "The link must be valid for 1 to 365 days."}
+            else:
+                kind, text_ = await anyio.to_thread.run_sync(self._send, form["email"], form["first_name"] or None, int(form["days"]))
+                result = {"kind": kind, "text": text_}
+                if kind == "success":
+                    form = {"email": "", "first_name": "", "days": form["days"]}
+        def recent():
+            with SessionLocal() as db:
+                return self._recent(db)
+        rows = await anyio.to_thread.run_sync(recent)
+        return await self.templates.TemplateResponse(request, "sqladmin/send_invite.html",
+                                                     {"title": "Send Invitation", "subtitle": "Early-access invitations", "form": form, "result": result, "recent": rows})
+
+
+def invites_default_days() -> int:
+    from pipeline.early_access_invites import DEFAULT_DAYS
+    return DEFAULT_DAYS
+
+
+_EMAIL_FORMAT = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
 class AccountInviteAdmin(ModelView, model=AccountInvite):
     """
     The invitation links made by pipeline/early_access_invites.py: who was invited, when the link expires and when it was used. Read-only
@@ -1134,6 +1213,7 @@ admin.add_view(PitchAdmin)
 admin.add_view(OwnBrandJobAdmin)
 admin.add_view(RateEstimateAdmin)
 admin.add_view(EarlyAccessSignupAdmin)
+admin.add_base_view(SendInviteAdmin)
 admin.add_view(AccountInviteAdmin)
 admin.add_view(PasswordResetTokenAdmin)
 admin.add_view(CreatorBrandLlmV3RankingAdmin)
