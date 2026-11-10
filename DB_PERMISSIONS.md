@@ -19,8 +19,8 @@ applied to production: run everything on a staging copy first.
 |---|---|
 | SELECT, INSERT | `apify_usage`, `llm_usage`, `contact_reveals` (the daily cap on brand-contact reveals) |
 | SELECT, INSERT, DELETE | `creator_brand_llm_rankings`, `creator_brand_llm_v3_rankings`, `login_failures` (failed-login lockout), `feature_locks` (one in-flight pitch per user) |
-| SELECT, INSERT, UPDATE | `account_invites` (early-access invitation links), `password_reset_tokens` (forgot-password links), `feature_usage` (per-user daily caps on LLM / Apify features) |
-| SELECT, INSERT, UPDATE, DELETE | the other 25, `creator_profiles` among them (the admin view can create, edit and delete a creator) |
+| SELECT, INSERT, UPDATE | `password_reset_tokens` (forgot-password links), `feature_usage` (per-user daily caps on LLM / Apify features) |
+| SELECT, INSERT, UPDATE, DELETE | the other 26, `creator_profiles` (the admin view can create, edit and delete a creator) and `account_invites` (the admin can delete a row to cancel an invitation) among them |
 
 Never granted: ownership, superuser, CREATE, TRUNCATE, REFERENCES, TRIGGER, and every object not listed (the 57 `bak_*` copies,
 `llm_model_test_rankings`, `v3cmp_*`, anything else). INSERT always comes with SELECT (`INSERT ... RETURNING`). No
@@ -36,9 +36,9 @@ real privileges. Nothing was made read-only.
 |---|---|---|
 | all three | 23: `brand_contacts`, `brand_instagram_users`, `brand_match_profile`, `brands_niches`, `brands_raw`, `content_creator_re`, `contract_reviews`, `creator_niches`, `creator_profiles`, `facebook_branded_content_checks`, `initial_brand_score`, `instagram_creator_commenters`, `instagram_posts`, `instagram_users`, `meta_ads`, `pitches`, `prompts`, `rate_estimates`, `saved_brands`, `test_brands_with_instagram_posts`, `test_creator_brand_partnership_posts`, `test_niches`, `youtube_sponsorships` | **`prompts` and `brands_raw`: create, edit, delete (HTTP POST / DELETE, results checked in the database).** The other 21: list page + privilege check only |
 | edit + delete (no create) | `early_access_signups` | create refused (403), **edit and delete performed** |
-| delete only | `creator_instagram_posts`, `own_brand_jobs` | create / edit refused (403), **delete performed** |
+| delete only | `creator_instagram_posts`, `own_brand_jobs`, `account_invites` | create / edit refused (403), **delete performed** |
 | none (read-only) | `llm_usage` | create / edit / delete refused (403), row still there; the role also has no UPDATE / DELETE in the database |
-| none (read-only pages, under "System") | `apify_usage`, `contact_reveals`, `feature_usage`, `feature_locks`, `login_failures`, `password_reset_tokens`, `account_invites`, `creator_brand_llm_rankings`, `creator_brand_llm_v3_rankings` | list + detail pages only; create / edit / delete refused. Their privileges did not change (SELECT was already in the plan). |
+| none (read-only pages, under "System") | `apify_usage`, `contact_reveals`, `feature_usage`, `feature_locks`, `login_failures`, `password_reset_tokens`, `creator_brand_llm_rankings`, `creator_brand_llm_v3_rankings` | list + detail pages only; create / edit / delete refused. Their privileges did not change (SELECT was already in the plan). |
 | read-only SQL view | `creator_llm_cost` | list + detail pages work; create / delete refused (403); role has SELECT only and cannot drop or replace it |
 
 Every admin list page (all 36 tables and the view) were opened as `mavlit_app`. Not exercised: create / edit / delete on the other 21 full-access

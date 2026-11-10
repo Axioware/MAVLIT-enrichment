@@ -927,8 +927,9 @@ _EMAIL_FORMAT = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 class AccountInviteAdmin(ModelView, model=AccountInvite):
     """
-    The invitation links made by pipeline/early_access_invites.py: who was invited, when the link expires and when it was used. Read-only
-    (the links are made from the command line); the token itself is never stored, only its hash, which is not shown here either.
+    The invitation links: who was invited, when the link expires and when it was used. Rows cannot be created or edited here (links are made by
+    "Send Invitation" or the command line), but a row can be DELETED, which cancels that invitation (its link stops working). The token itself
+    is never stored, only its hash, which is not shown here either.
     """
     name         = "Account Invite"
     name_plural  = "Account Invites"
@@ -941,7 +942,7 @@ class AccountInviteAdmin(ModelView, model=AccountInvite):
     column_default_sort  = [(AccountInvite.id, True)]
     can_create = False
     can_edit   = False
-    can_delete = False
+    can_delete = True    # cancel an invitation: its link stops working
     can_export = False   # a list of emails
     page_size = 25
 

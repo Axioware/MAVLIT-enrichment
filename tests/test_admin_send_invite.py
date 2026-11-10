@@ -73,6 +73,26 @@ class SendInvitationPage(unittest.TestCase):
         with self.engine.connect() as conn:
             return conn.execute(text("SELECT email FROM account_invites")).scalars().all()
 
+    def test_a_row_can_be_deleted_in_the_account_invites_page_which_cancels_the_invitation(self):
+        import api.app as api_app
+        from sqlalchemy.orm import sessionmaker
+        view = next(v for v in api_app.admin.views if isinstance(v, api_app.AccountInviteAdmin))
+        patcher = mock.patch.object(view, "session_maker", sessionmaker(self.engine), create=True)   # the admin pages use their own connection
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.client.post("/admin/send-invite", data={"email": "new@example.test"})
+        token = re.search(r"set-password\?token=([\w-]+)", self.sent[0].get_body(("plain",)).get_content()).group(1)
+        self.assertEqual(self.client.get(f"/auth/invite/{token}").json()["status"], "valid")
+        self.assertEqual(self.client.get("/admin/account-invite/list").status_code, 200)
+        self.assertEqual(self.client.get("/admin/account-invite/create").status_code, 403)   # still no create / edit
+        with self.engine.connect() as conn:
+            invite_id = conn.execute(text("SELECT id FROM account_invites")).scalar_one()
+        self.assertEqual(self.client.get(f"/admin/account-invite/edit/{invite_id}").status_code, 403)
+        deleted = self.client.request("DELETE", "/admin/account-invite/delete", params={"pks": str(invite_id)})
+        self.assertIn(deleted.status_code, (200, 204), deleted.text[:200])
+        self.assertEqual(self.rows(), [])
+        self.assertEqual(self.client.get(f"/auth/invite/{token}").json(), {"status": "invalid", "email": None})   # the link no longer works
+
     def test_the_page_is_behind_the_admin_login(self):
         anonymous = TestClient(self.client.app, follow_redirects=False)
         self.assertEqual(anonymous.get("/admin/send-invite").status_code, 302)

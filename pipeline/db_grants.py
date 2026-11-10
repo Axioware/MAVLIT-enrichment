@@ -89,7 +89,7 @@ CODE = {
 # tests/test_db_grants.py compares this with the live ModelView flags, so a change there fails until this is updated.
 ADMIN = {
     "password_reset_tokens": (False, False, False),
-    "account_invites": (False, False, False),   # a read-only admin page: who was invited, when the link expires / was used
+    "account_invites": (False, False, True),    # admin page: who was invited, when the link expires / was used; a row can be deleted (cancels the invitation)
     "apify_usage": (False, False, False),
     "brand_contacts": (True, True, True),
     "brand_instagram_users": (True, True, True),
