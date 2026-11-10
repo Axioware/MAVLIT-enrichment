@@ -64,7 +64,7 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
 - **Request:** No body or parameters.
 - **Response:** `200` `{ "id": 12, "email": "creator@example.com", "name": "Avery Stone" }`.
 - **Errors:** `401` missing, invalid, expired, inactive, or unknown user.
-- **Frontend:** All authenticated-aware pages: `login.html`, `index.html`, `add-creators.html`, `creator-profile.html`.
+- **Frontend:** All authenticated-aware pages: `login.html`, `index.html`, `add-creators.html`.
 
 ### `POST /auth/logout`
 
@@ -109,7 +109,7 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
   ```
 
 - **Errors:** `401` unauthenticated; `422` only if response data cannot satisfy the schema.
-- **Frontend:** `frontend/creator-profile.html`.
+- **Frontend:** none in this backend; the main app's profile page (app.mavlit.com/creator-profile) uses it.
 
 #### `PUT /creator-profile/me`
 
@@ -150,7 +150,7 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
 
 - **Response:** `200`, updated `CreatorProfileResponse`.
 - **Errors:** `401` unauthenticated; `422` invalid types or missing required fields.
-- **Frontend:** `frontend/creator-profile.html`.
+- **Frontend:** none in this backend; the main app's profile page (app.mavlit.com/creator-profile) uses it.
 
 #### `POST /creator-profile/me/generate-description`
 
@@ -159,14 +159,14 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
 - **Request body:** `{ "platform": "instagram", "username": "averystone", "niche": "fitness" }`.
 - **Response:** `200`, `{ "platform": "instagram", "description": "...", "posts_analyzed": 12, "videos_analyzed": null, "bio_found": true }`.
 - **Errors:** `400` platform is not `instagram` or `youtube`, or the generator rejects the input; `401` unauthenticated; `502` upstream generation failure; `422` malformed body.
-- **Frontend:** `frontend/creator-profile.html`.
+- **Frontend:** none in this backend; the main app's profile page (app.mavlit.com/creator-profile) uses it.
 
 #### `GET /creator-sub-niches`
 
 - **Purpose:** Return distinct brand tag values used by the profile sub-niche picker.
 - **Auth:** Public.
 - **Response:** `200` `{ "niches": ["strength training", "streetwear"] }`.
-- **Frontend:** `frontend/creator-profile.html`.
+- **Frontend:** none in this backend; the main app's profile page (app.mavlit.com/creator-profile) uses it.
 
 #### `GET /brand-niches`
 
@@ -182,7 +182,7 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
 - **Purpose:** Return all brand tags and a tag list grouped by primary niche.
 - **Auth:** Public.
 - **Response:** `200` `{ "tags": ["streetwear"], "tags_by_niche": { "fashion": ["streetwear"] } }`.
-- **Frontend status:** Not currently called; `creator-profile.html` uses `/creator-sub-niches` instead.
+- **Frontend status:** Not currently called; the main app's profile page uses `/creator-sub-niches` instead.
 
 ### Matching
 
@@ -216,7 +216,7 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
   ```
 
 - **Errors:** `401` unauthenticated; `422` invalid query values.
-- **Frontend:** `frontend/matches.html`.
+- **Frontend:** none in this backend; the main app's Brand Matches page (app.mavlit.com/brand-matches) uses it.
 - **Behavior:** Always computes live today; `cached` is always `false`. A brand qualifies when it has a processed match-profile with an embedding, passes the sponsorship-activity floor, excluded-category filter, platform-specific Instagram/YouTube presence and follower-fit filters, similarity exclusions, and the exact niche overlap rule against the brand, qualifying Instagram collaborators, or linked reverse-engineered creators. The returned page is then ranked and limited; `total` counts all qualifying brands.
 
 #### `POST /matches/me/refresh`
@@ -225,7 +225,7 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
 - **Auth:** Required.
 - **Query parameters:** `limit` default `20`.
 - **Response/errors:** Same `MatchesResponse` and `401`/`422` behavior as `GET /matches/me`.
-- **Frontend:** `frontend/matches.html`.
+- **Frontend:** none in this backend; the main app's Brand Matches page (app.mavlit.com/brand-matches) uses it.
 - **Maintenance flag:** Currently functionally identical to `GET /matches/me`; retained for a future cache invalidation contract.
 
 #### `GET /brands/{brand_id}`
@@ -446,8 +446,6 @@ These serve HTML or static assets rather than JSON APIs:
 | GET | `/dashboard` | Same dashboard HTML as `/` |
 | GET | `/signin` | `frontend/login.html`, `Cache-Control: no-store` |
 | GET | `/login` | `301` redirect to `/signin` |
-| GET | `/creator-profile` | `frontend/creator-profile.html` |
-| GET | `/matches` | `frontend/matches.html` |
 | GET | `/add-creators` | `frontend/add-creators.html` |
 | GET | `/static/{path}` | File from `frontend/` |
 | GET | `/posthog-init.js` | Runtime PostHog loader, or a disabled-analytics warning |
@@ -461,8 +459,7 @@ SQLAdmin is mounted at `/admin`. It exposes database model views. Its optional s
 | `frontend/login.html` | `GET /auth/me`, `POST /auth/login` |
 | `frontend/index.html` | `POST /seed`, `GET /seed/status/{job_id}`, `GET /auth/me`, `POST /auth/logout` |
 | `frontend/add-creators.html` | `POST /content-creator-re/bulk-add`, `GET /auth/me`, `POST /auth/logout` |
-| `frontend/creator-profile.html` | `POST /creator-profile/me/generate-description`, `GET /creator-sub-niches`, `GET /creator-profile/me`, `PUT /creator-profile/me`, `GET /auth/me` |
-| `frontend/matches.html` | `GET /matches/me?limit=20`, `POST /matches/me/refresh?limit=20` |
+| the main app's profile page (app.mavlit.com/creator-profile) | `POST /creator-profile/me/generate-description`, `GET /creator-sub-niches`, `GET /creator-profile/me`, `PUT /creator-profile/me`, `GET /auth/me` |
 
 All five pages also load `/posthog-init.js` for analytics. The API base is implicit because the pages use same-origin relative URLs.
 
@@ -507,7 +504,7 @@ External calls can be triggered indirectly by `/seed`, `/enrich/signals`, `/scor
 
 ### Creator onboarding
 
-1. `creator-profile.html` collects platform, handles, follower counts, niches, exclusions, descriptions, and audience percentages.
+1. the main app's profile page collects platform, handles, follower counts, niches, exclusions, descriptions, and audience percentages.
 2. For generated descriptions, call `POST /creator-profile/me/generate-description` once per selected platform.
 3. Save with `PUT /creator-profile/me`.
 4. The response immediately includes the synchronously calculated tier. Tags/embedding refresh asynchronously.

@@ -1416,8 +1416,6 @@ _PROTECTED_PAGE_HEADERS = {"Cache-Control": "no-store, no-cache, must-revalidate
 def frontend(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
     if not current_user:
         return RedirectResponse(url="/signin?return_to=/", status_code=307)
-    if not is_profile_complete(current_user):
-        return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
     return FileResponse("frontend/index.html", headers=_PROTECTED_PAGE_HEADERS)
 
 
@@ -1439,42 +1437,13 @@ def login_redirect():
 def dashboard_page(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
     if not current_user:
         return RedirectResponse(url="/signin?return_to=/dashboard", status_code=307)
-    if not is_profile_complete(current_user):
-        return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
     return FileResponse("frontend/index.html", headers=_PROTECTED_PAGE_HEADERS)
-
-
-@app.get("/creator-profile", include_in_schema=False)
-def creator_profile_page(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
-    if not current_user:
-        return RedirectResponse(url="/signin?return_to=/creator-profile", status_code=307)
-    return FileResponse("frontend/creator-profile.html", headers=_PROTECTED_PAGE_HEADERS)
-
-
-@app.get("/matches", include_in_schema=False)
-def matches_page(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
-    if not current_user:
-        return RedirectResponse(url="/signin?return_to=/matches", status_code=307)
-    if not is_profile_complete(current_user):
-        return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
-    return FileResponse("frontend/matches.html", headers=_PROTECTED_PAGE_HEADERS)
-
-
-@app.get("/pitch", include_in_schema=False)
-def pitch_page(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
-    if not current_user:
-        return RedirectResponse(url="/signin?return_to=/pitch", status_code=307)
-    if not is_profile_complete(current_user):
-        return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
-    return FileResponse("frontend/pitch.html", headers=_PROTECTED_PAGE_HEADERS)
 
 
 @app.get("/add-creators", include_in_schema=False)
 def add_creators_page(current_user: CreatorProfile | None = Depends(get_current_user_optional)):
     if not current_user:
         return RedirectResponse(url="/signin?return_to=/add-creators", status_code=307)
-    if not is_profile_complete(current_user):
-        return RedirectResponse(url="/creator-profile?onboarding=required", status_code=307)
     return FileResponse("frontend/add-creators.html", headers=_PROTECTED_PAGE_HEADERS)
 
 

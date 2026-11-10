@@ -28,7 +28,7 @@ Response `200`: `{ "id": int, "email": str, "name": str | null }`
 Clears the cookie. Response `200`: `{ "message": "Logged out" }`
 
 ### `GET /creator-profile/me` / `PUT /creator-profile/me`
-Full creator profile CRUD — not new, but the `follower_count`, `primary_platform`, etc. set here are what rate-intelligence and matching read. Not detailed further here — see existing frontend integration in `frontend/creator-profile.html` for the field list.
+Full creator profile CRUD — not new, but the `follower_count`, `primary_platform`, etc. set here are what rate-intelligence and matching read. Not detailed further here — see the main app's profile page (app.mavlit.com/creator-profile) for the field list.
 
 ---
 
