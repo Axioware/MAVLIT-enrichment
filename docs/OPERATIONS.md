@@ -26,7 +26,7 @@ or `DESCRIPTION_GENERATIONS_PER_DAY`. Run it daily, and whenever an alert below 
 | LLM spend | above your daily budget; or one user above 3 times the median spend | report 1 |
 | A user at a daily cap | any user at 100% (and many 429s) | report 2 |
 | Apify runs | one user above 20 runs in 24 h | report 3 |
-| Contact reveals | one user close to `CONTACT_REVEALS_PER_DAY` (50) | report 4 |
+| Contact reveals | no limit; watch one user opening far more brands than usual | report 4 |
 | Failed logins | 10 or more from one address in 15 minutes; or lockouts on many accounts | reports 5, 6 |
 | A held lock | any `feature_locks` row older than 3 minutes | report 7 |
 | A stuck job | any job queued/running for over 30 minutes | reports 8, 9 |

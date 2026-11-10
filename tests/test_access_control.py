@@ -70,14 +70,9 @@ class ClientAddress(unittest.TestCase):
 
 
 class Settings(unittest.TestCase):
-    def test_daily_cap(self):
-        self.assertEqual(contact_access.daily_cap(), 50)
-        for value, expected in (("7", 7), ("0", 0), (" 12 ", 12)):
-            with mock.patch.dict(os.environ, {"CONTACT_REVEALS_PER_DAY": value}):
-                self.assertEqual(contact_access.daily_cap(), expected)
-        for bad in ("many", "-1", "1.5"):
-            with mock.patch.dict(os.environ, {"CONTACT_REVEALS_PER_DAY": bad}), self.assertRaises(ValueError):
-                contact_access.daily_cap()
+    def test_there_is_no_limit_on_contact_reveals(self):
+        self.assertFalse(hasattr(contact_access, "daily_cap"))   # the old daily cap is gone
+        self.assertFalse(hasattr(contact_access, "reserve_reveal"))
 
 
 class AdminViews(unittest.TestCase):
@@ -259,32 +254,15 @@ class TwoCreators(unittest.TestCase):
         # unentitled brands cost nothing against the cap
         self.assertEqual(self.count("SELECT count(*) FROM contact_reveals WHERE creator_profile_id = :i", i=self.a.id), 3)
 
-    def test_the_daily_cap_is_enforced_and_kept_in_the_database(self):
+    def test_there_is_no_limit_on_how_many_brands_contacts_can_be_opened(self):
         c = self.client_for("c@example.test")
-        with mock.patch.dict(os.environ, {"CONTACT_REVEALS_PER_DAY": "2"}):
-            self.assertEqual(c.get("/brands/1").status_code, 200)
-            self.assertEqual(c.get("/brands/2").status_code, 200)
-            over = c.get("/brands/3")
-            self.assertEqual(over.status_code, 429)
-            self.assertIn("daily limit", over.json()["detail"])
-            self.assertIn("2 different brands", over.json()["detail"])
-            self.assertEqual(c.get("/brands/1").status_code, 200, "the same brand again the same day is free")
-            # a brand's page without contacts is not a reveal
-            self.assertEqual(self.count("SELECT count(*) FROM contact_reveals WHERE creator_profile_id = :i", i=self.c.id), 2)
-            # "another process": a brand new client, nothing in memory
-            fresh = self.client_for("c@example.test")
-            self.assertEqual(fresh.get("/brands/3").status_code, 429)
-            # a different creator is not affected
-            self.assertEqual(self.client_for("a@example.test").get("/brands/1").status_code, 200)
-            # tomorrow the count starts again
-            with self.engine.begin() as conn:
-                conn.execute(text("UPDATE contact_reveals SET revealed_on = revealed_on - 1"))
-            self.assertEqual(c.get("/brands/3").status_code, 200)
-
-    def test_a_cap_of_zero_turns_revealing_off(self):
-        a = self.client_for("a@example.test")
-        with mock.patch.dict(os.environ, {"CONTACT_REVEALS_PER_DAY": "0"}):
-            self.assertEqual(a.get("/brands/1").status_code, 429)
+        with mock.patch.dict(os.environ, {"CONTACT_REVEALS_PER_DAY": "1"}):   # the old setting no longer does anything
+            for brand_id in (1, 2, 3, 1, 2, 3):
+                body = c.get(f"/brands/{brand_id}")
+                self.assertEqual(body.status_code, 200, brand_id)
+                self.assertEqual(body.json()["top_contact"]["email"], f"contact{brand_id}@brand.test")
+        # each brand is still noted once for the day, as a usage record only
+        self.assertEqual(self.count("SELECT count(*) FROM contact_reveals WHERE creator_profile_id = :i", i=self.c.id), 3)
 
     def _pitch(self, client, brand_id, llm_prompts):
         def llm(prompt, **kw):
@@ -307,13 +285,13 @@ class TwoCreators(unittest.TestCase):
         self.assertIn("Zorblax1", prompts[1])
         self.assertEqual(self.count("SELECT contact_email FROM pitches WHERE id = :i", i=allowed.json()["id"]), "contact1@brand.test")
 
-    def test_a_pitch_over_the_cap_is_429_before_the_llm_runs(self):
+    def test_pitches_keep_including_the_contact_however_many_brands_were_opened(self):
         c, prompts = self.client_for("c@example.test"), []
         with mock.patch.dict(os.environ, {"CONTACT_REVEALS_PER_DAY": "1"}):
-            self.assertEqual(self._pitch(c, 1, prompts).status_code, 200)
-            over = self._pitch(c, 2, prompts)
-        self.assertEqual(over.status_code, 429)
-        self.assertEqual(len(prompts), 1, "no LLM call (and no cost) for a refused pitch")
+            first, second = self._pitch(c, 1, prompts), self._pitch(c, 2, prompts)
+        self.assertEqual((first.status_code, second.status_code), (200, 200))
+        self.assertEqual(second.json()["contact_email"], "contact2@brand.test")
+        self.assertEqual(len(prompts), 2)
 
     def test_the_streamed_pitch_follows_the_same_rule(self):
         a = self.client_for("a@example.test")
@@ -329,9 +307,8 @@ class TwoCreators(unittest.TestCase):
         self.assertIsNone(done["pitch"]["contact_email"])
         _, done = run(1)
         self.assertEqual(done["pitch"]["contact_email"], "contact1@brand.test")
-        with mock.patch.dict(os.environ, {"CONTACT_REVEALS_PER_DAY": "1"}):   # brand 1 is already counted today; brand 2 would be the 2nd
-            with mock.patch("pipeline.pitching.stream_gpt_text", side_effect=lambda *x, **k: iter(["x"])):
-                self.assertEqual(a.post("/pitches/stream", json={"is_custom": False, "brand_id": 2, "story": "s"}).status_code, 429)
+        _, done = run(2)   # a second brand the same day: no limit
+        self.assertEqual(done["pitch"]["contact_email"], "contact2@brand.test")
 
     def test_a_manual_pitch_never_carries_a_contact(self):
         a = self.client_for("a@example.test")

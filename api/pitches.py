@@ -125,7 +125,7 @@ def create_pitch(
     usage_limits.acquire_lock(db, creator_id)   # 409 while another pitch of this user is being written
     try:
         usage_limits.consume(db, creator_id, "pitches")   # 429 over the daily cap, before any LLM call
-        include_contact = allow_contacts(db, creator_id, body.brand_id)   # False (no contact in the pitch) for a brand the creator may not see; 429 over the daily cap
+        include_contact = allow_contacts(db, creator_id, body.brand_id)   # False (no contact in the pitch) for a brand the creator may not see
         try:
             pitch = generate_pitch(
                 db, current_user,
@@ -190,7 +190,7 @@ def stream_pitch_endpoint(
         raise
     try:
         usage_limits.consume(db, creator_id, "pitches")   # 429 over the daily cap, before the stream starts and before any LLM call
-        include_contact = allow_contacts(db, creator_id, body.brand_id)   # commits; 429 over the daily cap, before the stream starts
+        include_contact = allow_contacts(db, creator_id, body.brand_id)   # commits
         db.commit()   # the request session only validated; end its transaction so it is not open for the whole stream
     except BaseException:
         stream_slots.release(slot)

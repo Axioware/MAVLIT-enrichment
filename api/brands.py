@@ -19,8 +19,8 @@ def get_brand(
     detail = get_brand_detail(db, brand_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Brand not found")
-    # The brand's contact people only for a brand the creator saved, is matched to or added themselves, and within the daily cap
-    # (429 over it). For any other brand they are left out, not an error.
+    # The brand's contact people only for a brand the creator saved, is matched to or added themselves, and with no limit on
+    # how many. For any other brand they are left out, not an error.
     if (detail["top_contact"] or detail["other_contacts"]) and not allow_contacts(db, current_user.id, brand_id):
         detail = {**detail, "top_contact": None, "other_contacts": []}
     return brand_detail_to_response(detail)

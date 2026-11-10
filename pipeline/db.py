@@ -896,8 +896,8 @@ class SavedBrand(Base):
 
 class ContactReveal(Base):
     """
-    A brand whose contacts were shown to a creator on a given UTC day. The daily cap on contact reveals (CONTACT_REVEALS_PER_DAY,
-    api/contact_access.py) counts these rows, so it holds across restarts and processes.
+    A brand whose contacts were shown to a creator on a given UTC day. A usage record (api/contact_access.py): one row per brand per day. There is no limit on
+    contact reveals, so nothing counts these rows against a cap.
     """
     __tablename__ = "contact_reveals"
 
