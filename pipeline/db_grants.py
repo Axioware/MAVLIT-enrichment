@@ -88,9 +88,9 @@ CODE = {
 # --- what SQLAdmin allows (can_create, can_edit, can_delete); None = no admin view ---------------------------------------
 # tests/test_db_grants.py compares this with the live ModelView flags, so a change there fails until this is updated.
 ADMIN = {
-    "password_reset_tokens": None,
+    "password_reset_tokens": (False, False, False),
     "account_invites": (False, False, False),   # a read-only admin page: who was invited, when the link expires / was used
-    "apify_usage": None,
+    "apify_usage": (False, False, False),
     "brand_contacts": (True, True, True),
     "brand_instagram_users": (True, True, True),
     "brand_match_profile": (True, True, True),
@@ -98,18 +98,18 @@ ADMIN = {
     "brands_raw": (True, True, True),
     "content_creator_re": (True, True, True),
     "contract_reviews": (True, True, True),
-    "contact_reveals": None,
-    "creator_brand_llm_rankings": None,
-    "creator_brand_llm_v3_rankings": None,
+    "contact_reveals": (False, False, False),
+    "creator_brand_llm_rankings": (False, False, False),
+    "creator_brand_llm_v3_rankings": (False, False, False),
     "creator_instagram_posts": (False, False, True),
     "creator_niches": (True, True, True),
     "creator_profiles": (True, True, True),    # admin can create, edit and delete a creator (api/app.py CreatorProfileAdmin.delete_model)
     "early_access_signups": (False, True, True),
     "facebook_branded_content_checks": (True, True, True),
     "initial_brand_score": (True, True, True),
-    "feature_usage": None,
-    "feature_locks": None,
-    "login_failures": None,
+    "feature_usage": (False, False, False),
+    "feature_locks": (False, False, False),
+    "login_failures": (False, False, False),
     "instagram_creator_commenters": (True, True, True),
     "instagram_posts": (True, True, True),
     "instagram_users": (True, True, True),

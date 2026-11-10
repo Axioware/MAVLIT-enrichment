@@ -77,6 +77,12 @@ from pipeline.db import (
     BrandRaw,
     ContentCreatorRE,
     AccountInvite,
+    ApifyUsage,
+    ContactReveal,
+    FeatureLock,
+    FeatureUsage,
+    LoginFailure,
+    PasswordResetToken,
     ContractReview,
     EarlyAccessSignup,
     CreatorBrandLlmRanking,
@@ -702,6 +708,144 @@ class EarlyAccessSignupAdmin(ModelView, model=EarlyAccessSignup):
     page_size = 25
 
 
+# --- Read-only pages for the system tables (usage counters, locks, ranking results, login attempts): the application writes them,
+# --- people only look. Their privileges were already in the runtime role's plan (SELECT), so these pages add none.
+
+class ApifyUsageAdmin(ModelView, model=ApifyUsage):
+    """One row per Apify scrape a MAVLIT user triggered (profile generation, pitch post links): who, which account, posts asked for / read."""
+    name         = "Apify Usage"
+    name_plural  = "Apify Usage"
+    category     = "System"
+    icon         = "fa-solid fa-spider"
+    column_list  = "__all__"
+    column_labels = {ApifyUsage.creator_profile_id: "MAVLIT user id"}
+    column_searchable_list = [ApifyUsage.handle, ApifyUsage.feature]
+    column_sortable_list   = [c.name for c in ApifyUsage.__table__.columns]
+    column_default_sort    = [(ApifyUsage.created_at, True)]
+    column_filters = [AllUniqueStringValuesFilter(ApifyUsage.feature), AllUniqueStringValuesFilter(ApifyUsage.platform),
+                      OperationColumnFilter(ApifyUsage.creator_profile_id), OperationColumnFilter(ApifyUsage.created_at)]
+    can_create = can_edit = can_delete = False
+    page_size  = 25
+
+
+class ContactRevealAdmin(ModelView, model=ContactReveal):
+    """The distinct brands whose contacts a creator opened each day (the daily reveal cap counts these rows)."""
+    name         = "Contact Reveal"
+    name_plural  = "Contact Reveals"
+    category     = "System"
+    icon         = "fa-solid fa-address-book"
+    column_list  = "__all__"
+    column_labels = {ContactReveal.creator_profile_id: "MAVLIT user id", ContactReveal.brand_raw_id: "Brand id"}
+    column_sortable_list = [c.name for c in ContactReveal.__table__.columns]
+    column_default_sort  = [(ContactReveal.created_at, True)]
+    column_filters = [OperationColumnFilter(ContactReveal.creator_profile_id), OperationColumnFilter(ContactReveal.brand_raw_id),
+                      OperationColumnFilter(ContactReveal.revealed_on)]
+    can_create = can_edit = can_delete = False
+    can_export = False   # who looked at which brand
+    page_size  = 25
+
+
+class FeatureUsageAdmin(ModelView, model=FeatureUsage):
+    """Daily use counters behind the per-user caps (pitches, rate estimates, match refreshes, ...)."""
+    name         = "Feature Usage"
+    name_plural  = "Feature Usage (daily caps)"
+    category     = "System"
+    icon         = "fa-solid fa-gauge"
+    column_list  = "__all__"
+    column_labels = {FeatureUsage.creator_profile_id: "MAVLIT user id"}
+    column_searchable_list = [FeatureUsage.feature]
+    column_sortable_list   = [c.name for c in FeatureUsage.__table__.columns]
+    column_default_sort    = [(FeatureUsage.used_on, True)]
+    column_filters = [AllUniqueStringValuesFilter(FeatureUsage.feature), OperationColumnFilter(FeatureUsage.creator_profile_id),
+                      OperationColumnFilter(FeatureUsage.used_on), OperationColumnFilter(FeatureUsage.uses)]
+    can_create = can_edit = can_delete = False
+    page_size  = 25
+
+
+class FeatureLockAdmin(ModelView, model=FeatureLock):
+    """Jobs in flight right now: one row per creator and feature while a pitch, ranking or description is running. A row that stays for minutes is a stuck job."""
+    name         = "Feature Lock"
+    name_plural  = "Feature Locks (jobs running)"
+    category     = "System"
+    icon         = "fa-solid fa-lock"
+    column_list  = "__all__"
+    column_labels = {FeatureLock.creator_profile_id: "MAVLIT user id"}
+    column_searchable_list = [FeatureLock.feature]
+    column_sortable_list   = [c.name for c in FeatureLock.__table__.columns]
+    column_default_sort    = [(FeatureLock.started_at, True)]
+    can_create = can_edit = can_delete = False
+    page_size  = 25
+
+
+class LoginFailureAdmin(ModelView, model=LoginFailure):
+    """Failed sign-in attempts behind the lockout: a hash of the email (never the email itself) and the client address."""
+    name         = "Login Failure"
+    name_plural  = "Login Failures"
+    category     = "System"
+    icon         = "fa-solid fa-user-lock"
+    column_list  = "__all__"
+    column_searchable_list = [LoginFailure.ip]
+    column_sortable_list   = [c.name for c in LoginFailure.__table__.columns]
+    column_default_sort    = [(LoginFailure.created_at, True)]
+    column_filters = [OperationColumnFilter(LoginFailure.created_at)]
+    can_create = can_edit = can_delete = False
+    can_export = False   # client addresses
+    page_size  = 25
+
+
+class PasswordResetTokenAdmin(ModelView, model=PasswordResetToken):
+    """Forgot-password links: whose, when it expires, when it was used. The token itself is not stored, and its hash is not shown."""
+    name         = "Password Reset"
+    name_plural  = "Password Resets"
+    category     = "System"
+    icon         = "fa-solid fa-key"
+    column_list  = [PasswordResetToken.id, PasswordResetToken.created_at, PasswordResetToken.email, PasswordResetToken.expires_at, PasswordResetToken.used_at]
+    column_details_list = [PasswordResetToken.id, PasswordResetToken.created_at, PasswordResetToken.email, PasswordResetToken.expires_at, PasswordResetToken.used_at]
+    column_labels = {PasswordResetToken.created_at: "Requested", PasswordResetToken.expires_at: "Expires", PasswordResetToken.used_at: "Used"}
+    column_searchable_list = [PasswordResetToken.email]
+    column_sortable_list = [PasswordResetToken.id, PasswordResetToken.created_at, PasswordResetToken.email, PasswordResetToken.expires_at, PasswordResetToken.used_at]
+    column_default_sort  = [(PasswordResetToken.id, True)]
+    can_create = can_edit = can_delete = False
+    can_export = False   # a list of emails
+    page_size = 25
+
+
+class CreatorBrandLlmRankingAdmin(ModelView, model=CreatorBrandLlmRanking):
+    """The v2 AI ranking each creator got (replaced on every re-rank): brand, confidence, rank, reason."""
+    name         = "Match Ranking v2"
+    name_plural  = "Match Rankings v2"
+    category     = "System"
+    icon         = "fa-solid fa-ranking-star"
+    column_list  = [CreatorBrandLlmRanking.creator_profile_id, CreatorBrandLlmRanking.rank, CreatorBrandLlmRanking.brand_raw_id,
+                    CreatorBrandLlmRanking.confidence, CreatorBrandLlmRanking.reason, CreatorBrandLlmRanking.computed_at]
+    column_labels = {CreatorBrandLlmRanking.creator_profile_id: "MAVLIT user id", CreatorBrandLlmRanking.brand_raw_id: "Brand id"}
+    column_searchable_list = [CreatorBrandLlmRanking.reason]
+    column_sortable_list   = [c.name for c in CreatorBrandLlmRanking.__table__.columns if c.name != "reasons"]
+    column_default_sort    = [(CreatorBrandLlmRanking.computed_at, True)]
+    column_filters = [OperationColumnFilter(CreatorBrandLlmRanking.creator_profile_id), OperationColumnFilter(CreatorBrandLlmRanking.brand_raw_id),
+                      OperationColumnFilter(CreatorBrandLlmRanking.confidence)]
+    can_create = can_edit = can_delete = False
+    page_size  = 25
+
+
+class CreatorBrandLlmV3RankingAdmin(ModelView, model=CreatorBrandLlmV3Ranking):
+    """The v3 AI ranking each creator got (the one shown on Matches; replaced on every re-rank): brand, confidence, rank, 'why it's a match'."""
+    name         = "Match Ranking v3"
+    name_plural  = "Match Rankings v3"
+    category     = "System"
+    icon         = "fa-solid fa-ranking-star"
+    column_list  = [CreatorBrandLlmV3Ranking.creator_profile_id, CreatorBrandLlmV3Ranking.rank, CreatorBrandLlmV3Ranking.brand_raw_id,
+                    CreatorBrandLlmV3Ranking.confidence, CreatorBrandLlmV3Ranking.reason, CreatorBrandLlmV3Ranking.computed_at]
+    column_labels = {CreatorBrandLlmV3Ranking.creator_profile_id: "MAVLIT user id", CreatorBrandLlmV3Ranking.brand_raw_id: "Brand id"}
+    column_searchable_list = [CreatorBrandLlmV3Ranking.reason]
+    column_sortable_list   = [c.name for c in CreatorBrandLlmV3Ranking.__table__.columns if c.name != "reasons"]
+    column_default_sort    = [(CreatorBrandLlmV3Ranking.computed_at, True)]
+    column_filters = [OperationColumnFilter(CreatorBrandLlmV3Ranking.creator_profile_id), OperationColumnFilter(CreatorBrandLlmV3Ranking.brand_raw_id),
+                      OperationColumnFilter(CreatorBrandLlmV3Ranking.confidence)]
+    can_create = can_edit = can_delete = False
+    page_size  = 25
+
+
 class AccountInviteAdmin(ModelView, model=AccountInvite):
     """
     The invitation links made by pipeline/early_access_invites.py: who was invited, when the link expires and when it was used. Read-only
@@ -991,6 +1135,14 @@ admin.add_view(OwnBrandJobAdmin)
 admin.add_view(RateEstimateAdmin)
 admin.add_view(EarlyAccessSignupAdmin)
 admin.add_view(AccountInviteAdmin)
+admin.add_view(PasswordResetTokenAdmin)
+admin.add_view(CreatorBrandLlmV3RankingAdmin)
+admin.add_view(CreatorBrandLlmRankingAdmin)
+admin.add_view(ApifyUsageAdmin)
+admin.add_view(ContactRevealAdmin)
+admin.add_view(FeatureUsageAdmin)
+admin.add_view(FeatureLockAdmin)
+admin.add_view(LoginFailureAdmin)
 admin.add_view(ContractReviewAdmin)
 for _view in admin.views:
     if getattr(_view, "can_export", False):

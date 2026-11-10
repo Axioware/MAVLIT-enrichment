@@ -38,10 +38,10 @@ real privileges. Nothing was made read-only.
 | edit + delete (no create) | `early_access_signups` | create refused (403), **edit and delete performed** |
 | delete only | `creator_instagram_posts`, `own_brand_jobs` | create / edit refused (403), **delete performed** |
 | none (read-only) | `llm_usage` | create / edit / delete refused (403), row still there; the role also has no UPDATE / DELETE in the database |
-| no admin view | `apify_usage`, `creator_brand_llm_rankings`, `creator_brand_llm_v3_rankings` | not applicable |
+| none (read-only pages, under "System") | `apify_usage`, `contact_reveals`, `feature_usage`, `feature_locks`, `login_failures`, `password_reset_tokens`, `account_invites`, `creator_brand_llm_rankings`, `creator_brand_llm_v3_rankings` | list + detail pages only; create / edit / delete refused. Their privileges did not change (SELECT was already in the plan). |
 | read-only SQL view | `creator_llm_cost` | list + detail pages work; create / delete refused (403); role has SELECT only and cannot drop or replace it |
 
-All 28 admin list pages (27 tables and the view) were opened as `mavlit_app`. Not exercised: create / edit / delete on the other 21 full-access
+Every admin list page (all 36 tables and the view) were opened as `mavlit_app`. Not exercised: create / edit / delete on the other 21 full-access
 tables (the SQLAdmin login with `ADMIN_PASSKEY` set is now exercised: closed without it, a wrong passkey refused, the right one opens the pages).
 
 ## Pre-existing grants, memberships and inherited access
