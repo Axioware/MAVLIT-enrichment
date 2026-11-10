@@ -104,7 +104,7 @@ class SendInvitationPage(unittest.TestCase):
         self.assertIn("Send Invitation", page.text)   # in the admin menu
 
     def test_sending_creates_a_working_single_use_link_and_emails_it(self):
-        response = self.client.post("/admin/send-invite", data={"email": " New@Example.test ", "first_name": "Ali", "days": "7"})
+        response = self.client.post("/admin/send-invite", data={"email": " New@Example.test ", "first_name": "Alex", "days": "7"})
         self.assertEqual(response.status_code, 200)
         self.assertIn("Invitation sent to new@example.test", response.text)
         self.assertIn("expires in 7 days", response.text)
@@ -113,7 +113,7 @@ class SendInvitationPage(unittest.TestCase):
         message = self.sent[0]
         self.assertEqual(message["To"], "new@example.test")
         body = message.get_body(("plain",)).get_content()
-        self.assertTrue(body.startswith("Hi Ali,"))
+        self.assertTrue(body.startswith("Hi Alex,"))
         token = re.search(r"set-password\?token=([\w-]+)", body).group(1)
         self.assertEqual(self.client.get(f"/auth/invite/{token}").json(), {"status": "valid", "email": "new@example.test"})
         self.assertIn("new@example.test", response.text)   # listed under recent invitations, form cleared for the next one

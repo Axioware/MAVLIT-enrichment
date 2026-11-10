@@ -12,7 +12,7 @@ Who gets an invite: early_access_signups rows that have no account yet. Inviting
 Run, giving the email(s) to invite as arguments - only those people are invited and emailed:
     python -m pipeline.early_access_invites new@example.com                   # token + email, sent by SMTP
     python -m pipeline.early_access_invites a@x.com b@y.com --days 7
-    python -m pipeline.early_access_invites new@example.com --name Ali       # greets "Hi Ali," (without --name: "Hi there,")
+    python -m pipeline.early_access_invites new@example.com --name Alex       # greets "Hi Alex," (without --name: "Hi there,")
     python -m pipeline.early_access_invites new@example.com --no-send        # token + .eml file in ./invites/, nothing sent
     python -m pipeline.early_access_invites                                  # no email given: only LISTS the sign-ups without an account
     python -m pipeline.early_access_invites --all                            # every sign-up without an account (explicit, sends to all)

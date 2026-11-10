@@ -1513,8 +1513,8 @@ A generic sale announcement, seasonal promotion, brand-wide discount, coupon cam
 
 Examples:
 
-* "Use code ALI10" → "ALI10"
-* "Use creator code ALI" → "ALI"
+* "Use code ALEX10" → "ALEX10"
+* "Use creator code ALEX" → "ALEX"
 
 If referral/discount-code evidence exists but no exact code text is visible, use:
 

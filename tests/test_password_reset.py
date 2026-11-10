@@ -81,11 +81,11 @@ class AgainstPostgres(unittest.TestCase):
         self.client = TestClient(api_app.app, raise_server_exceptions=False)
         with self.engine.begin() as conn:
             conn.execute(text("TRUNCATE creator_profiles, password_reset_tokens, login_failures RESTART IDENTITY CASCADE"))
-            for email, active in (("ali@example.test", True), ("off@example.test", False)):
+            for email, active in (("Alex@example.test", True), ("off@example.test", False)):
                 conn.execute(text("INSERT INTO creator_profiles (email, password_hash, is_active) VALUES (:e, :h, :a)"),
                              {"e": email, "h": hash_password(OLD), "a": active})
 
-    def ask(self, email="ali@example.test", expect="ok"):
+    def ask(self, email="Alex@example.test", expect="ok"):
         response = self.client.post("/auth/forgot-password", json={"email": email})
         self.assertEqual((response.status_code, response.json()), (200, {"status": expect}))
         return response
@@ -99,14 +99,14 @@ class AgainstPostgres(unittest.TestCase):
             return conn.execute(text("SELECT count(*) FROM password_reset_tokens")).scalar_one()
 
     def test_a_registered_account_gets_one_email_and_other_addresses_are_told_and_get_nothing(self):
-        self.ask("ali@example.test")
+        self.ask("Alex@example.test")
         self.assertEqual(len(self.sent), 1)
-        self.assertEqual(self.sent[0]["To"], "ali@example.test")
-        self.ask("ALI@example.test")   # case does not matter
+        self.assertEqual(self.sent[0]["To"], "Alex@example.test")
+        self.ask("Alex@example.test")   # case does not matter
         self.ask("nobody@example.test", "not_registered")
         self.ask("off@example.test", "inactive")
         self.ask("not an email", "invalid_email")
-        self.assertEqual([m["To"] for m in self.sent], ["ali@example.test", "ali@example.test"])   # nothing went to the others
+        self.assertEqual([m["To"] for m in self.sent], ["Alex@example.test", "Alex@example.test"])   # nothing went to the others
         self.assertEqual(self.rows(), 1)                                                          # and no link was made for them
 
     def test_the_token_is_stored_only_as_a_hash(self):
@@ -120,16 +120,16 @@ class AgainstPostgres(unittest.TestCase):
     def test_the_full_reset_flow(self):
         self.ask()
         token = self.token_from_mail()
-        self.assertEqual(self.client.get(f"/auth/password-reset/{token}").json(), {"status": "valid", "email": "ali@example.test"})
-        old_cookie = self.client.post("/auth/login", json={"email": "ali@example.test", "password": OLD}).cookies.get("access_token")
+        self.assertEqual(self.client.get(f"/auth/password-reset/{token}").json(), {"status": "valid", "email": "Alex@example.test"})
+        old_cookie = self.client.post("/auth/login", json={"email": "Alex@example.test", "password": OLD}).cookies.get("access_token")
         self.assertTrue(old_cookie)
         short = self.client.post("/auth/password-reset", json={"token": token, "password": "abcde"})
         self.assertEqual(short.status_code, 422)
         ok = self.client.post("/auth/password-reset", json={"token": token, "password": NEW})
-        self.assertEqual((ok.status_code, ok.json()), (200, {"status": "ok", "email": "ali@example.test"}))
+        self.assertEqual((ok.status_code, ok.json()), (200, {"status": "ok", "email": "Alex@example.test"}))
         # the new password works, the old one does not, and the old session is ended
-        self.assertEqual(self.client.post("/auth/login", json={"email": "ali@example.test", "password": NEW}).status_code, 200)
-        self.assertEqual(self.client.post("/auth/login", json={"email": "ali@example.test", "password": OLD}).status_code, 401)
+        self.assertEqual(self.client.post("/auth/login", json={"email": "Alex@example.test", "password": NEW}).status_code, 200)
+        self.assertEqual(self.client.post("/auth/login", json={"email": "Alex@example.test", "password": OLD}).status_code, 401)
         stale = TestClient(self.client.app, raise_server_exceptions=False)
         stale.cookies.set("access_token", old_cookie)
         self.assertEqual(stale.get("/auth/me").status_code, 401)
@@ -137,15 +137,15 @@ class AgainstPostgres(unittest.TestCase):
         self.assertEqual(self.client.get(f"/auth/password-reset/{token}").json(), {"status": "used", "email": None})
         again = self.client.post("/auth/password-reset", json={"token": token, "password": "another password"})
         self.assertEqual((again.status_code, again.json()["detail"]["status"]), (410, "used"))
-        self.assertEqual(self.client.post("/auth/login", json={"email": "ali@example.test", "password": "another password"}).status_code, 401)
+        self.assertEqual(self.client.post("/auth/login", json={"email": "Alex@example.test", "password": "another password"}).status_code, 401)
 
     def test_a_lockout_from_wrong_passwords_does_not_block_the_new_password(self):
         for _ in range(6):
-            self.client.post("/auth/login", json={"email": "ali@example.test", "password": "wrong wrong"})
+            self.client.post("/auth/login", json={"email": "Alex@example.test", "password": "wrong wrong"})
         self.ask()
         token = self.token_from_mail()
         self.assertEqual(self.client.post("/auth/password-reset", json={"token": token, "password": NEW}).status_code, 200)
-        self.assertEqual(self.client.post("/auth/login", json={"email": "ali@example.test", "password": NEW}).status_code, 200)
+        self.assertEqual(self.client.post("/auth/login", json={"email": "Alex@example.test", "password": NEW}).status_code, 200)
 
     def test_expired_unknown_and_replaced_links(self):
         self.ask()
@@ -164,7 +164,7 @@ class AgainstPostgres(unittest.TestCase):
         self.ask()
         token = self.token_from_mail()
         with self.engine.begin() as conn:
-            conn.execute(text("UPDATE creator_profiles SET is_active = false WHERE email = 'ali@example.test'"))
+            conn.execute(text("UPDATE creator_profiles SET is_active = false WHERE email = 'Alex@example.test'"))
         self.assertEqual(self.client.get(f"/auth/password-reset/{token}").json()["status"], "invalid")
         self.assertEqual(self.client.post("/auth/password-reset", json={"token": token, "password": NEW}).status_code, 410)
 

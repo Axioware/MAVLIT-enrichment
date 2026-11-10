@@ -34,7 +34,7 @@ class EmailAndToken(unittest.TestCase):
 
     def test_the_email_carries_the_link_in_text_and_html(self):
         link = inv.invite_link("TOKEN123")
-        message = inv.build_message("new@example.test", link, 30, "MAVLIT <hello@mavlit.com>", "Ali Ahmed")
+        message = inv.build_message("new@example.test", link, 30, "MAVLIT <hello@mavlit.com>", "Alex Ahmed")
         self.assertEqual(message["To"], "new@example.test")
         self.assertEqual(message["Subject"], inv.SUBJECT)
         self.assertTrue(message["Date"] and message["Message-ID"].endswith("@mavlit.com>"))
@@ -47,7 +47,7 @@ class EmailAndToken(unittest.TestCase):
             self.assertIn("The MAVLIT Team", part)
             self.assertIn("https://mavlit.com", part)
             self.assertNotIn("{{", part)
-        self.assertTrue(text_part.startswith("Hi Ali,\n"))
+        self.assertTrue(text_part.startswith("Hi Alex,\n"))
         self.assertIn("Set Up My Account", html_part)
         self.assertIn("Set Up My Account", text_part)
         self.assertIn("contact@mavlit.com", html_part)
