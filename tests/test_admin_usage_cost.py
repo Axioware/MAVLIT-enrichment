@@ -109,3 +109,19 @@ class UsageCostPage(unittest.TestCase):
 
     def test_the_page_is_behind_the_admin_login(self):
         self.assertEqual(TestClient(self.client.app, follow_redirects=False).get("/admin/usage-cost").status_code, 302)
+
+    def test_active_users_per_day_counts_each_person_once_and_counts_every_kind_of_activity(self):
+        from api import usage_dashboard
+        with self.engine.begin() as conn:
+            conn.execute(text("INSERT INTO creator_profiles (email, password_hash, is_active) VALUES ('two@example.test','x',true), ('three@example.test','x',true)"))
+            conn.execute(text("INSERT INTO llm_usage (model, endpoint, prompt_tokens, cached_tokens, completion_tokens, reasoning_tokens, creator_profile_id, created_at) VALUES "
+                              "('m','/e',0,0,0,0,1,now()), ('m','/e',0,0,0,0,1,now()), ('m','/e',0,0,0,0,NULL,now())"))   # user 1 twice today; a script call is nobody
+            conn.execute(text("INSERT INTO feature_usage (creator_profile_id, feature, used_on, uses) VALUES (2, 'pitches', current_date, 1), (1, 'pitches', current_date - 1, 1)"))
+            conn.execute(text("INSERT INTO contact_reveals (creator_profile_id, brand_raw_id, revealed_on) SELECT 3, id, current_date FROM (SELECT 1 AS id) b WHERE false"))
+        with Session(self.engine) as db:
+            rows = usage_dashboard.load(db, 7)["active_users"]
+        self.assertEqual(len(rows), 7)
+        today, yesterday = rows[-1], rows[-2]
+        self.assertEqual((today["users"], yesterday["users"]), (2, 1))   # users 1 and 2 today; only user 1 yesterday
+        self.assertEqual(today["actions"], 3)                           # user 1 twice + user 2 once (the script call is not counted)
+        self.assertTrue(all(r["users"] == 0 for r in rows[:-2]))

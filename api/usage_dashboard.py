@@ -106,6 +106,22 @@ def load(db, days: int, user_id: int | None = None) -> dict:
     out["daily_budget"] = daily_budget
     out["window_total"] = sum(r["llm"] + r["apify"] for r in daily)
 
+    # ---- active users per day: people who did anything that day (a paid call, a pitch, a saved brand, a daily-limit feature, a contact opened) ----
+    out["active_users"] = _rows(db, """
+        SELECT to_char(d, 'Mon DD') AS day, count(DISTINCT a.uid) AS users, count(a.uid) AS actions
+        FROM generate_series(current_date - (:d - 1), current_date, interval '1 day') d
+        LEFT JOIN (
+            SELECT creator_profile_id AS uid, created_at::date AS day FROM llm_usage WHERE creator_profile_id IS NOT NULL AND created_at >= current_date - :d
+            UNION ALL SELECT creator_profile_id, created_at::date FROM apify_usage WHERE creator_profile_id IS NOT NULL AND created_at >= current_date - :d
+            UNION ALL SELECT creator_profile_id, used_on FROM feature_usage WHERE used_on >= current_date - :d
+            UNION ALL SELECT creator_profile_id, revealed_on FROM contact_reveals WHERE revealed_on >= current_date - :d
+            UNION ALL SELECT creator_profile_id, created_at::date FROM pitches WHERE created_at >= current_date - :d
+            UNION ALL SELECT creator_profile_id, created_at::date FROM saved_brands WHERE created_at >= current_date - :d
+        ) a ON a.day = d::date
+        GROUP BY d ORDER BY d""", d=days)
+    for r in out["active_users"]:
+        r["users"], r["actions"] = int(r["users"]), int(r["actions"])
+
     # ---- enrichment scripts vs users ----
     split = _rows(db, f"""
         SELECT COALESCE(sum(cost) FILTER (WHERE creator_profile_id IS NULL), 0) AS scripts,
