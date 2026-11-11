@@ -235,11 +235,11 @@ class UsageCostPage(unittest.TestCase):
                               "('m','/e',0,0,0,0,1,'match_v3', now() - interval '2 days')"))
         with Session(self.engine) as db:
             d = usage_dashboard.load(db, 7)
-        self.assertEqual(d["feature_lines"], ["matches", "rate", "pitch", "description", "post_added", "post_removed", "own_brand", "contacts", "saved"])
+        self.assertEqual(d["feature_lines"], ["matches", "rate", "pitch", "description", "post_added", "own_brand", "contacts", "saved"])   # no "post_removed" line
         self.assertEqual(len(d["feature_daily"]), 7)                                      # one entry per day, the same days as the spend chart
         today_row, two_days_ago = d["feature_daily"][-1], d["feature_daily"][-3]
-        self.assertEqual(today_row["users"], {"matches": 2, "rate": 1, "pitch": 2, "description": 1, "post_added": 1, "post_removed": 1, "own_brand": 1, "contacts": 1, "saved": 1})
-        self.assertEqual(today_row["uses"],  {"matches": 3, "rate": 1, "pitch": 3, "description": 1, "post_added": 2, "post_removed": 1, "own_brand": 1, "contacts": 1, "saved": 1})
+        self.assertEqual(today_row["users"], {"matches": 2, "rate": 1, "pitch": 2, "description": 1, "post_added": 1, "own_brand": 1, "contacts": 1, "saved": 1})
+        self.assertEqual(today_row["uses"],  {"matches": 3, "rate": 1, "pitch": 3, "description": 1, "post_added": 2, "own_brand": 1, "contacts": 1, "saved": 1})   # the removed post is not counted anywhere
         # matches: user 1 ran it twice (5 minutes apart), user 2 once -> 2 users, 3 uses; the profile-tags call is not a line; the test account's pitch is ignored
         self.assertEqual((two_days_ago["users"]["matches"], two_days_ago["uses"]["matches"]), (1, 1))
         self.assertTrue(all(v == 0 for v in two_days_ago["users"].values() if v != two_days_ago["users"]["matches"]))

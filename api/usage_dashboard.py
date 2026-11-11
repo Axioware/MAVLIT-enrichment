@@ -57,13 +57,12 @@ _ACTIVITY = """
 """
 
 # The lines of the "feature use per day" chart, in the order the page shows them. Each activity (see _ACTIVITY) belongs to at most one line.
-FEATURE_LINES = ("matches", "rate", "pitch", "description", "post_added", "post_removed", "own_brand", "contacts", "saved")
+FEATURE_LINES = ("matches", "rate", "pitch", "description", "post_added", "own_brand", "contacts", "saved")   # removed posts are logged but not charted
 _LINE_CASE = """(CASE WHEN what = 'Ran AI brand matching' THEN 'matches'
                        WHEN grp = 'Rate estimates' THEN 'rate'
                        WHEN grp = 'Pitches' THEN 'pitch'
                        WHEN what = 'Generated profile description' THEN 'description'
                        WHEN what = 'Added an Instagram post' THEN 'post_added'
-                       WHEN what = 'Removed an Instagram post' THEN 'post_removed'
                        WHEN what LIKE 'Added their own brand%' THEN 'own_brand'
                        WHEN grp = 'Brand contacts' THEN 'contacts'
                        WHEN grp = 'Saved brands' THEN 'saved' END)"""
