@@ -30,6 +30,30 @@ _SPEND = f"""(SELECT created_at, 'llm' AS src, creator_profile_id, feature, COAL
               SELECT created_at, 'apify', creator_profile_id, feature, COALESCE(cost_usd, 0), label FROM apify_usage
               WHERE {_REAL})"""
 
+# One user's activity (:i = creator id), newest first when ordered by `at`: what they did and when, from the tables that record it. The paid AI calls of a
+# pitch / rate estimate / contract review are NOT listed again (the pitch, estimate and review rows already say so); matching and profile calls come in
+# bursts, so they are collapsed to one entry per minute. There is no log of pages opened, only of things that were done.
+_ACTIVITY = """
+    SELECT DISTINCT date_trunc('minute', created_at) AS at, 'Ran AI brand matching' AS what, 'Matching' AS grp
+        FROM llm_usage WHERE creator_profile_id = :i AND feature IN ('match_v2', 'match_v3', 'match_refresh')
+    UNION ALL SELECT DISTINCT date_trunc('minute', created_at), 'Generated profile description', 'Profile generation'
+        FROM llm_usage WHERE creator_profile_id = :i AND feature = 'description'
+    UNION ALL SELECT DISTINCT date_trunc('minute', created_at), 'Updated profile tags', 'Profile generation'
+        FROM llm_usage WHERE creator_profile_id = :i AND feature = 'profile_signals'
+    UNION ALL SELECT created_at, 'Created a pitch for ' || COALESCE(NULLIF(brand_name, ''), 'a brand'), 'Pitches'
+        FROM pitches WHERE creator_profile_id = :i
+    UNION ALL SELECT created_at, 'Estimated a rate for ' || COALESCE(NULLIF(brand_name, ''), 'a brand'), 'Rate estimates'
+        FROM rate_estimates WHERE creator_profile_id = :i
+    UNION ALL SELECT created_at, 'Reviewed a contract' || COALESCE(' with ' || NULLIF(brand_name, ''), ''), 'Contract reviews'
+        FROM contract_reviews WHERE creator_profile_id = :i
+    UNION ALL SELECT r.created_at, 'Opened the contacts of ' || COALESCE(b.name, 'a brand'), 'Brand contacts'
+        FROM contact_reveals r LEFT JOIN brands_raw b ON b.id = r.brand_raw_id WHERE r.creator_profile_id = :i
+    UNION ALL SELECT s.created_at, 'Saved ' || COALESCE(b.name, 'a brand'), 'Saved brands'
+        FROM saved_brands s LEFT JOIN brands_raw b ON b.id = s.brand_raw_id WHERE s.creator_profile_id = :i
+    UNION ALL SELECT created_at, 'Added their own brand @' || instagram_handle, 'Own brands'
+        FROM own_brand_jobs WHERE creator_profile_id = :i
+"""
+
 FEATURE_GROUPS = {
     "match_v2": "Matching", "match_v3": "Matching", "match_refresh": "Matching",
     "pitch": "Pitches", "rate_estimate": "Rate estimates", "contract_advice": "Contract reviews",
@@ -164,9 +188,9 @@ def load(db, days: int, user_id: int | None = None) -> dict:
                 near.append({"id": r["id"], "name": r["name"], "feature": DAILY_CAPS[r["feature"]][2], "uses": r["uses"], "cap": cap,
                              "pct": min(100, round(r["uses"] / cap * 100))})
     out["near_cap"] = sorted(near, key=lambda r: -r["pct"])[:15]
-    out["reveals"] = _bars(_rows(db, """SELECT c.email AS name, count(*) AS cost, count(DISTINCT r.brand_raw_id) AS brands
+    out["reveals"] = _bars(_rows(db, """SELECT r.creator_profile_id AS id, c.email AS name, count(*) AS cost, count(DISTINCT r.brand_raw_id) AS brands
                                          FROM contact_reveals r JOIN creator_profiles c ON c.id = r.creator_profile_id
-                                         WHERE r.revealed_on > current_date - :d AND lower(c.email) <> ALL(:excl) GROUP BY 1 ORDER BY 2 DESC LIMIT 10""", d=days))
+                                         WHERE r.revealed_on > current_date - :d AND lower(c.email) <> ALL(:excl) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 10""", d=days))
 
     # ---- health ----
     from api.usage_limits import job_lock_stale_seconds
@@ -209,9 +233,17 @@ def load(db, days: int, user_id: int | None = None) -> dict:
                                  WHERE creator_profile_id = :i AND {w} GROUP BY 1 ORDER BY 2 DESC""", i=user_id, d=days)
             recent = _rows(db, """SELECT created_at, model, left(COALESCE(context, ''), 60) AS context, COALESCE(cost_usd, 0) AS cost, duration_ms
                                   FROM llm_usage WHERE creator_profile_id = :i ORDER BY id DESC LIMIT 20""", i=user_id)
+            activity = _rows(db, _ACTIVITY + " ORDER BY at DESC LIMIT 20", i=user_id)
+            mix = _rows(db, "SELECT grp AS name, count(*) AS count FROM (" + _ACTIVITY + ") a WHERE at > now() - make_interval(days => :d) GROUP BY 1 ORDER BY 2 DESC",
+                        i=user_id, d=days)
         else:
-            by_f, recent = [], []
+            by_f, recent, activity, mix = [], [], [], []
         for r in recent:
             r["cost"] = _num(r["cost"]); r["created_at"] = r["created_at"].strftime("%b %d %H:%M") if r["created_at"] else ""
-        out["user"] = {"id": user_id, "email": who[0]["email"] if who else f"user #{user_id}", "features": _bars(by_f), "recent": recent}
+        top_count = max([int(r["count"]) for r in mix] + [1])
+        for r in mix:
+            r["count"] = int(r["count"]); r["pct"] = round(r["count"] / top_count * 100, 1)
+        out["user"] = {"id": user_id, "email": who[0]["email"] if who else f"user #{user_id}", "features": _bars(by_f), "recent": recent,
+                       "activity": [{"at": r["at"], "what": r["what"], "group": r["grp"]} for r in activity],   # what they did, newest first (no money)
+                       "activity_mix": mix}                                                                         # how many times per feature in the window, most used first
     return out

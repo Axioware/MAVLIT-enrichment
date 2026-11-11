@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -173,3 +174,33 @@ class UsageCostPage(unittest.TestCase):
         page = self.client.get("/admin/usage-cost").text
         for hidden in ("abdulrauf@axioware.tech", "abdulrauf_99", "abc@gmail.com", "model-4", "model-99", "handle2", "handle99"):
             self.assertNotIn(hidden.lower(), page.lower())
+
+    def test_one_users_activity_lists_what_they_did_with_the_time_and_counts_the_most_used_feature(self):
+        from api import usage_dashboard
+        from pipeline.db import BrandRaw, ContactReveal, Pitch, SavedBrand
+        with Session(self.engine) as s:
+            s.add_all([BrandRaw(name="Nike"), BrandRaw(name="Adidas")])
+            s.flush()
+            s.add_all([SavedBrand(creator_profile_id=1, brand_raw_id=1), ContactReveal(creator_profile_id=1, brand_raw_id=1, revealed_on=datetime.now(timezone.utc).date()),
+                       Pitch(creator_profile_id=1, brand_name="Nike", story="s", pitch_text="p", status="generated"),
+                       Pitch(creator_profile_id=1, brand_name="Adidas", story="s", pitch_text="p", status="generated")])
+            s.commit()
+        with self.engine.begin() as conn:   # a burst of 3 matching calls in one minute is ONE activity; a pitch's own AI calls are not listed again
+            conn.execute(text("INSERT INTO llm_usage (model, endpoint, prompt_tokens, cached_tokens, completion_tokens, reasoning_tokens, cost_usd, creator_profile_id, feature, created_at) VALUES "
+                              "('m','/e',0,0,0,0,0.1,1,'match_v3', now()), ('m','/e',0,0,0,0,0.1,1,'match_v3', now()), ('m','/e',0,0,0,0,0.1,1,'match_v3', now()), "
+                              "('m','/e',0,0,0,0,0.1,1,'pitch', now()), ('m','/e',0,0,0,0,0.1,1,'profile_signals', now() - interval '3 days')"))
+        with Session(self.engine) as db:
+            user = usage_dashboard.load(db, 30, user_id=1)["user"]
+        whats = [a["what"] for a in user["activity"]]
+        self.assertEqual(sorted(whats), sorted(["Ran AI brand matching", "Created a pitch for Nike", "Created a pitch for Adidas", "Opened the contacts of Nike", "Saved Nike",
+                                                "Updated profile tags"]))
+        self.assertEqual(whats.count("Ran AI brand matching"), 1)
+        times = [a["at"] for a in user["activity"]]
+        self.assertEqual(times, sorted(times, reverse=True))                                    # newest first
+        self.assertTrue(all(a["at"] is not None for a in user["activity"]))
+        mix = {m["name"]: m["count"] for m in user["activity_mix"]}
+        self.assertEqual(mix, {"Pitches": 2, "Matching": 1, "Brand contacts": 1, "Saved brands": 1, "Profile generation": 1})
+        self.assertEqual(user["activity_mix"][0]["name"], "Pitches")                            # the most used feature comes first
+        self.assertTrue(all("cost" not in a for a in user["activity"]))                          # activity carries no money
+        with Session(self.engine) as db:
+            self.assertEqual(usage_dashboard.load(db, 30)["reveals"][0]["id"], 1)               # the contacts list gives each user's id so a name can be clicked
