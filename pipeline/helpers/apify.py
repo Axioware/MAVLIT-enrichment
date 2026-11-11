@@ -1,6 +1,7 @@
 import contextvars
 import logging
 import os
+import re
 from contextlib import contextmanager
 
 from apify_client import ApifyClient
@@ -9,6 +10,52 @@ from apify_client.errors import ApifyApiError
 from config import APIFY_TOKEN
 
 logger = logging.getLogger(__name__)
+
+# The Instagram scraper (apify/instagram-scraper) every Instagram step uses. Its runs are recorded in apify_usage with an estimated cost.
+INSTAGRAM_ACTOR_ID = "shu8hvrXbJbY3Eb9W"
+_DEFAULT_INSTAGRAM_USD_PER_1000 = 2.30
+
+
+def instagram_usd_per_1000() -> float:
+    """Price of 1,000 results of the Instagram scraper in USD (APIFY_INSTAGRAM_USD_PER_1000, default 2.30)."""
+    raw = (os.environ.get("APIFY_INSTAGRAM_USD_PER_1000") or "").strip()
+    if not raw:
+        return _DEFAULT_INSTAGRAM_USD_PER_1000
+    try:
+        value = float(raw)
+        if value < 0:
+            raise ValueError
+        return value
+    except ValueError:
+        logger.warning("APIFY_INSTAGRAM_USD_PER_1000=%r is not a valid price: using %.2f", raw, _DEFAULT_INSTAGRAM_USD_PER_1000)
+        return _DEFAULT_INSTAGRAM_USD_PER_1000
+
+
+def instagram_cost_usd(results: int) -> float:
+    """Estimated cost of an Instagram scraper run that returned `results` items: results x price / 1,000."""
+    return round(max(int(results), 0) * instagram_usd_per_1000() / 1000, 6)
+
+
+def _handle_from_input(run_input: dict, label: str) -> str:
+    """The Instagram username a run was for (from its first profile URL), else the call's label."""
+    for url in (run_input.get("directUrls") or [])[:1]:
+        found = re.search(r"instagram\.com/([A-Za-z0-9._]+)/?$", str(url))
+        if found and found.group(1) not in ("p", "reel", "tv"):
+            return found.group(1)
+    return label or "instagram"
+
+
+def _record_instagram_run(actor_id: str, label: str, run_input: dict, results: int) -> None:
+    """Log a finished Instagram scraper run in apify_usage (who it was for, how many results, the estimated cost). Never raises."""
+    if actor_id != INSTAGRAM_ACTOR_ID:
+        return
+    try:
+        from pipeline.helpers.gpt_llm import record_apify_scrape   # lazy: gpt_llm must not load with this module
+
+        record_apify_scrape("instagram", _handle_from_input(run_input, label), int(run_input.get("resultsLimit") or 0), results,
+                            actor_id=actor_id, label=label)
+    except Exception:
+        logger.warning("Apify usage: could not record the Instagram run %r", label, exc_info=True)
 
 # Apify's own client defaults to waiting *indefinitely* for a run to finish
 # (timeout_secs / wait_secs both default to None) — a stuck actor run (a
@@ -130,6 +177,7 @@ def run_apify_actor(
         dataset_id = _run_field(run, "defaultDatasetId", "default_dataset_id")
         items = list(client.dataset(dataset_id).iterate_items())
         logger.info("%s%d items from Apify", prefix, len(items))
+        _record_instagram_run(actor_id, label, run_input, len(items))
         return items
     except ApifyApiError as exc:
         if "usage hard limit" in (exc.message or "").lower():

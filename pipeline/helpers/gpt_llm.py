@@ -122,21 +122,23 @@ def scoped(fn):
     return run
 
 
-def record_apify_scrape(platform: str, handle: str, posts_requested: int, posts_scraped: int) -> None:
+def record_apify_scrape(platform: str, handle: str, posts_requested: int, posts_scraped: int, *,
+                        actor_id: str | None = None, label: str | None = None) -> None:
     """
-    Log how many posts an Apify scrape returned for the MAVLIT user of the current
-    llm_usage_scope (no-op outside one). No cost is recorded. Never raises.
+    Log an Apify scrape in apify_usage: how many results it returned and, for Instagram, the estimated cost (results x the scraper's price per
+    1,000 results). It belongs to the MAVLIT user of the current llm_usage_scope; outside one (the enrichment scripts) creator_profile_id and
+    feature stay empty. Called by pipeline/helpers/apify.run_apify_actor for every Instagram run. Never raises.
     """
     scope = _usage_scope.get()
-    if scope is None:
-        return
     try:
         from pipeline.db import ApifyUsage, SessionLocal   # lazy, as in _record_usage
+        from pipeline.helpers.apify import instagram_cost_usd
 
         with SessionLocal() as db:
             db.add(ApifyUsage(
-                creator_profile_id=scope[0], feature=scope[1], platform=platform, handle=handle,
-                posts_requested=posts_requested, posts_scraped=posts_scraped,
+                creator_profile_id=scope[0] if scope else None, feature=scope[1] if scope else None, platform=platform, handle=handle,
+                posts_requested=posts_requested, posts_scraped=posts_scraped, actor_id=actor_id, label=label,
+                cost_usd=instagram_cost_usd(posts_scraped) if platform == "instagram" else None,
             ))
             db.commit()
     except Exception as exc:

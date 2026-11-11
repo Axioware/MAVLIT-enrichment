@@ -716,18 +716,23 @@ class EarlyAccessSignupAdmin(ModelView, model=EarlyAccessSignup):
 # --- people only look. Their privileges were already in the runtime role's plan (SELECT), so these pages add none.
 
 class ApifyUsageAdmin(ModelView, model=ApifyUsage):
-    """One row per Apify scrape a MAVLIT user triggered (profile generation, pitch post links): who, which account, posts asked for / read."""
+    """
+    One row per run of the Instagram scraper, from users and from the enrichment scripts: who (empty for a script), which account, results asked for /
+    returned and the ESTIMATED cost (results x $2.30 per 1,000, setting APIFY_INSTAGRAM_USD_PER_1000).
+    """
     name         = "Apify Usage"
     name_plural  = "Apify Usage"
     category     = "System"
     icon         = "fa-solid fa-spider"
     column_list  = "__all__"
-    column_labels = {ApifyUsage.creator_profile_id: "MAVLIT user id"}
-    column_searchable_list = [ApifyUsage.handle, ApifyUsage.feature]
+    column_labels = {ApifyUsage.creator_profile_id: "MAVLIT user id (empty = enrichment script)", ApifyUsage.cost_usd: "Cost (USD, estimated)",
+                     ApifyUsage.posts_scraped: "Results returned", ApifyUsage.posts_requested: "Results asked for"}
+    column_searchable_list = [ApifyUsage.handle, ApifyUsage.feature, ApifyUsage.label]
     column_sortable_list   = [c.name for c in ApifyUsage.__table__.columns]
     column_default_sort    = [(ApifyUsage.created_at, True)]
     column_filters = [AllUniqueStringValuesFilter(ApifyUsage.feature), AllUniqueStringValuesFilter(ApifyUsage.platform),
-                      OperationColumnFilter(ApifyUsage.creator_profile_id), OperationColumnFilter(ApifyUsage.created_at)]
+                      OperationColumnFilter(ApifyUsage.creator_profile_id), OperationColumnFilter(ApifyUsage.cost_usd),
+                      OperationColumnFilter(ApifyUsage.created_at)]
     can_create = can_edit = can_delete = False
     page_size  = 25
 

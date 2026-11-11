@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 from config import APIFY_TOKEN, OPENAI_KEY
 from pipeline.db import BrandRaw, CreatorProfile, InstagramPost, OwnBrandJob, Prompt, BatchSessionLocal, SessionLocal, normalize_niche
 from pipeline.helpers.apify import request_path
-from pipeline.helpers.gpt_llm import LLMUnavailableError, call_gpt_json, fill_template, llm_usage_scope, record_apify_scrape
+from pipeline.helpers.gpt_llm import LLMUnavailableError, call_gpt_json, fill_template, llm_usage_scope
 from pipeline.helpers.normalize import normalize
 from pipeline.helpers.prompts import BRAND_FROM_INSTAGRAM_DEFAULT_PROMPT, BRAND_FROM_INSTAGRAM_PROMPT_NAME
 
@@ -269,12 +269,11 @@ def scrape_and_save_posts(db: Session, brand: BrandRaw, handle: str, creator_id:
     from pipeline.enrichment.instagram_posts import _build_row, _scrape_handle   # lazy: avoids loading the scraper stack at import
     from pipeline.helpers.db import upsert_rows
 
-    items = _scrape_handle(handle, POSTS_TO_SCRAPE)
+    with llm_usage_scope(creator_id, "own_brand"):   # the run is recorded in apify_usage for this creator
+        items = _scrape_handle(handle, POSTS_TO_SCRAPE)
     if items is None:
         return None
     items = [i for i in items if isinstance(i, dict)]
-    with llm_usage_scope(creator_id, "own_brand"):
-        record_apify_scrape("instagram", handle, POSTS_TO_SCRAPE, len(items))
     rows = [r for r in (_build_row(brand.id, handle, item) for item in items) if r]
     if rows:
         upsert_rows(db, InstagramPost, rows, ["post_id"])

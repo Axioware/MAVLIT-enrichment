@@ -13,7 +13,6 @@ def _item(i):
 def stubs(monkeypatch):
     calls = {"scrape": 0}
     monkeypatch.setattr(d, "save_creator_posts", lambda *a, **k: 0)
-    monkeypatch.setattr(d, "record_apify_scrape", lambda *a, **k: None)
     monkeypatch.setattr(d, "sub_niche_options", lambda *a, **k: [])
     monkeypatch.setattr(d, "_get_description_prompt", lambda db: "{niche}{bio}{captions}{sub_niche_options}{followers}")
     monkeypatch.setattr(d, "call_gpt_json", lambda *a, **k: {"description": "ok"})

@@ -684,6 +684,12 @@ def _apply_migrations(engine: Engine, lock_timeout_ms: int | None = None, grant_
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS facebook_stats",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_followers INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_highest_views INTEGER",
+        "ALTER TABLE IF EXISTS apify_usage ADD COLUMN IF NOT EXISTS actor_id TEXT",
+        "ALTER TABLE IF EXISTS apify_usage ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(12,6)",
+        "ALTER TABLE IF EXISTS apify_usage ADD COLUMN IF NOT EXISTS label TEXT",
+        # Earlier rows: the Instagram scraper at its price of $2.30 per 1,000 results.
+        "UPDATE apify_usage SET actor_id = 'shu8hvrXbJbY3Eb9W', cost_usd = round(posts_scraped * 2.30 / 1000, 6) "
+        "WHERE cost_usd IS NULL AND platform = 'instagram'",
         "ALTER TABLE IF EXISTS creator_instagram_posts ADD COLUMN IF NOT EXISTS partnership_post BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS tiktok_handle",
         "ALTER TABLE creator_profiles DROP COLUMN IF EXISTS tiktok_followers",

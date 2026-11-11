@@ -842,10 +842,11 @@ class LlmUsage(Base):
 
 class ApifyUsage(Base):
     """
-    One row per Apify scrape a MAVLIT user triggered (e.g. "let MAVLIT generate
-    my description" scrapes their last Instagram posts). Only the number of
-    posts is recorded - no Apify cost. Written by gpt_llm.record_apify_scrape()
-    inside an llm_usage_scope; totals per user: the creator_llm_cost view.
+    One row per run of the Instagram scraper actor, from every caller: a MAVLIT user's actions (profile generation, pitch post links,
+    own-brand lookups: creator_profile_id and feature are set) and the enrichment scripts (instagram_posts, instagram_users,
+    content_creator_re, brand_instagram_profile, ...: creator_profile_id is NULL). Written by gpt_llm.record_apify_scrape(), which
+    pipeline/helpers/apify.run_apify_actor calls for every Instagram run. cost_usd is an ESTIMATE: results returned x the Instagram scraper's
+    price per 1,000 results (APIFY_INSTAGRAM_USD_PER_1000, default 2.30). Totals per user: the creator_llm_cost view.
     """
     __tablename__ = "apify_usage"
 
@@ -856,7 +857,10 @@ class ApifyUsage(Base):
     platform           = Column(Text)      # "instagram"
     handle             = Column(Text)
     posts_requested    = Column(Integer)
-    posts_scraped      = Column(Integer, nullable=False, default=0)
+    posts_scraped      = Column(Integer, nullable=False, default=0)   # results the run returned (what Apify bills per)
+    actor_id           = Column(Text)                                  # the Apify actor that ran
+    cost_usd           = Column(Numeric(12, 6))                       # estimated: posts_scraped x price per result
+    label              = Column(Text)                                  # the call's own label, e.g. "IGUsers @name (n=40)"
 
 
 class CreatorLlmCost(ViewBase):

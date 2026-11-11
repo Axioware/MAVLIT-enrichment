@@ -162,7 +162,7 @@ class AdminExportCap(unittest.TestCase):
             self.assertEqual(view.export_max_rows, 10000, view.identity)
         for view in api_app.admin.views:
             if not getattr(view, "can_export", True):
-                self.assertIn(view.identity, {"instagram-post", "instagram-user", "contract-review", "brand-contact", "creator-profile"})
+                self.assertIn(view.identity, {"instagram-post", "instagram-user", "contract-review", "brand-contact", "creator-profile", "account-invite", "password-reset-token", "contact-reveal", "login-failure"})
 
     def test_override_and_bad_value(self):
         code = "import api.app as a; print({v.export_max_rows for v in a.admin.views if getattr(v, 'can_export', False)})"
@@ -218,7 +218,7 @@ class ApifyRequestTimeouts(unittest.TestCase):
         from pipeline import pitch_posts
         db, creator = mock.MagicMock(), SimpleNamespace(id=1)
         with mock.patch.object(pitch_posts, "APIFY_TOKEN", "x"), mock.patch("pipeline.helpers.apify.APIFY_TOKEN", "x"), \
-                mock.patch.object(pitch_posts, "record_apify_scrape"):
+                mock.patch("pipeline.helpers.gpt_llm.record_apify_scrape"):
             pitch_posts._scrape_posts(db, creator, {"abc": "https://www.instagram.com/p/abc/"})
         self.assertEqual((self.FakeClient.calls[-1]["timeout_secs"], self.FakeClient.calls[-1]["wait_secs"]), (90, 90))
 

@@ -27,7 +27,7 @@ from config import APIFY_TOKEN
 from pipeline.creator_content.instagram_description import save_creator_posts
 from pipeline.db import CreatorInstagramPost, CreatorProfile
 from pipeline.helpers.apify import ApifyQuotaExceeded, request_path, run_apify_actor
-from pipeline.helpers.gpt_llm import llm_usage_scope, record_apify_scrape
+from pipeline.helpers.gpt_llm import llm_usage_scope
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ def _scrape_posts(db: Session, creator: CreatorProfile, urls: dict[str, str]) ->
         return {}
     db.commit()   # end the read transaction first: an Apify run can take minutes
     try:
-        with request_path():   # a person is waiting: 90 s, not the batch limit
+        with request_path(), llm_usage_scope(creator.id, "pitch"):   # a person is waiting: 90 s, not the batch limit; the run is recorded for them
             items = run_apify_actor(
                 _ACTOR_ID,
                 {"directUrls": list(urls.values()), "resultsType": "posts", "resultsLimit": len(urls)},
@@ -93,8 +93,6 @@ def _scrape_posts(db: Session, creator: CreatorProfile, urls: dict[str, str]) ->
         logger.warning("Pitch posts: Apify quota exceeded - using the URLs without details")
         return {}
     items = [i for i in (items or []) if isinstance(i, dict)]
-    with llm_usage_scope(creator.id, "pitch"):
-        record_apify_scrape("instagram", "post urls", len(urls), len(items))
 
     found: dict[str, dict] = {}
     by_owner: dict[str, list[dict]] = {}

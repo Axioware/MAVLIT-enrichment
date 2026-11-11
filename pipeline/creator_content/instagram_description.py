@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from pipeline.db import CreatorInstagramPost, Prompt
 from pipeline.enrichment.instagram_posts import _scrape_handle, _usernames_only
-from pipeline.helpers.gpt_llm import call_gpt_json, fill_template, record_apify_scrape
+from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import (
     CREATOR_AUDIENCE_DESCRIPTION_NOTE,
     CREATOR_AUDIENCE_NOTE,
@@ -300,7 +300,6 @@ def generate_instagram_description(
                 raise DescriptionError("Instagram could not be read right now. Please try again in a minute.")
             logger.warning("Instagram @%s: scrape failed, using the %d saved post(s)", handle, len(items))
         else:
-            record_apify_scrape("instagram", handle, _POSTS_LIMIT, len(fresh[:_POSTS_LIMIT]))
             # The scraper answers a username that does not exist (or is private) with an empty result or an "error" placeholder item.
             real = [item for item in fresh if not item.get("error") and (item.get("id") or item.get("metaData") or item.get("biography"))]
             if not real:
