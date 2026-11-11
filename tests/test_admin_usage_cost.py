@@ -141,3 +141,35 @@ class UsageCostPage(unittest.TestCase):
         self.assertEqual((today["users"], yesterday["users"]), (2, 1))   # users 1 and 2 today; only user 1 yesterday
         self.assertEqual(today["actions"], 3)                           # user 1 twice + user 2 once (the script call is not counted)
         self.assertTrue(all(r["users"] == 0 for r in rows[:-2]))
+
+    def test_test_accounts_and_deleted_accounts_are_left_out_of_everything(self):
+        from api import usage_dashboard
+        with self.engine.begin() as conn:
+            conn.execute(text("INSERT INTO creator_profiles (id, email, password_hash, is_active) VALUES "
+                              "(2, 'abdulrauf@axioware.tech', 'x', true), (3, 'Abdulrauf_99@Outlook.com', 'x', true), (4, 'abc@gmail.com', 'x', true)"))
+            for uid in (1, 2, 3, 4, 99):   # 1 = the real user; 2-4 = the owner's test accounts; 99 = an account that was deleted (no creator_profiles row)
+                conn.execute(text("INSERT INTO llm_usage (model, endpoint, prompt_tokens, cached_tokens, completion_tokens, reasoning_tokens, cost_usd, creator_profile_id, feature, created_at, duration_ms) "
+                                  "VALUES (:m, '/e', 10, 5, 1, 0, 1.0, :u, 'pitch', now(), 100)"), {"m": f"model-{uid}", "u": uid})
+                conn.execute(text("INSERT INTO apify_usage (creator_profile_id, feature, platform, handle, posts_scraped, cost_usd) VALUES (:u, 'description', 'instagram', :h, 10, 0.5)"),
+                             {"u": uid, "h": f"handle{uid}"})
+                conn.execute(text("INSERT INTO feature_usage (creator_profile_id, feature, used_on, uses) SELECT :u, 'pitches', current_date, 30 WHERE EXISTS (SELECT 1 FROM creator_profiles WHERE id = :u)"), {"u": uid})
+            conn.execute(text("INSERT INTO early_access_signups (email, handle, platform, niche, followers) VALUES "
+                              "('abc@gmail.com','a','instagram','music','10k-50k'), ('real@example.test','r','instagram','music','10k-50k')"))
+            conn.execute(text("INSERT INTO account_invites (email, token_hash, expires_at) VALUES ('abc@gmail.com','h1', now() + interval '1 day'), ('real@example.test','h2', now() + interval '1 day')"))
+        with Session(self.engine) as db:
+            d = usage_dashboard.load(db, 30)
+            blocked = usage_dashboard.load(db, 30, user_id=4)
+        self.assertAlmostEqual(d["cards"]["d30"], 1.5)                                            # only the real user: 1.0 OpenAI + 0.5 Apify
+        self.assertAlmostEqual(sum(r["llm"] + r["apify"] for r in d["daily"]), 1.5)
+        self.assertEqual([m["name"] for m in d["models"]], ["model-1"])                          # test and deleted accounts' models are not in the mix
+        self.assertEqual([u["name"] for u in d["users"]], ["member@example.test"])
+        self.assertEqual([a["name"] for a in d["apify"]], ["handle1"])
+        self.assertEqual(len(d["expensive"]) + len(d["slow"]), 2)                                 # one call each, the real user's
+        self.assertEqual(d["active_users"][-1]["users"], 1)                                       # one person was active today, not five
+        self.assertEqual([r["name"] for r in d["near_cap"]], ["member@example.test"])
+        self.assertEqual([f["n"] for f in d["funnel"]], [1, 1, 0])                                # the test account's sign-up and invitation are not counted
+        self.assertEqual(d["funnel_extra"]["accounts"], 1)
+        self.assertEqual((blocked["user"]["features"], blocked["user"]["recent"]), ([], []))     # opening a test account shows nothing
+        page = self.client.get("/admin/usage-cost").text
+        for hidden in ("abdulrauf@axioware.tech", "abdulrauf_99", "abc@gmail.com", "model-4", "model-99", "handle2", "handle99"):
+            self.assertNotIn(hidden.lower(), page.lower())
