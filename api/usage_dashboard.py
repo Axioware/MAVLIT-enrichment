@@ -56,6 +56,18 @@ _ACTIVITY = """
         FROM user_activity
 """
 
+# The lines of the "feature use per day" chart, in the order the page shows them. Each activity (see _ACTIVITY) belongs to at most one line.
+FEATURE_LINES = ("matches", "rate", "pitch", "description", "post_added", "post_removed", "own_brand", "contacts", "saved")
+_LINE_CASE = """(CASE WHEN what = 'Ran AI brand matching' THEN 'matches'
+                       WHEN grp = 'Rate estimates' THEN 'rate'
+                       WHEN grp = 'Pitches' THEN 'pitch'
+                       WHEN what = 'Generated profile description' THEN 'description'
+                       WHEN what = 'Added an Instagram post' THEN 'post_added'
+                       WHEN what = 'Removed an Instagram post' THEN 'post_removed'
+                       WHEN what LIKE 'Added their own brand%' THEN 'own_brand'
+                       WHEN grp = 'Brand contacts' THEN 'contacts'
+                       WHEN grp = 'Saved brands' THEN 'saved' END)"""
+
 FEATURE_GROUPS = {
     "match_v2": "Matching", "match_v3": "Matching", "match_refresh": "Matching",
     "pitch": "Pitches", "rate_estimate": "Rate estimates", "contract_advice": "Contract reviews",
@@ -134,6 +146,16 @@ def load(db, days: int, user_id: int | None = None) -> dict:
         GROUP BY d ORDER BY d""", d=days)
     for r in out["active_users"]:
         r["users"], r["actions"] = int(r["users"]), int(r["actions"])
+
+    # ---- each feature per day, for the multi-line chart: how many DIFFERENT users used it, and how many times it was used (several per user) ----
+    per_day: dict[tuple[str, str], tuple[int, int]] = {}
+    for r in _rows(db, "SELECT at::date AS day, " + _LINE_CASE + " AS line, count(DISTINCT uid) AS users, count(*) AS uses FROM (" + _ACTIVITY + """) a
+                        WHERE at >= current_date - (:d - 1) AND uid IN (SELECT id FROM creator_profiles WHERE lower(email) <> ALL(:excl)) AND """ + _LINE_CASE + """ IS NOT NULL
+                        GROUP BY 1, 2""", d=days):
+        per_day[(r["day"].strftime("%b %d"), r["line"])] = (int(r["users"]), int(r["uses"]))
+    out["feature_daily"] = [{"day": r["day"], "users": {k: per_day.get((r["day"], k), (0, 0))[0] for k in FEATURE_LINES},
+                             "uses": {k: per_day.get((r["day"], k), (0, 0))[1] for k in FEATURE_LINES}} for r in out["daily"]]   # same days as the spend chart
+    out["feature_lines"] = list(FEATURE_LINES)
 
     # ---- by feature (users), merged into friendly groups ----
     groups: dict[str, dict] = {}

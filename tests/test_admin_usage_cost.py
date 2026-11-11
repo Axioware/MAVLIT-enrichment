@@ -208,3 +208,38 @@ class UsageCostPage(unittest.TestCase):
         self.assertEqual([(u["id"], u["name"], u["count"], u["pct"]) for u in top], [(1, "member@example.test", 6, 100.0)])   # 2 pitches + matching + contacts + saved + the 3-day-old tag update
         self.assertEqual(top[0]["split"][0], ("Pitches", 2))                                    # its most used feature first
         self.assertNotIn("id", d["reveals"][0])                                                 # "Brand contacts opened per user" is a plain list again (no clickable user)
+
+    def test_feature_use_per_day_counts_users_and_uses_for_each_of_the_nine_lines(self):
+        from api import usage_dashboard
+        from pipeline.db import BrandRaw, ContactReveal, Pitch, SavedBrand
+        with self.engine.begin() as conn:
+            conn.execute(text("INSERT INTO creator_profiles (id, email, password_hash, is_active) VALUES (2, 'two@example.test', 'x', true), (3, 'abc@gmail.com', 'x', true)"))
+        with Session(self.engine) as s:
+            s.add(BrandRaw(name="Nike"))
+            s.flush()
+            today = datetime.now(timezone.utc).date()
+            s.add_all([Pitch(creator_profile_id=1, brand_name="A", story="s", pitch_text="p", status="generated"),                      # user 1: 2 pitches today
+                       Pitch(creator_profile_id=1, brand_name="B", story="s", pitch_text="p", status="generated"),
+                       Pitch(creator_profile_id=2, brand_name="C", story="s", pitch_text="p", status="generated"),                      # user 2: 1 pitch today  -> 2 users, 3 uses
+                       Pitch(creator_profile_id=3, brand_name="D", story="s", pitch_text="p", status="generated"),                      # a test account: ignored
+                       SavedBrand(creator_profile_id=1, brand_raw_id=1), ContactReveal(creator_profile_id=2, brand_raw_id=1, revealed_on=today)])
+            s.commit()
+        with self.engine.begin() as conn:
+            conn.execute(text("INSERT INTO rate_estimates (creator_profile_id, platform, deliverable_type, status) VALUES (1, 'instagram', 'reel', 'ok')"))
+            conn.execute(text("INSERT INTO own_brand_jobs (id, creator_profile_id, instagram_handle, status) VALUES ('j1', 2, 'mybrand', 'ready')"))
+            conn.execute(text("INSERT INTO user_activity (creator_profile_id, kind, detail) VALUES (1, 'instagram_post_added', 'Added an Instagram post'), "
+                              "(1, 'instagram_post_added', 'Added an Instagram post'), (2, 'instagram_post_removed', 'Removed an Instagram post')"))
+            conn.execute(text("INSERT INTO llm_usage (model, endpoint, prompt_tokens, cached_tokens, completion_tokens, reasoning_tokens, creator_profile_id, feature, created_at) VALUES "
+                              "('m','/e',0,0,0,0,1,'match_v3', now()), ('m','/e',0,0,0,0,1,'match_v3', now() - interval '5 minutes'), ('m','/e',0,0,0,0,2,'match_v3', now()), "
+                              "('m','/e',0,0,0,0,2,'description', now()), ('m','/e',0,0,0,0,2,'profile_signals', now()), "
+                              "('m','/e',0,0,0,0,1,'match_v3', now() - interval '2 days')"))
+        with Session(self.engine) as db:
+            d = usage_dashboard.load(db, 7)
+        self.assertEqual(d["feature_lines"], ["matches", "rate", "pitch", "description", "post_added", "post_removed", "own_brand", "contacts", "saved"])
+        self.assertEqual(len(d["feature_daily"]), 7)                                      # one entry per day, the same days as the spend chart
+        today_row, two_days_ago = d["feature_daily"][-1], d["feature_daily"][-3]
+        self.assertEqual(today_row["users"], {"matches": 2, "rate": 1, "pitch": 2, "description": 1, "post_added": 1, "post_removed": 1, "own_brand": 1, "contacts": 1, "saved": 1})
+        self.assertEqual(today_row["uses"],  {"matches": 3, "rate": 1, "pitch": 3, "description": 1, "post_added": 2, "post_removed": 1, "own_brand": 1, "contacts": 1, "saved": 1})
+        # matches: user 1 ran it twice (5 minutes apart), user 2 once -> 2 users, 3 uses; the profile-tags call is not a line; the test account's pitch is ignored
+        self.assertEqual((two_days_ago["users"]["matches"], two_days_ago["uses"]["matches"]), (1, 1))
+        self.assertTrue(all(v == 0 for v in two_days_ago["users"].values() if v != two_days_ago["users"]["matches"]))
