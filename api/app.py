@@ -83,6 +83,7 @@ from pipeline.db import (
     AccountInvite,
     ApifyUsage,
     ContactReveal,
+    UserActivity,
     FeatureLock,
     FeatureUsage,
     LoginFailure,
@@ -756,6 +757,22 @@ class ContactRevealAdmin(ModelView, model=ContactReveal):
     page_size  = 25
 
 
+class UserActivityAdmin(ModelView, model=UserActivity):
+    """What users did that no other table records (an Instagram post added or removed). Feeds the Usage & Cost page's activity views."""
+    name         = "User Activity"
+    name_plural  = "User Activity"
+    category     = "System"
+    icon         = "fa-solid fa-list-check"
+    column_list  = "__all__"
+    column_labels = {UserActivity.creator_profile_id: "MAVLIT user id"}
+    column_sortable_list = [c.name for c in UserActivity.__table__.columns]
+    column_default_sort  = [(UserActivity.created_at, True)]
+    column_filters = [AllUniqueStringValuesFilter(UserActivity.kind), OperationColumnFilter(UserActivity.creator_profile_id), OperationColumnFilter(UserActivity.created_at)]
+    can_create = can_edit = can_delete = False
+    can_export = False   # who did what
+    page_size  = 25
+
+
 class FeatureUsageAdmin(ModelView, model=FeatureUsage):
     """Daily use counters behind the per-user caps (pitches, rate estimates, match refreshes, ...)."""
     name         = "Feature Usage"
@@ -1259,6 +1276,7 @@ admin.add_view(CreatorBrandLlmV3RankingAdmin)
 admin.add_view(CreatorBrandLlmRankingAdmin)
 admin.add_view(ApifyUsageAdmin)
 admin.add_view(ContactRevealAdmin)
+admin.add_view(UserActivityAdmin)
 admin.add_view(FeatureUsageAdmin)
 admin.add_view(FeatureLockAdmin)
 admin.add_view(LoginFailureAdmin)

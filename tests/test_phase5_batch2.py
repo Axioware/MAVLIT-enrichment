@@ -162,7 +162,7 @@ class AdminExportCap(unittest.TestCase):
             self.assertEqual(view.export_max_rows, 10000, view.identity)
         for view in api_app.admin.views:
             if not getattr(view, "can_export", True):
-                self.assertIn(view.identity, {"instagram-post", "instagram-user", "contract-review", "brand-contact", "creator-profile", "account-invite", "password-reset-token", "contact-reveal", "login-failure"})
+                self.assertIn(view.identity, {"instagram-post", "instagram-user", "contract-review", "brand-contact", "creator-profile", "account-invite", "password-reset-token", "contact-reveal", "login-failure", "user-activity"})
 
     def test_override_and_bad_value(self):
         code = "import api.app as a; print({v.export_max_rows for v in a.admin.views if getattr(v, 'can_export', False)})"

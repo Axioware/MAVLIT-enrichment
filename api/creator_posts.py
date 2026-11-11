@@ -11,6 +11,7 @@ from api.auth import get_current_user
 from pipeline.creator_posts import MIN_POSTS, add_post, delete_post, get_post, list_posts, posts_query, set_partnership
 from pipeline.db import CreatorInstagramPost, CreatorProfile, get_db
 from pipeline.pitch_posts import post_code
+from pipeline.user_activity import POST_ADDED, POST_REMOVED, record_activity
 
 router = APIRouter(prefix="/creator-profile/me/posts", tags=["creator-posts"])
 
@@ -98,14 +99,17 @@ def add_my_post(body: AddPostRequest, db: Session = Depends(get_db), current_use
     Apify (a few seconds to a minute). Adding a post that is already on the profile returns it unchanged.
     """
     try:
-        row, _how = add_post(db, current_user, body.post_url)
+        row, how = add_post(db, current_user, body.post_url)
         if body.is_partnership_post and not row.partnership_post:
             row = set_partnership(db, row, True)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except LookupError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    return _item(row)
+    item = _item(row)
+    if how != "already_added":   # a post that was already on the profile is not an activity
+        record_activity(db, current_user.id, POST_ADDED)
+    return item
 
 
 def _own_post(db: Session, creator: CreatorProfile, post_id: int) -> CreatorInstagramPost:
@@ -244,4 +248,5 @@ def delete_my_post(post_id: int, db: Session = Depends(get_db), current_user: Cr
         delete_post(db, current_user.id, row)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    record_activity(db, current_user.id, POST_REMOVED)   # only when the post was really deleted (a refused delete raised above)
     return _response(db, current_user.id)

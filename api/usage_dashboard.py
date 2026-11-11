@@ -52,6 +52,8 @@ _ACTIVITY = """
         FROM saved_brands s LEFT JOIN brands_raw b ON b.id = s.brand_raw_id
     UNION ALL SELECT creator_profile_id, created_at, 'Added their own brand @' || instagram_handle, 'Own brands'
         FROM own_brand_jobs
+    UNION ALL SELECT creator_profile_id, created_at, detail, 'Instagram posts'
+        FROM user_activity
 """
 
 FEATURE_GROUPS = {
@@ -127,6 +129,7 @@ def load(db, days: int, user_id: int | None = None) -> dict:
             UNION ALL SELECT creator_profile_id, revealed_on FROM contact_reveals WHERE {_REAL} AND revealed_on >= current_date - :d
             UNION ALL SELECT creator_profile_id, created_at::date FROM pitches WHERE {_REAL} AND created_at >= current_date - :d
             UNION ALL SELECT creator_profile_id, created_at::date FROM saved_brands WHERE {_REAL} AND created_at >= current_date - :d
+            UNION ALL SELECT creator_profile_id, created_at::date FROM user_activity WHERE {_REAL} AND created_at >= current_date - :d
         ) a ON a.day = d::date
         GROUP BY d ORDER BY d""", d=days)
     for r in out["active_users"]:

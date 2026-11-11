@@ -58,6 +58,7 @@ CODE = {
     "content_creator_re": "SIU",                  # /content-creator-re/bulk-add
     "contract_reviews": "SI",                     # contract_advice
     "contact_reveals": "SI",                      # api/contact_access.py: the daily cap on contact reveals
+    "user_activity": "SI",                        # pipeline/user_activity.py: a usage record of what a user did (post added / removed)
     "creator_brand_llm_rankings": "SID",          # v2 ranking refresh = delete + insert
     "creator_brand_llm_v3_rankings": "SID",       # v3 ranking refresh = delete + insert
     "creator_instagram_posts": "SIUD",            # /creator-profile/me/posts
@@ -99,6 +100,7 @@ ADMIN = {
     "content_creator_re": (True, True, True),
     "contract_reviews": (True, True, True),
     "contact_reveals": (False, False, False),
+    "user_activity": (False, False, False),
     "creator_brand_llm_rankings": (False, False, False),
     "creator_brand_llm_v3_rankings": (False, False, False),
     "creator_instagram_posts": (False, False, True),

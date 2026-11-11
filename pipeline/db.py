@@ -912,6 +912,21 @@ class ContactReveal(Base):
     created_at           = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
+class UserActivity(Base):
+    """
+    Things a user did that no other table records (written by pipeline/user_activity.record_activity): "Added an Instagram post", "Removed an Instagram post".
+    Shown in the admin Usage & Cost page (a user's activity timeline and the Top 10 users by activity). A usage record only: nothing reads it to decide anything.
+    `detail` is the sentence shown in the timeline; `kind` groups it (the ranking's per-feature split).
+    """
+    __tablename__ = "user_activity"
+
+    id                 = Column(Integer, primary_key=True)
+    creator_profile_id = Column(Integer, ForeignKey("creator_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind               = Column(Text, nullable=False)   # "instagram_post_added" | "instagram_post_removed"
+    detail             = Column(Text, nullable=False)
+    created_at         = Column(TIMESTAMP(timezone=True), server_default=func.now(), index=True)
+
+
 class FeatureUsage(Base):
     """
     How many times a creator used a cost-bearing feature (pitch, rate estimate, contract review, ranking refresh, own brand, description
