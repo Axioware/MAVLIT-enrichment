@@ -2,12 +2,10 @@
 Numbers for the admin "Usage & Cost" page (api/app.py UsageDashboardAdmin). Read-only SQL over llm_usage and apify_usage (spend), feature_usage,
 contact_reveals, feature_locks, login_failures, own_brand_jobs, creator_profiles, early_access_signups and account_invites. Costs are the logged
 cost_usd values (NULL counts as 0; Apify's is an estimate). Rows with no creator_profile_id come from the enrichment scripts.
-Setting: USAGE_MONTHLY_BUDGET_USD (default 0 = no budget line).
 """
 import calendar
 import csv
 import io
-import os
 from datetime import datetime, timezone
 
 from sqlalchemy import text
@@ -33,13 +31,6 @@ FEATURE_GROUPS = {
 
 def parse_days(raw) -> int:
     return int(raw) if str(raw or "").isdigit() and int(raw) in DAY_CHOICES else 30
-
-
-def budget() -> float:
-    try:
-        return max(0.0, float(os.environ.get("USAGE_MONTHLY_BUDGET_USD") or 0))
-    except ValueError:
-        return 0.0
 
 
 def _num(v) -> float:
@@ -71,7 +62,7 @@ def load(db, days: int, user_id: int | None = None) -> dict:
     w = "created_at > now() - make_interval(days => :d)"
     out: dict = {"days": days, "choices": DAY_CHOICES}
 
-    # ---- spend cards, budget, projection, spike ----
+    # ---- spend cards, month-end projection, spike ----
     c = _rows(db, f"""
         SELECT COALESCE(sum(cost) FILTER (WHERE created_at >= current_date), 0) AS today,
                COALESCE(sum(cost) FILTER (WHERE created_at >= current_date - 7 AND created_at < current_date), 0) / 7 AS prev7_avg,
@@ -83,9 +74,6 @@ def load(db, days: int, user_id: int | None = None) -> dict:
     now = datetime.now(timezone.utc)
     dim = calendar.monthrange(now.year, now.month)[1]
     cards["projected"] = cards["month"] / max(now.day, 1) * dim
-    cards["budget"] = budget()
-    cards["budget_pct"] = round(cards["month"] / cards["budget"] * 100, 1) if cards["budget"] else 0
-    cards["projected_pct"] = round(cards["projected"] / cards["budget"] * 100, 1) if cards["budget"] else 0
     cards["spike"] = cards["prev7_avg"] > 0 and cards["today"] >= SPIKE_FACTOR * cards["prev7_avg"]
     out["cards"] = cards
 
@@ -95,15 +83,12 @@ def load(db, days: int, user_id: int | None = None) -> dict:
                COALESCE(sum(s.cost) FILTER (WHERE s.src = 'llm'), 0) AS llm, COALESCE(sum(s.cost) FILTER (WHERE s.src = 'apify'), 0) AS apify
         FROM generate_series(current_date - (:d - 1), current_date, interval '1 day') d
         LEFT JOIN {_SPEND} s ON s.created_at::date = d::date GROUP BY d ORDER BY d""", d=days)
-    daily_budget = cards["budget"] / 30
-    peak = max([_num(r["llm"]) + _num(r["apify"]) for r in daily] + [daily_budget, 1e-9])
+    peak = max([_num(r["llm"]) + _num(r["apify"]) for r in daily] + [1e-9])
     for r in daily:
         r["day"] = r["day"].strftime("%b %d")
         r["llm"], r["apify"] = _num(r["llm"]), _num(r["apify"])
         r["llm_pct"], r["apify_pct"] = round(r["llm"] / peak * 100, 1), round(r["apify"] / peak * 100, 1)
     out["daily"] = daily
-    out["budget_line_pct"] = round(daily_budget / peak * 100, 1) if daily_budget else None
-    out["daily_budget"] = daily_budget
     out["window_total"] = sum(r["llm"] + r["apify"] for r in daily)
 
     # ---- active users per day: people who did anything that day (a paid call, a pitch, a saved brand, a daily-limit feature, a contact opened) ----

@@ -66,24 +66,14 @@
       <div class="text-secondary small">{{ label }}</div><div class="h2 mb-0">{{ money(value) }}</div><div class="text-secondary small">{{ note }}</div>
     </div></div>
     {% endfor %}
-    <div class="card"><div class="card-body">
-      <div class="text-secondary small">Monthly budget</div>
-      {% if c.budget %}
-      <div class="h2 mb-1">{{ c.budget_pct }}%</div>
-      <div class="uc-bar {{ 'bad' if c.budget_pct >= 100 else 'warn' if c.projected_pct >= 100 else '' }}"><i data-w="{{ [c.budget_pct, 100]|min }}"></i></div>
-      <div class="text-secondary small">{{ money(c.month) }} of {{ money(c.budget) }}; on pace for {{ c.projected_pct }}%</div>
-      {% else %}<div class="h2 mb-0">not set</div><div class="text-secondary small">set USAGE_MONTHLY_BUDGET_USD in .env</div>{% endif %}
-    </div></div>
   </div>
 
   <div class="card"><div class="card-header"><h3 class="card-title">Spend per day ({{ d.days }} days: {{ money(d.window_total) }})</h3>
-      <div class="ms-auto small"><span class="uc-dot" style="background:#4f7cff"></span>OpenAI <span class="uc-dot ms-2" style="background:#f59f00"></span>Apify
-        {% if d.budget_line_pct %}<span class="uc-dot ms-2" style="background:#d63939"></span>daily budget ({{ money(d.daily_budget) }}){% endif %}</div></div>
+      <div class="ms-auto small"><span class="uc-dot" style="background:#4f7cff"></span>OpenAI <span class="uc-dot ms-2" style="background:#f59f00"></span>Apify</div></div>
     <div class="card-body"><div class="uc-chart">
       <div class="uc-days">{% for r in d.daily %}
         <div class="uc-day" title="{{ r.day }}: OpenAI {{ money(r.llm) }}, Apify {{ money(r.apify) }}"><i class="uc-apify" data-h="{{ r.apify_pct }}"></i><i class="uc-llm" data-h="{{ r.llm_pct }}"></i></div>
       {% endfor %}</div>
-      {% if d.budget_line_pct %}<div class="uc-line" data-b="{{ d.budget_line_pct }}"></div>{% endif %}
     </div>
     <div class="d-flex justify-content-between text-secondary small mt-1"><span>{{ d.daily[0].day }}</span><span>{{ d.daily[-1].day }}</span></div></div></div>
 

@@ -95,14 +95,18 @@ class UsageCostPage(unittest.TestCase):
         self.assertIn("step,openai_usd", csv_.text)
         self.assertIn("demographics", csv_.text)
 
-    def test_the_budget_line_and_the_limits_show_up(self):
+    def test_the_limits_show_up_and_there_is_no_budget_anywhere(self):
+        from api import usage_dashboard
         self.seed()
         with self.engine.begin() as conn:
             conn.execute(text("INSERT INTO feature_usage (creator_profile_id, feature, used_on, uses) VALUES (1, 'pitches', current_date, 29)"))
-        with mock.patch.dict(os.environ, {"USAGE_MONTHLY_BUDGET_USD": "10"}):
+        with mock.patch.dict(os.environ, {"USAGE_MONTHLY_BUDGET_USD": "10"}):   # the old setting does nothing now
             page = self.client.get("/admin/usage-cost").text
-        self.assertIn("daily budget", page)
+            with Session(self.engine) as db:
+                data = usage_dashboard.load(db, 30)
         self.assertIn("29 / 30", page)
+        self.assertNotIn("budget", page.lower())
+        self.assertFalse([k for k in data["cards"] if "budget" in k] + [k for k in data if "budget" in k])
 
     def test_an_empty_database_still_renders(self):
         self.assertEqual(self.client.get("/admin/usage-cost").status_code, 200)
