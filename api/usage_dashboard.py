@@ -34,24 +34,24 @@ _SPEND = f"""(SELECT created_at, 'llm' AS src, creator_profile_id, feature, COAL
 # pitch / rate estimate / contract review are NOT listed again (the pitch, estimate and review rows already say so); matching and profile calls come in
 # bursts, so they are collapsed to one entry per minute. There is no log of pages opened, only of things that were done.
 _ACTIVITY = """
-    SELECT DISTINCT date_trunc('minute', created_at) AS at, 'Ran AI brand matching' AS what, 'Matching' AS grp
-        FROM llm_usage WHERE creator_profile_id = :i AND feature IN ('match_v2', 'match_v3', 'match_refresh')
-    UNION ALL SELECT DISTINCT date_trunc('minute', created_at), 'Generated profile description', 'Profile generation'
-        FROM llm_usage WHERE creator_profile_id = :i AND feature = 'description'
-    UNION ALL SELECT DISTINCT date_trunc('minute', created_at), 'Updated profile tags', 'Profile generation'
-        FROM llm_usage WHERE creator_profile_id = :i AND feature = 'profile_signals'
-    UNION ALL SELECT created_at, 'Created a pitch for ' || COALESCE(NULLIF(brand_name, ''), 'a brand'), 'Pitches'
-        FROM pitches WHERE creator_profile_id = :i
-    UNION ALL SELECT created_at, 'Estimated a rate for ' || COALESCE(NULLIF(brand_name, ''), 'a brand'), 'Rate estimates'
-        FROM rate_estimates WHERE creator_profile_id = :i
-    UNION ALL SELECT created_at, 'Reviewed a contract' || COALESCE(' with ' || NULLIF(brand_name, ''), ''), 'Contract reviews'
-        FROM contract_reviews WHERE creator_profile_id = :i
-    UNION ALL SELECT r.created_at, 'Opened the contacts of ' || COALESCE(b.name, 'a brand'), 'Brand contacts'
-        FROM contact_reveals r LEFT JOIN brands_raw b ON b.id = r.brand_raw_id WHERE r.creator_profile_id = :i
-    UNION ALL SELECT s.created_at, 'Saved ' || COALESCE(b.name, 'a brand'), 'Saved brands'
-        FROM saved_brands s LEFT JOIN brands_raw b ON b.id = s.brand_raw_id WHERE s.creator_profile_id = :i
-    UNION ALL SELECT created_at, 'Added their own brand @' || instagram_handle, 'Own brands'
-        FROM own_brand_jobs WHERE creator_profile_id = :i
+    SELECT DISTINCT creator_profile_id AS uid, date_trunc('minute', created_at) AS at, 'Ran AI brand matching' AS what, 'Matching' AS grp
+        FROM llm_usage WHERE creator_profile_id IS NOT NULL AND feature IN ('match_v2', 'match_v3', 'match_refresh')
+    UNION ALL SELECT DISTINCT creator_profile_id, date_trunc('minute', created_at), 'Generated profile description', 'Profile generation'
+        FROM llm_usage WHERE creator_profile_id IS NOT NULL AND feature = 'description'
+    UNION ALL SELECT DISTINCT creator_profile_id, date_trunc('minute', created_at), 'Updated profile tags', 'Profile generation'
+        FROM llm_usage WHERE creator_profile_id IS NOT NULL AND feature = 'profile_signals'
+    UNION ALL SELECT creator_profile_id, created_at, 'Created a pitch for ' || COALESCE(NULLIF(brand_name, ''), 'a brand'), 'Pitches'
+        FROM pitches
+    UNION ALL SELECT creator_profile_id, created_at, 'Estimated a rate for ' || COALESCE(NULLIF(brand_name, ''), 'a brand'), 'Rate estimates'
+        FROM rate_estimates
+    UNION ALL SELECT creator_profile_id, created_at, 'Reviewed a contract' || COALESCE(' with ' || NULLIF(brand_name, ''), ''), 'Contract reviews'
+        FROM contract_reviews
+    UNION ALL SELECT r.creator_profile_id, r.created_at, 'Opened the contacts of ' || COALESCE(b.name, 'a brand'), 'Brand contacts'
+        FROM contact_reveals r LEFT JOIN brands_raw b ON b.id = r.brand_raw_id
+    UNION ALL SELECT s.creator_profile_id, s.created_at, 'Saved ' || COALESCE(b.name, 'a brand'), 'Saved brands'
+        FROM saved_brands s LEFT JOIN brands_raw b ON b.id = s.brand_raw_id
+    UNION ALL SELECT creator_profile_id, created_at, 'Added their own brand @' || instagram_handle, 'Own brands'
+        FROM own_brand_jobs
 """
 
 FEATURE_GROUPS = {
@@ -157,6 +157,21 @@ def load(db, days: int, user_id: int | None = None) -> dict:
             r["split"] = sorted(((k, v) for k, v in per_user.get(r["id"], {}).items()), key=lambda kv: -kv[1])
     out["users"] = _bars(top)
 
+    # ---- top users by ACTIVITY (how much they did, not what it cost), each with their per-feature split ----
+    busy = _rows(db, "SELECT a.uid AS id, c.email AS name, count(*) AS count FROM (" + _ACTIVITY + """) a JOIN creator_profiles c ON c.id = a.uid
+                     WHERE a.at > now() - make_interval(days => :d) AND lower(c.email) <> ALL(:excl) GROUP BY 1, 2 ORDER BY 3 DESC, 2 LIMIT 10""", d=days)
+    if busy:
+        mix_rows = _rows(db, "SELECT uid AS id, grp, count(*) AS count FROM (" + _ACTIVITY + """) a
+                              WHERE uid = ANY(:ids) AND at > now() - make_interval(days => :d) GROUP BY 1, 2""", ids=[r["id"] for r in busy], d=days)
+        per_busy: dict[int, list] = {}
+        for r in mix_rows:
+            per_busy.setdefault(r["id"], []).append((r["grp"], int(r["count"])))
+        top_busy = max(int(r["count"]) for r in busy)
+        for r in busy:
+            r["count"] = int(r["count"]); r["pct"] = round(r["count"] / top_busy * 100, 1)
+            r["split"] = sorted(per_busy.get(r["id"], []), key=lambda kv: -kv[1])   # most used feature first
+    out["activity_users"] = busy
+
     # ---- model mix and cached tokens ----
     models = _rows(db, f"""SELECT model AS name, COALESCE(sum(cost_usd), 0) AS cost, count(*) AS calls, COALESCE(sum(prompt_tokens), 0) AS prompt,
                            COALESCE(sum(cached_tokens), 0) AS cached FROM llm_usage WHERE {_REAL} AND {w} GROUP BY 1 ORDER BY 2 DESC""", d=days)
@@ -188,9 +203,9 @@ def load(db, days: int, user_id: int | None = None) -> dict:
                 near.append({"id": r["id"], "name": r["name"], "feature": DAILY_CAPS[r["feature"]][2], "uses": r["uses"], "cap": cap,
                              "pct": min(100, round(r["uses"] / cap * 100))})
     out["near_cap"] = sorted(near, key=lambda r: -r["pct"])[:15]
-    out["reveals"] = _bars(_rows(db, """SELECT r.creator_profile_id AS id, c.email AS name, count(*) AS cost, count(DISTINCT r.brand_raw_id) AS brands
+    out["reveals"] = _bars(_rows(db, """SELECT c.email AS name, count(*) AS cost, count(DISTINCT r.brand_raw_id) AS brands
                                          FROM contact_reveals r JOIN creator_profiles c ON c.id = r.creator_profile_id
-                                         WHERE r.revealed_on > current_date - :d AND lower(c.email) <> ALL(:excl) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 10""", d=days))
+                                         WHERE r.revealed_on > current_date - :d AND lower(c.email) <> ALL(:excl) GROUP BY 1 ORDER BY 2 DESC LIMIT 10""", d=days))
 
     # ---- health ----
     from api.usage_limits import job_lock_stale_seconds
@@ -233,8 +248,8 @@ def load(db, days: int, user_id: int | None = None) -> dict:
                                  WHERE creator_profile_id = :i AND {w} GROUP BY 1 ORDER BY 2 DESC""", i=user_id, d=days)
             recent = _rows(db, """SELECT created_at, model, left(COALESCE(context, ''), 60) AS context, COALESCE(cost_usd, 0) AS cost, duration_ms
                                   FROM llm_usage WHERE creator_profile_id = :i ORDER BY id DESC LIMIT 20""", i=user_id)
-            activity = _rows(db, _ACTIVITY + " ORDER BY at DESC LIMIT 20", i=user_id)
-            mix = _rows(db, "SELECT grp AS name, count(*) AS count FROM (" + _ACTIVITY + ") a WHERE at > now() - make_interval(days => :d) GROUP BY 1 ORDER BY 2 DESC",
+            activity = _rows(db, "SELECT at, what, grp FROM (" + _ACTIVITY + ") a WHERE uid = :i ORDER BY at DESC LIMIT 20", i=user_id)
+            mix = _rows(db, "SELECT grp AS name, count(*) AS count FROM (" + _ACTIVITY + ") a WHERE uid = :i AND at > now() - make_interval(days => :d) GROUP BY 1 ORDER BY 2 DESC",
                         i=user_id, d=days)
         else:
             by_f, recent, activity, mix = [], [], [], []

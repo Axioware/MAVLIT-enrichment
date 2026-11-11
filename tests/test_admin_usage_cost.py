@@ -203,4 +203,8 @@ class UsageCostPage(unittest.TestCase):
         self.assertEqual(user["activity_mix"][0]["name"], "Pitches")                            # the most used feature comes first
         self.assertTrue(all("cost" not in a for a in user["activity"]))                          # activity carries no money
         with Session(self.engine) as db:
-            self.assertEqual(usage_dashboard.load(db, 30)["reveals"][0]["id"], 1)               # the contacts list gives each user's id so a name can be clicked
+            d = usage_dashboard.load(db, 30)
+        top = d["activity_users"]                                                               # "Top 10 users by activity": ranked by how much they did
+        self.assertEqual([(u["id"], u["name"], u["count"], u["pct"]) for u in top], [(1, "member@example.test", 6, 100.0)])   # 2 pitches + matching + contacts + saved + the 3-day-old tag update
+        self.assertEqual(top[0]["split"][0], ("Pitches", 2))                                    # its most used feature first
+        self.assertNotIn("id", d["reveals"][0])                                                 # "Brand contacts opened per user" is a plain list again (no clickable user)
