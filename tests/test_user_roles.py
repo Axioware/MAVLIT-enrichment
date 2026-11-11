@@ -101,7 +101,7 @@ class Roles(unittest.TestCase):
         ok = admin.get("/usage/summary?days=7")
         self.assertEqual(ok.status_code, 200, ok.text[:300])
         self.assertEqual(ok.json()["days"], 7)
-        for key in ("cards", "daily", "features", "steps", "users", "models", "health", "funnel"):
+        for key in ("cards", "daily", "active_users", "features", "users", "models", "health", "funnel"):
             self.assertIn(key, ok.json())
         self.assertEqual(admin.get("/usage/summary?days=5").json()["days"], 30)   # a value that is not offered means 30
 

@@ -73,27 +73,39 @@ class UsageCostPage(unittest.TestCase):
         with self.engine.begin() as conn:
             conn.execute(text("INSERT INTO llm_usage (model, endpoint, prompt_tokens, cached_tokens, completion_tokens, reasoning_tokens, context, cost_usd, creator_profile_id, feature, created_at) VALUES "
                               "('gpt', '/chat/completions', 0, 0, 0, 0, 'pitch', 0.5, 1, 'pitch', now()),"
-                              "('gpt', '/chat/completions', 0, 0, 0, 0, 'demographics @nike', 0.25, NULL, NULL, now() - interval '2 days')"))
+                              "('script-model', '/chat/completions', 0, 0, 0, 0, 'demographics @nike', 0.25, NULL, NULL, now() - interval '2 days')"))   # an enrichment script's call
             conn.execute(text("INSERT INTO apify_usage (creator_profile_id, feature, platform, handle, posts_scraped, cost_usd) VALUES "
                               "(1, 'description', 'instagram', 'me', 20, 0.046), (NULL, NULL, 'instagram', 'nike', 40, 0.092)"))
 
-    def test_the_page_shows_the_totals_and_the_split_between_users_and_scripts(self):
+    def test_the_page_shows_only_what_users_spent_not_the_enrichment_scripts(self):
         self.seed()
         page = self.client.get("/admin/usage-cost")
         self.assertEqual(page.status_code, 200, page.text[:300])
-        for text_ in ("Usage &amp; Cost", "$0.888", "member@example.test", "demographics", "Enrichment scripts vs users", "Pitches", "Sign-up funnel", "Failed sign-ins"):
+        for text_ in ("Usage &amp; Cost", "$0.546", "member@example.test", "Pitches", "Sign-up funnel", "Failed sign-ins"):
             self.assertIn(text_, page.text)
+        for gone in ("$0.888", "script-model", "demographics", "Enrichment scripts", "nike"):   # the script's call and Apify run are not shown anywhere
+            self.assertNotIn(gone, page.text)
         if os.environ.get("UC_SAVE"):
             Path(os.environ["UC_SAVE"]).write_text(page.text)
 
-    def test_the_window_user_and_csv_options_work(self):
+    def test_every_cost_figure_leaves_the_enrichment_scripts_out(self):
+        from api import usage_dashboard
+        self.seed()
+        with Session(self.engine) as db:
+            d = usage_dashboard.load(db, 30)
+        self.assertAlmostEqual(d["cards"]["d30"], 0.546)                                      # 0.5 OpenAI + 0.046 Apify, both by the user
+        self.assertAlmostEqual(sum(r["llm"] + r["apify"] for r in d["daily"]), 0.546)         # the daily bars: the same total, no script cost
+        self.assertEqual([m["name"] for m in d["models"]], ["gpt"])                           # the script's model is not in the model mix
+        self.assertAlmostEqual(d["models"][0]["cost"], 0.5)
+        self.assertEqual([a["name"] for a in d["apify"]], ["me"])                             # the script's Apify run on "nike" is not listed
+        self.assertEqual([c["context"] for c in d["expensive"]], ["pitch"])
+        self.assertNotIn("steps", d)
+        self.assertNotIn("split", d)
+
+    def test_the_window_and_user_options_work(self):
         self.seed()
         for q in ("?days=7", "?days=90", "?days=999", "?user=1", "?user=999", "?user=abc"):
             self.assertEqual(self.client.get("/admin/usage-cost" + q).status_code, 200, q)
-        csv_ = self.client.get("/admin/usage-cost?format=csv")
-        self.assertEqual(csv_.headers["content-type"].split(";")[0], "text/csv")
-        self.assertIn("step,openai_usd", csv_.text)
-        self.assertIn("demographics", csv_.text)
 
     def test_the_limits_show_up_and_there_is_no_budget_anywhere(self):
         from api import usage_dashboard

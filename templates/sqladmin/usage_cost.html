@@ -78,11 +78,6 @@
     <div class="d-flex justify-content-between text-secondary small mt-1"><span>{{ d.daily[0].day }}</span><span>{{ d.daily[-1].day }}</span></div></div></div>
 
   <div class="uc-lists">
-    <div class="card"><div class="card-header"><h3 class="card-title">Enrichment scripts vs users</h3></div><div class="card-body">
-      <div class="uc-bar uc-thick"><i data-w="{{ d.split.scripts_pct }}" class="uc-scripts"></i></div>
-      <div class="d-flex justify-content-between mt-2"><span><span class="uc-dot" style="background:#f59f00"></span>Scripts {{ money(d.split.scripts) }} ({{ d.split.scripts_pct }}%)</span>
-        <span>Users {{ money(d.split.users) }} ({{ d.split.users_pct }}%)</span></div>
-    </div></div>
     <div class="card"><div class="card-header"><h3 class="card-title">By feature (users)</h3></div><div class="card-body">
       {% for r in d.features %}
       <div class="mb-3"><div class="uc-row"><span>{{ r.name }}</span><strong>{{ money(r.cost) }}</strong></div><div class="uc-bar"><i data-w="{{ r.pct }}"></i></div>
@@ -92,12 +87,6 @@
     <div class="card"><div class="card-header"><h3 class="card-title">Top 10 users</h3></div><div class="card-body">{{ bars(d.users) }}</div></div>
     <div class="card"><div class="card-header"><h3 class="card-title">Model mix and cached tokens</h3></div><div class="card-body">{{ bars(d.models) }}</div></div>
   </div>
-
-  <div class="card"><div class="card-header"><h3 class="card-title">Enrichment scripts by step (OpenAI + Apify)</h3>
-      <a class="btn btn-sm btn-outline-secondary ms-auto" href="?days={{ d.days }}&format=csv">Download CSV</a></div>
-    <div class="uc-scroll"><table class="table table-sm card-table"><thead><tr><th>Step</th><th>OpenAI</th><th>Apify</th><th>Total</th><th>Calls</th><th>Avg per call</th></tr></thead><tbody>
-      {% for r in d.steps %}<tr><td>{{ r.name }}</td><td>{{ money(r.llm) }}</td><td>{{ money(r.apify) }}</td><td><strong>{{ money(r.cost) }}</strong></td><td>{{ r.calls }}</td><td>{{ "%.4f"|format(r.avg) }}</td></tr>
-      {% else %}<tr><td colspan="6" class="text-secondary">No script spend in this window.</td></tr>{% endfor %}</tbody></table></div></div>
 
   <div class="uc-lists">
     {% for title, rows in [("Most expensive calls", d.expensive), ("Slowest calls", d.slow)] %}

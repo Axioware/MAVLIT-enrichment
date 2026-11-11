@@ -1,11 +1,10 @@
 """
 Numbers for the admin "Usage & Cost" page (api/app.py UsageDashboardAdmin). Read-only SQL over llm_usage and apify_usage (spend), feature_usage,
 contact_reveals, feature_locks, login_failures, own_brand_jobs, creator_profiles, early_access_signups and account_invites. Costs are the logged
-cost_usd values (NULL counts as 0; Apify's is an estimate). Rows with no creator_profile_id come from the enrichment scripts.
+cost_usd values (NULL counts as 0; Apify's is an estimate). Every cost here is what USERS spent: rows with no creator_profile_id (the enrichment
+scripts) are left out of all the cost figures and charts.
 """
 import calendar
-import csv
-import io
 from datetime import datetime, timezone
 
 from sqlalchemy import text
@@ -14,12 +13,12 @@ DAY_CHOICES = (7, 30, 90)
 SPIKE_FACTOR = 3.0         # "today" is flagged when it is this many times the average of the 7 days before
 NEAR_CAP = 0.8             # a user is "near" a daily limit from this share of it
 
-# every OpenAI call and every Instagram scraper run as one row shape
+# every OpenAI call and every Instagram scraper run that a USER caused, as one row shape (the enrichment scripts' rows have no user and are excluded)
 _SPEND = """(SELECT created_at, 'llm' AS src, creator_profile_id, feature, COALESCE(cost_usd, 0) AS cost, context AS label FROM llm_usage
+             WHERE creator_profile_id IS NOT NULL
              UNION ALL
-             SELECT created_at, 'apify', creator_profile_id, feature, COALESCE(cost_usd, 0), label FROM apify_usage)"""
-# "demographics @someone" -> "demographics"; "brand tier for brand_id=3" -> "brand tier for": the first words before an @, an id or a number
-_STEP = r"""COALESCE(NULLIF(array_to_string((regexp_split_to_array(regexp_replace(lower(COALESCE(label, '')), '\s+(@|\S*=|\(|[0-9]).*$', ''), '\s+'))[1:3], ' '), ''), '(no label)')"""
+             SELECT created_at, 'apify', creator_profile_id, feature, COALESCE(cost_usd, 0), label FROM apify_usage
+             WHERE creator_profile_id IS NOT NULL)"""
 
 FEATURE_GROUPS = {
     "match_v2": "Matching", "match_v3": "Matching", "match_refresh": "Matching",
@@ -47,15 +46,6 @@ def _bars(rows: list[dict], key: str = "cost") -> list[dict]:
         r[key] = _num(r[key])
         r["pct"] = round(r[key] / top * 100, 1)
     return rows
-
-
-def steps_csv(steps: list[dict]) -> str:
-    out = io.StringIO()
-    writer = csv.writer(out)
-    writer.writerow(["step", "openai_usd", "apify_usd", "total_usd", "calls", "avg_usd_per_call"])
-    for r in steps:
-        writer.writerow([r["name"], f"{r['llm']:.6f}", f"{r['apify']:.6f}", f"{r['cost']:.6f}", r["calls"], f"{r['avg']:.6f}"])
-    return out.getvalue()
 
 
 def load(db, days: int, user_id: int | None = None) -> dict:
@@ -107,15 +97,6 @@ def load(db, days: int, user_id: int | None = None) -> dict:
     for r in out["active_users"]:
         r["users"], r["actions"] = int(r["users"]), int(r["actions"])
 
-    # ---- enrichment scripts vs users ----
-    split = _rows(db, f"""
-        SELECT COALESCE(sum(cost) FILTER (WHERE creator_profile_id IS NULL), 0) AS scripts,
-               COALESCE(sum(cost) FILTER (WHERE creator_profile_id IS NOT NULL), 0) AS users FROM {_SPEND} s WHERE {w}""", d=days)[0]
-    scripts, users = _num(split["scripts"]), _num(split["users"])
-    total = scripts + users
-    out["split"] = {"scripts": scripts, "users": users, "scripts_pct": round(scripts / total * 100, 1) if total else 0,
-                    "users_pct": round(users / total * 100, 1) if total else 0}
-
     # ---- by feature (users), merged into friendly groups ----
     groups: dict[str, dict] = {}
     for r in _rows(db, f"""SELECT feature AS name, sum(cost) AS cost, count(*) AS calls FROM {_SPEND} s
@@ -124,16 +105,6 @@ def load(db, days: int, user_id: int | None = None) -> dict:
         g["cost"] += _num(r["cost"]); g["calls"] += int(r["calls"])
     feats = [{"name": k, "cost": v["cost"], "calls": v["calls"], "avg": v["cost"] / v["calls"] if v["calls"] else 0} for k, v in groups.items()]
     out["features"] = _bars(sorted(feats, key=lambda r: -r["cost"]))
-
-    # ---- by step (enrichment scripts), OpenAI and Apify together ----
-    steps = _rows(db, f"""
-        SELECT {_STEP} AS name, sum(cost) FILTER (WHERE src = 'llm') AS llm, sum(cost) FILTER (WHERE src = 'apify') AS apify,
-               sum(cost) AS cost, count(*) AS calls
-        FROM {_SPEND} s WHERE creator_profile_id IS NULL AND {w} GROUP BY 1 ORDER BY 4 DESC NULLS LAST LIMIT 40""", d=days)
-    for r in steps:
-        r["llm"], r["apify"], r["calls"] = _num(r["llm"]), _num(r["apify"]), int(r["calls"])
-        r["avg"] = _num(r["cost"]) / r["calls"] if r["calls"] else 0
-    out["steps"] = _bars(steps)
 
     # ---- top users with each one's per-feature split ----
     top = _rows(db, f"""
@@ -154,21 +125,21 @@ def load(db, days: int, user_id: int | None = None) -> dict:
 
     # ---- model mix and cached tokens ----
     models = _rows(db, f"""SELECT model AS name, COALESCE(sum(cost_usd), 0) AS cost, count(*) AS calls, COALESCE(sum(prompt_tokens), 0) AS prompt,
-                           COALESCE(sum(cached_tokens), 0) AS cached FROM llm_usage WHERE {w} GROUP BY 1 ORDER BY 2 DESC""", d=days)
+                           COALESCE(sum(cached_tokens), 0) AS cached FROM llm_usage WHERE creator_profile_id IS NOT NULL AND {w} GROUP BY 1 ORDER BY 2 DESC""", d=days)
     for r in models:
         r["cached_pct"] = round(int(r["cached"]) / int(r["prompt"]) * 100, 1) if r["prompt"] else 0
     out["models"] = _bars(models)
 
     # ---- expensive and slow calls ----
     cols = "created_at, model, left(COALESCE(context, '(no label)'), 60) AS context, COALESCE(cost_usd, 0) AS cost, duration_ms, creator_profile_id"
-    out["expensive"] = _rows(db, f"SELECT {cols} FROM llm_usage WHERE {w} ORDER BY cost_usd DESC NULLS LAST LIMIT 10", d=days)
-    out["slow"] = _rows(db, f"SELECT {cols} FROM llm_usage WHERE {w} AND duration_ms IS NOT NULL ORDER BY duration_ms DESC LIMIT 10", d=days)
+    out["expensive"] = _rows(db, f"SELECT {cols} FROM llm_usage WHERE creator_profile_id IS NOT NULL AND {w} ORDER BY cost_usd DESC NULLS LAST LIMIT 10", d=days)
+    out["slow"] = _rows(db, f"SELECT {cols} FROM llm_usage WHERE creator_profile_id IS NOT NULL AND {w} AND duration_ms IS NOT NULL ORDER BY duration_ms DESC LIMIT 10", d=days)
     for r in out["expensive"] + out["slow"]:
         r["cost"] = _num(r["cost"]); r["created_at"] = r["created_at"].strftime("%b %d %H:%M") if r["created_at"] else ""
 
     # ---- Apify: runs where fewer results came back than were asked for, and the dearest accounts ----
     out["apify"] = _rows(db, f"""SELECT COALESCE(handle, '?') AS name, count(*) AS runs, COALESCE(sum(posts_requested), 0) AS asked, sum(posts_scraped) AS got,
-                                 COALESCE(sum(cost_usd), 0) AS cost FROM apify_usage WHERE {w} GROUP BY 1 ORDER BY 5 DESC LIMIT 10""", d=days)
+                                 COALESCE(sum(cost_usd), 0) AS cost FROM apify_usage WHERE creator_profile_id IS NOT NULL AND {w} GROUP BY 1 ORDER BY 5 DESC LIMIT 10""", d=days)
     out["apify"] = _bars(out["apify"])
 
     # ---- limits: users near a daily cap today, and brand contacts opened ----

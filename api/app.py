@@ -929,8 +929,8 @@ class SendInviteAdmin(BaseView):
 
 class UsageDashboardAdmin(BaseView):
     """
-    "Usage & Cost": OpenAI and Apify spend, limits, health and the sign-up funnel, read-only. The queries live in api/usage_dashboard.py.
-    ?days=7|30|90 sets the window, ?user=<id> opens one user, ?format=csv downloads the per-step table.
+    "Usage & Cost": what USERS spent on OpenAI and Apify (the enrichment scripts' own cost is not counted), plus limits, health and the sign-up
+    funnel, read-only. The queries live in api/usage_dashboard.py. ?days=7|30|90 sets the window, ?user=<id> opens one user.
     """
     name = "Usage & Cost"
     icon = "fa-solid fa-chart-column"
@@ -946,12 +946,8 @@ class UsageDashboardAdmin(BaseView):
             with SessionLocal() as db:
                 return usage_dashboard.load(db, days, user_id)
         data = await anyio.to_thread.run_sync(load)
-        if request.query_params.get("format") == "csv":
-            from starlette.responses import Response
-            return Response(usage_dashboard.steps_csv(data["steps"]), media_type="text/csv",
-                            headers={"Content-Disposition": f'attachment; filename="usage-by-step-{days}d.csv"'})
         return await self.templates.TemplateResponse(request, "sqladmin/usage_cost.html",
-                                                     {"title": "Usage & Cost", "subtitle": f"OpenAI and Apify spend, last {days} days", "d": data})
+                                                     {"title": "Usage & Cost", "subtitle": f"User spend on OpenAI and Apify, last {days} days", "d": data})
 
 
 def invites_default_days() -> int:
