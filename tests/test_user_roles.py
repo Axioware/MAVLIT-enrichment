@@ -104,3 +104,14 @@ class Roles(unittest.TestCase):
         for key in ("cards", "daily", "features", "steps", "users", "models", "health", "funnel"):
             self.assertIn(key, ok.json())
         self.assertEqual(admin.get("/usage/summary?days=5").json()["days"], 30)   # a value that is not offered means 30
+
+
+class RoleCannotBeSetByAUser(unittest.TestCase):
+    def test_no_request_model_a_user_can_send_has_a_role_field(self):
+        import api.app as api_app
+        from api import schemas
+        self.assertNotIn("role", api_app.CreatorProfileRequest.model_fields)
+        for name, model in vars(schemas).items():
+            fields = getattr(model, "model_fields", None)
+            if fields is not None and name.endswith("Request"):
+                self.assertNotIn("role", fields, name)
