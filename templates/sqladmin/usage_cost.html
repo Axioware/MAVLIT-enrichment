@@ -1,0 +1,154 @@
+{% extends "sqladmin/layout.html" %}
+{% macro money(v) %}${{ "%.2f"|format(v) if v >= 1 else "%.3f"|format(v) }}{% endmacro %}
+{% macro bars(rows, unit="cost", extra=None) %}
+  {% for r in rows %}
+  <div class="mb-3">
+    <div class="uc-row"><span title="{{ r.name }}">{% if r.id is defined and r.id %}<a href="?days={{ d.days }}&user={{ r.id }}">{{ r.name }}</a>{% else %}{{ r.name }}{% endif %}</span>
+      <strong>{% if unit == "cost" %}{{ money(r.cost) }}{% else %}{{ r.cost|int }}{% endif %}</strong></div>
+    <div class="uc-bar"><i data-w="{{ r.pct }}"></i></div>
+    <div class="text-secondary small">
+      {% if r.calls is defined %}{{ r.calls }} call{{ "" if r.calls == 1 else "s" }}{% endif %}
+      {% if r.split is defined and r.split %}<br>{% for k, v in r.split %}{{ k }} {{ money(v) }}{{ " · " if not loop.last }}{% endfor %}{% endif %}
+      {% if r.cached_pct is defined %}{{ r.cached_pct }}% of prompt tokens cached{% endif %}
+      {% if r.brands is defined %}{{ r.brands }} brand{{ "" if r.brands == 1 else "s" }}{% endif %}
+      {% if r.runs is defined %}{{ r.runs }} run{{ "" if r.runs == 1 else "s" }}, {{ r.got }} of {{ r.asked }} results{% endif %}
+    </div>
+  </div>
+  {% else %}<p class="text-secondary mb-0">No data yet.</p>{% endfor %}
+{% endmacro %}
+{% block content %}
+<style>
+  .uc{width:100%;flex:1 1 100%;min-width:0;display:flex;flex-direction:column;gap:16px}
+  .uc-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:16px}
+  .uc-lists{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+  .uc .card{margin:0;min-width:0}
+  .uc-bar{height:10px;border-radius:5px;background:var(--tblr-border-color,#e6e7e9);overflow:hidden}
+  .uc-bar>i{display:block;height:100%;background:#4f7cff}
+  .uc-bar.warn>i{background:#f59f00}.uc-bar.bad>i{background:#d63939}
+  .uc-chart{position:relative;height:180px}
+  .uc-days{display:flex;align-items:flex-end;gap:3px;height:100%}
+  .uc-day{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;min-width:0}
+  .uc-day i{display:block;width:100%}
+  .uc-llm{background:#4f7cff}.uc-apify{background:#f59f00;border-radius:3px 3px 0 0}
+  .uc-line{position:absolute;left:0;right:0;border-top:2px dashed #d63939;pointer-events:none}
+  .uc-dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px}
+  .uc-row{display:flex;justify-content:space-between;gap:12px;font-size:.85rem}
+  .uc-row span{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .uc-row strong{flex:none}
+  .uc table{font-size:.82rem}
+  .uc td,.uc th{white-space:nowrap}.uc td.wrap{white-space:normal;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+  .uc-scroll{overflow-x:auto}
+  .uc-thick{height:18px}.uc-scripts{background:#f59f00!important}
+</style>
+{% set c = d.cards %}
+<div class="uc">
+  <div class="d-flex flex-wrap align-items-center gap-2">
+    <span class="text-secondary small">Window:</span>
+    {% for n in d.choices %}<a class="btn btn-sm {{ 'btn-primary' if n == d.days else 'btn-outline-secondary' }}" href="?days={{ n }}">{{ n }} days</a>{% endfor %}
+    {% if d.user %}<a class="btn btn-sm btn-outline-secondary ms-auto" href="?days={{ d.days }}">&larr; Back to all users</a>{% endif %}
+  </div>
+
+  {% if c.spike %}<div class="alert alert-danger mb-0" role="alert">Today's spend ({{ money(c.today) }}) is over 3&times; the daily average of the previous 7 days ({{ money(c.prev7_avg) }}). Check for a script stuck in a loop.</div>{% endif %}
+
+  {% if d.user %}
+  <div class="card"><div class="card-header"><h3 class="card-title">{{ d.user.email }}</h3></div><div class="card-body">
+    <div class="uc-lists">
+      <div><h4>Cost by feature ({{ d.days }} days)</h4>{{ bars(d.user.features) }}</div>
+      <div class="uc-scroll"><h4>Latest 20 calls</h4><table class="table table-sm"><tbody>
+        {% for r in d.user.recent %}<tr><td>{{ r.created_at }}</td><td class="wrap" title="{{ r.context }}">{{ r.context }}</td><td>{{ money(r.cost) }}</td><td>{{ r.duration_ms or "" }} ms</td></tr>
+        {% else %}<tr><td class="text-secondary">No calls.</td></tr>{% endfor %}</tbody></table></div>
+    </div></div></div>
+  {% endif %}
+
+  <div class="uc-cards">
+    {% for label, value, note in [("Today", c.today, "since midnight"), ("7 days", c.d7, "rolling"), ("30 days", c.d30, "rolling"), ("This month", c.month, "projected " ~ money(c.projected))] %}
+    <div class="card"><div class="card-body">
+      <div class="text-secondary small">{{ label }}</div><div class="h2 mb-0">{{ money(value) }}</div><div class="text-secondary small">{{ note }}</div>
+    </div></div>
+    {% endfor %}
+    <div class="card"><div class="card-body">
+      <div class="text-secondary small">Monthly budget</div>
+      {% if c.budget %}
+      <div class="h2 mb-1">{{ c.budget_pct }}%</div>
+      <div class="uc-bar {{ 'bad' if c.budget_pct >= 100 else 'warn' if c.projected_pct >= 100 else '' }}"><i data-w="{{ [c.budget_pct, 100]|min }}"></i></div>
+      <div class="text-secondary small">{{ money(c.month) }} of {{ money(c.budget) }}; on pace for {{ c.projected_pct }}%</div>
+      {% else %}<div class="h2 mb-0">not set</div><div class="text-secondary small">set USAGE_MONTHLY_BUDGET_USD in .env</div>{% endif %}
+    </div></div>
+  </div>
+
+  <div class="card"><div class="card-header"><h3 class="card-title">Spend per day ({{ d.days }} days: {{ money(d.window_total) }})</h3>
+      <div class="ms-auto small"><span class="uc-dot" style="background:#4f7cff"></span>OpenAI <span class="uc-dot ms-2" style="background:#f59f00"></span>Apify
+        {% if d.budget_line_pct %}<span class="uc-dot ms-2" style="background:#d63939"></span>daily budget ({{ money(d.daily_budget) }}){% endif %}</div></div>
+    <div class="card-body"><div class="uc-chart">
+      <div class="uc-days">{% for r in d.daily %}
+        <div class="uc-day" title="{{ r.day }}: OpenAI {{ money(r.llm) }}, Apify {{ money(r.apify) }}"><i class="uc-apify" data-h="{{ r.apify_pct }}"></i><i class="uc-llm" data-h="{{ r.llm_pct }}"></i></div>
+      {% endfor %}</div>
+      {% if d.budget_line_pct %}<div class="uc-line" data-b="{{ d.budget_line_pct }}"></div>{% endif %}
+    </div>
+    <div class="d-flex justify-content-between text-secondary small mt-1"><span>{{ d.daily[0].day }}</span><span>{{ d.daily[-1].day }}</span></div></div></div>
+
+  <div class="uc-lists">
+    <div class="card"><div class="card-header"><h3 class="card-title">Enrichment scripts vs users</h3></div><div class="card-body">
+      <div class="uc-bar uc-thick"><i data-w="{{ d.split.scripts_pct }}" class="uc-scripts"></i></div>
+      <div class="d-flex justify-content-between mt-2"><span><span class="uc-dot" style="background:#f59f00"></span>Scripts {{ money(d.split.scripts) }} ({{ d.split.scripts_pct }}%)</span>
+        <span>Users {{ money(d.split.users) }} ({{ d.split.users_pct }}%)</span></div>
+    </div></div>
+    <div class="card"><div class="card-header"><h3 class="card-title">By feature (users)</h3></div><div class="card-body">
+      {% for r in d.features %}
+      <div class="mb-3"><div class="uc-row"><span>{{ r.name }}</span><strong>{{ money(r.cost) }}</strong></div><div class="uc-bar"><i data-w="{{ r.pct }}"></i></div>
+        <div class="text-secondary small">{{ r.calls }} calls &middot; average {{ "%.4f"|format(r.avg) }} per call</div></div>
+      {% else %}<p class="text-secondary mb-0">No data yet.</p>{% endfor %}
+    </div></div>
+    <div class="card"><div class="card-header"><h3 class="card-title">Top 10 users</h3></div><div class="card-body">{{ bars(d.users) }}</div></div>
+    <div class="card"><div class="card-header"><h3 class="card-title">Model mix and cached tokens</h3></div><div class="card-body">{{ bars(d.models) }}</div></div>
+  </div>
+
+  <div class="card"><div class="card-header"><h3 class="card-title">Enrichment scripts by step (OpenAI + Apify)</h3>
+      <a class="btn btn-sm btn-outline-secondary ms-auto" href="?days={{ d.days }}&format=csv">Download CSV</a></div>
+    <div class="uc-scroll"><table class="table table-sm card-table"><thead><tr><th>Step</th><th>OpenAI</th><th>Apify</th><th>Total</th><th>Calls</th><th>Avg per call</th></tr></thead><tbody>
+      {% for r in d.steps %}<tr><td>{{ r.name }}</td><td>{{ money(r.llm) }}</td><td>{{ money(r.apify) }}</td><td><strong>{{ money(r.cost) }}</strong></td><td>{{ r.calls }}</td><td>{{ "%.4f"|format(r.avg) }}</td></tr>
+      {% else %}<tr><td colspan="6" class="text-secondary">No script spend in this window.</td></tr>{% endfor %}</tbody></table></div></div>
+
+  <div class="uc-lists">
+    {% for title, rows in [("Most expensive calls", d.expensive), ("Slowest calls", d.slow)] %}
+    <div class="card"><div class="card-header"><h3 class="card-title">{{ title }}</h3></div><div class="uc-scroll"><table class="table table-sm card-table"><tbody>
+      {% for r in rows %}<tr><td>{{ r.created_at }}</td><td class="wrap" title="{{ r.context }}">{{ r.context }}</td><td>{{ money(r.cost) }}</td><td>{{ ((r.duration_ms or 0) / 1000)|round(1) }}s</td></tr>
+      {% else %}<tr><td class="text-secondary">No calls yet.</td></tr>{% endfor %}</tbody></table></div></div>
+    {% endfor %}
+    <div class="card"><div class="card-header"><h3 class="card-title">Apify: dearest accounts</h3></div><div class="card-body">{{ bars(d.apify) }}</div></div>
+  </div>
+
+  <h3 class="mb-0 mt-2">Limits</h3>
+  <div class="uc-lists">
+    <div class="card"><div class="card-header"><h3 class="card-title">Users near a daily limit (today)</h3></div><div class="card-body">
+      {% for r in d.near_cap %}
+      <div class="mb-3"><div class="uc-row"><span><a href="?days={{ d.days }}&user={{ r.id }}">{{ r.name }}</a> &middot; {{ r.feature }}</span><strong>{{ r.uses }} / {{ r.cap }}</strong></div>
+        <div class="uc-bar {{ 'bad' if r.pct >= 100 else 'warn' }}"><i data-w="{{ r.pct }}"></i></div></div>
+      {% else %}<p class="text-secondary mb-0">Nobody is near a limit.</p>{% endfor %}
+    </div></div>
+    <div class="card"><div class="card-header"><h3 class="card-title">Brand contacts opened per user</h3></div><div class="card-body">{{ bars(d.reveals, "count") }}</div></div>
+  </div>
+
+  <h3 class="mb-0 mt-2">Health</h3>
+  <div class="uc-lists">
+    <div class="card"><div class="card-header"><h3 class="card-title">Jobs</h3></div><div class="card-body">
+      <p class="mb-2">{% if d.health.failed_total %}<strong class="text-danger">{{ d.health.failed_total }} failed</strong>{% else %}<strong class="text-success">No failed jobs</strong>{% endif %}
+        &middot; {% if d.health.stuck %}<strong class="text-danger">{{ d.health.stuck|length }} stuck</strong>{% else %}<strong class="text-success">none stuck</strong>{% endif %}</p>
+      {% for k, v in d.health.failed.items() if v %}<div class="uc-row"><span>{{ k }}</span><strong>{{ v }}</strong></div>{% endfor %}
+      {% for r in d.health.stuck %}<div class="uc-row text-danger"><span>{{ r.name }} &middot; {{ r.feature }}</span><strong>since {{ r.since }}</strong></div>{% endfor %}
+    </div></div>
+    <div class="card"><div class="card-header"><h3 class="card-title">Failed sign-ins by address</h3></div><div class="uc-scroll"><table class="table table-sm card-table"><thead><tr><th>IP</th><th>Failures</th><th>Emails</th><th>Last</th></tr></thead><tbody>
+      {% for r in d.failed_signins %}<tr><td>{{ r.name }}</td><td>{{ r.n }}</td><td>{{ r.emails }}</td><td>{{ r.last }}</td></tr>
+      {% else %}<tr><td colspan="4" class="text-secondary">None in this window.</td></tr>{% endfor %}</tbody></table></div></div>
+    <div class="card"><div class="card-header"><h3 class="card-title">Sign-up funnel</h3></div><div class="card-body">
+      {% for r in d.funnel %}<div class="mb-3"><div class="uc-row"><span>{{ r.name }}</span><strong>{{ r.n }}</strong></div><div class="uc-bar"><i data-w="{{ r.pct }}"></i></div></div>{% endfor %}
+      <div class="text-secondary small">{{ d.funnel_extra.accounts }} accounts in total &middot; {{ d.funnel_extra.signups_window }} new sign-ups in the last {{ d.days }} days</div>
+    </div></div>
+  </div>
+</div>
+<script>
+  document.querySelectorAll('.uc [data-w]').forEach(function (e) { e.style.width = e.dataset.w + '%'; });
+  document.querySelectorAll('.uc [data-h]').forEach(function (e) { e.style.height = e.dataset.h + '%'; });
+  document.querySelectorAll('.uc [data-b]').forEach(function (e) { e.style.bottom = e.dataset.b + '%'; });
+</script>
+{% endblock %}

@@ -703,6 +703,18 @@ def _apply_migrations(engine: Engine, lock_timeout_ms: int | None = None, grant_
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS password_hash TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false",
+        # Roles: every account is a "user" unless promoted. The first admins are set ONCE, in the same step that adds the column, so a later
+        # demotion in the admin is never undone by the next start.
+        """
+        DO $$ BEGIN
+            IF to_regclass('creator_profiles') IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM information_schema.columns WHERE table_name = 'creator_profiles' AND column_name = 'role') THEN
+                ALTER TABLE creator_profiles ADD COLUMN role TEXT NOT NULL DEFAULT 'user';
+                UPDATE creator_profiles SET role = 'admin' WHERE lower(email) IN
+                    ('abdulrauf@axioware.tech', 'alternativenationnet@gmail.com', 'brett@gmail.com', 'abc@gmail.com');
+            END IF;
+        END $$
+        """,
                 """
                 UPDATE prompts
                 SET name = 'creator_niche_description'

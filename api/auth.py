@@ -100,6 +100,13 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> Creator
     return user
 
 
+def get_admin_user(current_user: CreatorProfile = Depends(get_current_user)) -> CreatorProfile:
+    """Require a signed-in account whose role is "admin" (anyone else: 403)."""
+    if (current_user.role or "user") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+
 def get_current_user_optional(request: Request, db: Session = Depends(get_db)) -> CreatorProfile | None:
     """Like get_current_user, but returns None rather than raising when unauthenticated."""
     token = request.cookies.get("access_token")

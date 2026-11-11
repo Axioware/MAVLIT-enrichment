@@ -698,6 +698,7 @@ class CreatorProfile(Base):
     # admin typed for them).
     must_change_password = Column(Boolean, nullable=False, server_default="false", default=False)
     is_active     = Column(Boolean, nullable=False, server_default="true", default=True)
+    role          = Column(Text, nullable=False, server_default="user", default="user")   # "user" | "admin": admins may open the usage / cost page and its API
 
     #  Identity
     full_name        = Column(Text)

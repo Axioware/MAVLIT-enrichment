@@ -36,6 +36,7 @@ SINKS = {"text", "execute", "exec_driver_sql", "executemany", "from_statement", 
 ALLOWED_DYNAMIC = {
     "pipeline/db_grants.py": "DDL generator: role / database names pass IDENTIFIER, tables come from a fixed registry, literals go through literal()/quote()",
     "pipeline/migrations.py": "two DDL steps: a type-cast expression chosen from a fixed dict, and a GRANT whose privilege is checked against a fixed set and whose role is quoted",
+    "api/usage_dashboard.py": "admin report: the f-strings only splice in module constants (the shared spend subquery, the step expression, the time-window predicate); days, user ids and every other value are bound parameters",
     "pipeline/enrichment/wikidata_socials.py": "SPARQL, not SQL",
     "pipeline/enrichment_re/brand_wikidata_lookup.py": "SPARQL, not SQL",
     "pipeline/sources/wikidata.py": "SPARQL, not SQL",

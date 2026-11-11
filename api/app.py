@@ -31,6 +31,7 @@ from sqlalchemy.sql import Select
 from api.advisory import router as advisory_router
 from api.early_access import router as early_access_router
 from api.invites import router as invites_router
+from api.usage_api import router as usage_api_router
 from api.password_reset import router as password_reset_router
 from api.auth import (
     get_completed_user,
@@ -204,6 +205,7 @@ app.include_router(advisory_router)
 app.include_router(early_access_router)
 app.include_router(invites_router)
 app.include_router(password_reset_router)
+app.include_router(usage_api_router)
 
 # Lets a separate frontend app (different domain, see FRONTEND_ORIGINS in
 # config.py) call this API with credentials (cookies) from the browser.
@@ -925,6 +927,33 @@ class SendInviteAdmin(BaseView):
                                                      {"title": "Send Invitation", "subtitle": "Early-access invitations", "form": form, "result": result, "recent": rows})
 
 
+class UsageDashboardAdmin(BaseView):
+    """
+    "Usage & Cost": OpenAI and Apify spend, limits, health and the sign-up funnel, read-only. The queries live in api/usage_dashboard.py.
+    ?days=7|30|90 sets the window, ?user=<id> opens one user, ?format=csv downloads the per-step table.
+    """
+    name = "Usage & Cost"
+    icon = "fa-solid fa-chart-column"
+
+    @expose("/usage-cost", methods=["GET"], identity="usage-cost")
+    async def usage_cost(self, request: Request):
+        from api import usage_dashboard
+        days = usage_dashboard.parse_days(request.query_params.get("days"))
+        user = request.query_params.get("user")
+        user_id = int(user) if user and user.isdigit() else None
+
+        def load():
+            with SessionLocal() as db:
+                return usage_dashboard.load(db, days, user_id)
+        data = await anyio.to_thread.run_sync(load)
+        if request.query_params.get("format") == "csv":
+            from starlette.responses import Response
+            return Response(usage_dashboard.steps_csv(data["steps"]), media_type="text/csv",
+                            headers={"Content-Disposition": f'attachment; filename="usage-by-step-{days}d.csv"'})
+        return await self.templates.TemplateResponse(request, "sqladmin/usage_cost.html",
+                                                     {"title": "Usage & Cost", "subtitle": f"OpenAI and Apify spend, last {days} days", "d": data})
+
+
 def invites_default_days() -> int:
     from pipeline.early_access_invites import DEFAULT_DAYS
     return DEFAULT_DAYS
@@ -1125,6 +1154,10 @@ class CreatorProfileAdmin(ModelView, model=CreatorProfile):
         else:
             # Blank on edit — leave the existing hash untouched.
             data.pop("password_hash", None)
+        if "role" in data:
+            data["role"] = (str(data["role"] or "user")).strip().lower()
+            if data["role"] not in ("user", "admin"):
+                raise ValueError("Role must be user or admin")
         if "is_active" in data and not is_created and bool(data["is_active"]) != bool(model.is_active):
             revoke_sessions = True   # deactivated or reactivated: tokens issued before must not come back to life
         if revoke_sessions and not is_created:
@@ -1223,6 +1256,7 @@ admin.add_view(OwnBrandJobAdmin)
 admin.add_view(RateEstimateAdmin)
 admin.add_view(EarlyAccessSignupAdmin)
 admin.add_base_view(SendInviteAdmin)
+admin.add_base_view(UsageDashboardAdmin)
 admin.add_view(AccountInviteAdmin)
 admin.add_view(PasswordResetTokenAdmin)
 admin.add_view(CreatorBrandLlmV3RankingAdmin)
