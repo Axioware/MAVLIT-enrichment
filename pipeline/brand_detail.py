@@ -8,7 +8,7 @@ recomputing them:
     per-platform signal strength + last partnership date
   - BrandProfile for creator-tier fit, meta ads, sponsorship activity score
   - BrandContact for the top (marketing-first) contact
-  - BrandNiche for the long, Shopify-scraped description
+  - BrandRaw.description for the long, Shopify-scraped description
 """
 
 import re
@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from pipeline.db import BrandContact, BrandNiche, BrandProfile, BrandRaw
+from pipeline.db import BrandContact, BrandProfile, BrandRaw
 from pipeline.enrichment.initial_brand_scoring import _score_instagram, _score_youtube
 
 
@@ -139,12 +139,7 @@ def get_brand_detail(db: Session, brand_raw_id: int) -> dict | None:
         return None
     profile = db.query(BrandProfile).filter(BrandProfile.brand_raw_id == brand_raw_id).first()
 
-    niche_row = (
-        db.query(BrandNiche)
-        .filter(BrandNiche.brand_raw_id == brand_raw_id, BrandNiche.description.isnot(None))
-        .first()
-    )
-    long_description = niche_row.description if niche_row else brand.description
+    long_description = brand.description
 
     yt_pts, yt_details = _score_youtube(db, brand_raw_id)
     ig_pts, ig_details = _score_instagram(db, brand_raw_id)

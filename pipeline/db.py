@@ -14,17 +14,14 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
 )
+from sqlalchemy import and_
 from sqlalchemy.dialects.postgresql import JSONB, insert
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 from sqlalchemy.sql import func
 
-# Source trust scores (higher = more authoritative)
-SOURCE_CONFIDENCE = {
-    "wikidata":  100,
-    "wikipedia": 80,
-}
-
 from config import DATABASE_URL
+from pipeline.helpers.website import website_domain
 
 def _ms_env(name: str, default: int) -> int:
     """Millisecond setting from the environment; 0 disables it. A non-numeric or negative value raises ValueError."""
@@ -107,11 +104,11 @@ class BrandRaw(Base):
     wikidata_id       = Column(Text)
     entity_type       = Column(Text)
     description       = Column(Text)
-    wikipedia_url     = Column(Text)
+    # LLM-extracted sub-niche/category tags (e.g. ["sustainable clothing", "streetwear"]) from the
+    # brand's description; written by shopify_detect.py / own_brand.py. NULL until extracted.
+    tags              = Column(JSONB)
     niche             = Column(Text)
     source            = Column(Text)
-    source_confidence = Column(Integer)
-    source_url        = Column(Text)
     # True when content_creator_re's brand_check LLM sees this brand using
     # a creator discount/referral code in a confirmed partnership post.
     refferls          = Column(Boolean, nullable=False, server_default="false", default=False)
@@ -133,11 +130,7 @@ class BrandRaw(Base):
     audience_analysis_explanation = Column(Text)
     # Official website (P856) resolved at seed time
     website           = Column(Text)
-    domain            = Column(Text)
     country           = Column(Text)
-    headquarters      = Column(Text)
-    location          = Column(Text)
-    operating_area    = Column(Text)
     created_at        = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     #  Social media handles (from Wikidata Layer 1 enrichment)
@@ -148,7 +141,6 @@ class BrandRaw(Base):
     linkedin_id         = Column(Text)
 
     #  Website enrichment
-    has_official_website     = Column(Boolean)
     website_source           = Column(Text)   # 'wikidata' | 'none'
 
     #  Brand market tier
@@ -204,39 +196,14 @@ class BrandRaw(Base):
     def __str__(self) -> str:
         return self.name or f"Brand #{self.id}"
 
+    @hybrid_property
+    def has_website(self) -> bool:
+        """True when the brand has a website (replaces the old has_official_website column)."""
+        return bool(self.website)
 
-class BrandNiche(Base):
-    """
-    Many-to-many mirror of brands_raw.niche — a relational join table so a
-    brand can eventually carry more than one niche without changing
-    brands_raw's schema. Kept in sync automatically: insert_brand() and
-    insert_brands_batch() write a matching row here every time a brand is
-    newly inserted into brands_raw. brands_raw.niche itself is untouched and
-    still the single source of truth for existing code that reads it.
-    """
-    __tablename__ = "brands_niches"
-    __table_args__ = (
-        UniqueConstraint("brand_raw_id", "niche", name="uq_brand_niche"),
-    )
-
-    id           = Column(Integer, primary_key=True)
-    brand_raw_id = Column(Integer, ForeignKey("brands_raw.id"), nullable=False, index=True)
-    niche        = Column(Text, nullable=False, index=True)
-
-    # Mirrored from brands_raw.description whenever shopify_detect.py scrapes
-    # one (see that module) — kept here too so niche-tag extraction has a
-    # source text without needing to join back to brands_raw.
-    description  = Column(Text)
-    # LLM-extracted sub-niche/category tags derived from `description` via
-    # the LLM — e.g. ["sustainable clothing", "streetwear"] for a brand
-    # whose niche is just "fashion". NULL until shopify_detect.py finds a
-    # description to extract from.
-    tags         = Column(JSONB)
-
-    brand_raw = relationship("BrandRaw", lazy="selectin", foreign_keys=[brand_raw_id])
-
-    def __str__(self) -> str:
-        return f"{self.niche} — brand={self.brand_raw_id}"
+    @has_website.expression
+    def has_website(cls):
+        return and_(cls.website.isnot(None), cls.website != "")
 
 
 class YoutubeSponsorship(Base):
@@ -1077,6 +1044,34 @@ class OwnBrandJob(Base):
     updated_at          = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class RateBenchmark(Base):
+    """
+    The rate data behind Deal Tools > Rate Intelligence (pipeline/rate_intelligence.py): self-reported Instagram rate cards, one row per niche x follower bucket
+    x deliverable (creators, price points, min / max / average / median price in USD, and the views of those creators). First filled by the migration from
+    pipeline/rate_benchmark_seed.py (only when the table is empty); after that THIS TABLE is the source: change it with SQL as the table owner (there is no admin page). The
+    estimate reads it through a 60-second in-process cache, so a change shows up within a minute. It was a CSV file before.
+    """
+    __tablename__ = "rate_benchmarks"
+    __table_args__ = (UniqueConstraint("niche", "follower_bucket", "deliverable", name="uq_rate_benchmarks_niche_bucket_deliverable"),)
+
+    id                 = Column(Integer, primary_key=True)
+    niche              = Column(Text, nullable=False)   # "Beauty" | "Health & Fitness" | "Music & Dance"
+    follower_bucket    = Column(Text, nullable=False)   # "5k-25k" | "25k-50k" | "50k-100k" | "100k-300k" | "300k-600k" | "600k+"
+    deliverable        = Column(Text, nullable=False)   # "Reel" | "Post" | "Story" | "Live"
+    creators_in_bucket = Column(Integer, nullable=False)
+    price_points       = Column(Integer, nullable=False)
+    min_usd            = Column(Float, nullable=False)
+    max_usd            = Column(Float, nullable=False)
+    avg_usd            = Column(Float, nullable=False)
+    median_usd         = Column(Float, nullable=False)
+    views_creators     = Column(Integer, nullable=False, server_default="0", default=0)
+    views_min          = Column(Float)
+    views_max          = Column(Float)
+    views_avg          = Column(Float)
+    views_median       = Column(Float)
+    updated_at         = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class RateEstimate(Base):
     """A saved LLM rate-intelligence estimate for a creator/brand/deliverable combo."""
     __tablename__ = "rate_estimates"
@@ -1142,34 +1137,6 @@ class ContractReview(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     creator = relationship("CreatorProfile", lazy="selectin", foreign_keys=[creator_profile_id])
-
-
-class TestBrandsWithInstagramPosts(Base):
-    """
-    Scratch/test table — see test_active_sponsorships.py. Every eligible
-    brand with at least one instagram_posts row, plus post/active-creator
-    counts. Broader net than TestActiveSponsorship. Not part of the core
-    enrichment pipeline.
-    """
-    __tablename__ = "test_brands_with_instagram_posts"
-
-    id                      = Column(Integer, primary_key=True)
-    brand_raw_id            = Column(Integer, nullable=False, unique=True)
-    brand_name              = Column(Text)
-    brand_niche             = Column(Text)
-    brand_website           = Column(Text)
-    brand_instagram_handle  = Column(Text)
-    instagram_post_count    = Column(Integer)
-    active_creator_count    = Column(Integer)
-    generated_at            = Column(TIMESTAMP(timezone=True), server_default=func.now())
-
-
-class TestNiche(Base):
-    __tablename__ = "test_niches"
-
-    niche       = Column(Text, primary_key=True)
-    description = Column(Text)
-    embedding   = Column(Vector(1024))
 
 
 class FacebookBrandedContentCheck(Base):
@@ -1282,16 +1249,9 @@ def _brand_raw_fields(b: dict) -> dict:
         "wikidata_id":           b.get("wikidata_id") or None,
         "entity_type":           b.get("entity_type") or None,
         "description":           b.get("description") or None,
-        "wikipedia_url":         b.get("wikipedia_url") or None,
-        "source_confidence":     b.get("source_confidence"),
         "refferls":              bool(b.get("refferls")),
         "website":               website,
-        "domain":                b.get("domain") or None,
         "country":               b.get("country"),
-        "headquarters":          b.get("headquarters"),
-        "location":              b.get("location"),
-        "operating_area":        b.get("operating_area"),
-        "has_official_website":  True if website else None,
         "website_source":        "wikidata" if website else None,
         "instagram_handle":      b.get("instagram_handle") or None,
     }
@@ -1305,26 +1265,8 @@ def _row_values(b: dict) -> dict:
         "name_normalized": b.get("normalized"),
         "niche":           normalize_niche(b.get("niche")),
         "source":          b.get("source"),
-        "source_url":      b.get("source_url"),
         **_brand_raw_fields(b),
     }
-
-
-def _insert_brand_niches(db: Session, id_niche_pairs: list[tuple[int, str]]) -> None:
-    """Mirror each newly-inserted brand's niche into brands_niches."""
-    rows = [
-        {"brand_raw_id": bid, "niche": normalize_niche(niche)}
-        for bid, niche in id_niche_pairs
-        if niche
-    ]
-    if not rows:
-        return
-    stmt = (
-        insert(BrandNiche)
-        .values(rows)
-        .on_conflict_do_nothing(index_elements=["brand_raw_id", "niche"])
-    )
-    db.execute(stmt)
 
 
 def insert_brand(db: Session, brand: dict) -> bool:
@@ -1333,11 +1275,9 @@ def insert_brand(db: Session, brand: dict) -> bool:
         .values(**_row_values(brand))
         # on_conflict_do_nothing() with no args handles all unique constraints
         .on_conflict_do_nothing()
-        .returning(BrandRaw.id, BrandRaw.niche)
+        .returning(BrandRaw.id)
     )
     row = db.execute(stmt).first()
-    if row:
-        _insert_brand_niches(db, [(row.id, row.niche)])
     db.commit()
     return row is not None
 
@@ -1376,7 +1316,6 @@ def insert_brands_batch(db: Session, brands: list[dict]) -> int:
         lambda b: b["normalized"],
     )
     total = 0
-    inserted_niches: list[tuple[int, str]] = []
 
     for i in range(0, max(len(with_qid), 1), _CHUNK):
         chunk = with_qid[i : i + _CHUNK]
@@ -1389,10 +1328,9 @@ def insert_brands_batch(db: Session, brands: list[dict]) -> int:
             insert(BrandRaw)
             .values([_row_values(b) for b in chunk])
             .on_conflict_do_nothing()
-            .returning(BrandRaw.id, BrandRaw.niche)
+            .returning(BrandRaw.id)
         )
         rows = db.execute(stmt).all()
-        inserted_niches.extend((r.id, r.niche) for r in rows)
         total += len(rows)
 
     for i in range(0, max(len(without_qid), 1), _CHUNK):
@@ -1403,12 +1341,10 @@ def insert_brands_batch(db: Session, brands: list[dict]) -> int:
             insert(BrandRaw)
             .values([_row_values(b) for b in chunk])
             .on_conflict_do_nothing(index_elements=["name_normalized"])
-            .returning(BrandRaw.id, BrandRaw.niche)
+            .returning(BrandRaw.id)
         )
         rows = db.execute(stmt).all()
-        inserted_niches.extend((r.id, r.niche) for r in rows)
         total += len(rows)
 
-    _insert_brand_niches(db, inserted_niches)
     db.commit()
     return total

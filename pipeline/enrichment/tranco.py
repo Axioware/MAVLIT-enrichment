@@ -8,7 +8,7 @@ The list is downloaded once per process run and cached in memory.
 Sets in_tranco_list=True/False and tranco_rank=<int|None>.
 Sets tranco_checked=True for each processed brand.
 
-Only runs for brands that have a domain set.
+Only runs for brands that have a website set (the domain is derived from it).
 """
 
 import io
@@ -20,6 +20,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from pipeline.db import BrandRaw
+from pipeline.helpers.website import website_domain
 
 logger = logging.getLogger(__name__)
 
@@ -59,16 +60,15 @@ def _lookup(domain: str, tranco: dict[str, int]) -> tuple[bool, int | None]:
 
 def enrich_tranco(db: Session, limit: int = 500, brand_id: int | None = None) -> int:
     """
-    Process brands with domain set, has_official_website=True, and
+    Process brands with a website set and
     tranco_checked=False. Returns number of rows updated.
 
     Pass brand_id to target one specific brand directly — this bypasses the
-    has_official_website/tranco_checked filters (so you can re-run/test a
-    brand that was already processed), but domain must still be set.
+    tranco_checked filter (so you can re-run/test a
+    brand that was already processed), but a website must still be set.
     """
     query = db.query(BrandRaw).filter(
-        BrandRaw.domain.isnot(None),
-        BrandRaw.has_official_website.is_(True),
+        BrandRaw.has_website,
     )
     if brand_id is not None:
         query = query.filter(BrandRaw.id == brand_id)
@@ -78,7 +78,7 @@ def enrich_tranco(db: Session, limit: int = 500, brand_id: int | None = None) ->
     brands: list[BrandRaw] = query.limit(limit).all()
 
     if not brands:
-        logger.info("Tranco: no pending brands with domain")
+        logger.info("Tranco: no pending brands with a website")
         return 0
 
     try:
@@ -91,7 +91,8 @@ def enrich_tranco(db: Session, limit: int = 500, brand_id: int | None = None) ->
     updated = 0
 
     for brand in brands:
-        in_list, rank = _lookup(brand.domain, tranco)
+        domain = website_domain(brand.website)
+        in_list, rank = _lookup(domain, tranco) if domain else (False, None)
         brand.in_tranco_list = in_list
         brand.tranco_rank    = rank
         brand.tranco_checked = True

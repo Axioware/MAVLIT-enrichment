@@ -11,7 +11,7 @@ against the creator's profile:
 
   creator — niche(s), sub-niche tags, content_tags, description(s),
             embedding_text
-  brand   — name, niche, description, brands_niches tags
+  brand   — name, niche, description, tags
 
 Brands are sent in batches of _BATCH_SIZE (_WORKERS batches in parallel).
 Results replace the creator's previous rows in creator_brand_llm_rankings,
@@ -30,7 +30,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from sqlalchemy.orm import Session
 
-from pipeline.db import BrandNiche, CreatorBrandLlmRanking, CreatorProfile, Prompt
+from pipeline.db import CreatorBrandLlmRanking, CreatorProfile, Prompt
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template, scoped
 from pipeline.helpers.prompts import (
     LLM_BRAND_RANKING_DEFAULT_PROMPT,
@@ -81,26 +81,17 @@ def _creator_fields(creator: CreatorProfile) -> dict[str, str]:
 
 
 def _brand_payloads(db: Session, brands: list) -> list[dict]:
-    ids = [brand.id for brand in brands]
     tags_by_brand: dict[int, list[str]] = {}
-    niche_description: dict[int, str] = {}
-    for brand_raw_id, tags, description in (
-        db.query(BrandNiche.brand_raw_id, BrandNiche.tags, BrandNiche.description)
-        .filter(BrandNiche.brand_raw_id.in_(ids))
-        .all()
-    ):
-        if isinstance(tags, list):
-            bucket = tags_by_brand.setdefault(brand_raw_id, [])
-            bucket.extend(t.strip() for t in tags if isinstance(t, str) and t.strip() and t.strip() not in bucket)
-        if description and brand_raw_id not in niche_description:
-            niche_description[brand_raw_id] = description
+    for brand in brands:
+        if isinstance(brand.tags, list):
+            tags_by_brand[brand.id] = list(dict.fromkeys(t.strip() for t in brand.tags if isinstance(t, str) and t.strip()))
 
     return [
         {
             "id":          brand.id,
             "name":        brand.name,
             "niche":       brand.niche,
-            "description": ((brand.description or niche_description.get(brand.id) or "").strip()[:_DESCRIPTION_LIMIT]) or None,
+            "description": ((brand.description or "").strip()[:_DESCRIPTION_LIMIT]) or None,
             "tags":        tags_by_brand.get(brand.id, [])[:_TAG_LIMIT],
         }
         for brand in brands

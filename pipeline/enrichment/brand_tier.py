@@ -188,7 +188,7 @@ def _classify_brand_tier(db: Session, brand: BrandRaw) -> str | None:
         brand_name=name or "none provided",
         niche=brand.niche or "unknown",
         description=description[:800] or "none provided",
-        website=brand.website or brand.domain or "none provided",
+        website=brand.website or "none provided",
         instagram_handle=brand.instagram_handle or "none provided",
         username=username or "none provided",
         identification_note=note,

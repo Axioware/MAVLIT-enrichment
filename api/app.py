@@ -76,7 +76,6 @@ from pipeline.creator_content.youtube_description import generate_youtube_descri
 from pipeline.db import (
     BrandContact,
     BrandInstagramUser,
-    BrandNiche,
     BrandProfile,
     BrandRaw,
     ContentCreatorRE,
@@ -111,9 +110,7 @@ from pipeline.db import (
     BatchSessionLocal,
     SessionLocal,
     get_db,
-    TestBrandsWithInstagramPosts,
     TestCreatorBrandPartnershipPost,
-    TestNiche,
     YoutubeSponsorship,
     engine,
 )
@@ -279,8 +276,6 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
         BrandRaw.niche,
         BrandRaw.source,
         BrandRaw.website,
-        BrandRaw.domain,
-        BrandRaw.wikipedia_url,
         BrandRaw.country,
         BrandRaw.instagram_handle,
     ]
@@ -289,16 +284,6 @@ class BrandRawAdmin(ModelView, model=BrandRaw):
     page_size = 15
 
 
-class BrandNicheAdmin(ModelView, model=BrandNiche):
-    name         = "Brand Niche"
-    name_plural  = "Brand Niches"
-    icon         = "fa-solid fa-tags"
-    column_list  = "__all__"
-    column_labels = {BrandNiche.brand_raw: "Brand"}
-    column_searchable_list = [BrandNiche.niche, BrandNiche.description]
-    column_sortable_list   = [c.name for c in BrandNiche.__table__.columns]
-    column_default_sort    = [(BrandNiche.id, True)]
-    page_size = 15
 
 
 class MetaAdAdmin(ModelView, model=MetaAd):
@@ -335,31 +320,6 @@ class InstagramPostAdmin(ModelView, model=InstagramPost):
     column_sortable_list   = [c.name for c in InstagramPost.__table__.columns]
     column_default_sort    = [(InstagramPost.id, True)]
     can_export = False   # unbounded export of a large table
-    page_size = 15
-
-
-class TestBrandsWithInstagramPostsAdmin(ModelView, model=TestBrandsWithInstagramPosts):
-    name         = "Brand w/ IG Posts (test)"
-    name_plural  = "Brands w/ IG Posts (test)"
-    category     = "Test"
-    icon         = "fa-solid fa-flask"
-    column_list  = "__all__"
-    column_searchable_list = [TestBrandsWithInstagramPosts.brand_name]
-    column_sortable_list   = [c.name for c in TestBrandsWithInstagramPosts.__table__.columns]
-    column_default_sort    = [(TestBrandsWithInstagramPosts.instagram_post_count, True)]
-    page_size = 15
-
-
-class TestNicheAdmin(ModelView, model=TestNiche):
-    name         = "Niche (test)"
-    name_plural  = "Niches (test)"
-    category     = "Test"
-    icon         = "fa-solid fa-list"
-    column_list  = [TestNiche.niche, TestNiche.description]
-    column_searchable_list = [TestNiche.niche, TestNiche.description]
-    column_sortable_list   = [TestNiche.niche, TestNiche.description]
-    column_default_sort    = [(TestNiche.niche, False)]
-    form_excluded_columns  = [TestNiche.embedding]
     page_size = 15
 
 
@@ -490,7 +450,12 @@ class CreatorNicheAdmin(ModelView, model=CreatorNiche):
     name_plural  = "Creator Niches"
     category     = "Test"
     icon         = "fa-solid fa-id-card"
-    column_list  = "__all__"
+    # embedding is a pgvector column (a numpy array): sqladmin's list / detail rendering does `if value and isinstance(value, Enum)`, which raises
+    # "truth value of an array ... is ambiguous" (HTTP 500) for any row that has an embedding. Leave it out of the list, the detail page, sorting and
+    # the form (same as BrandProfileAdmin and CreatorProfileAdmin). Can't combine column_list with column_exclude_list.
+    column_exclude_list = [CreatorNiche.embedding]
+    column_details_exclude_list = [CreatorNiche.embedding]
+    form_excluded_columns = [CreatorNiche.embedding]
     column_labels = {
         CreatorNiche.instagram_user: "Instagram User",
     }
@@ -499,7 +464,7 @@ class CreatorNicheAdmin(ModelView, model=CreatorNiche):
         CreatorNiche.niche,
         CreatorNiche.description,
     ]
-    column_sortable_list = [c.name for c in CreatorNiche.__table__.columns]
+    column_sortable_list = [c.name for c in CreatorNiche.__table__.columns if c.name != "embedding"]
     column_default_sort = [(CreatorNiche.id, True)]
     page_size = 15
 
@@ -838,24 +803,6 @@ class PasswordResetTokenAdmin(ModelView, model=PasswordResetToken):
     page_size = 25
 
 
-class CreatorBrandLlmRankingAdmin(ModelView, model=CreatorBrandLlmRanking):
-    """The v2 AI ranking each creator got (replaced on every re-rank): brand, confidence, rank, reason."""
-    name         = "Match Ranking v2"
-    name_plural  = "Match Rankings v2"
-    category     = "System"
-    icon         = "fa-solid fa-ranking-star"
-    column_list  = [CreatorBrandLlmRanking.creator_profile_id, CreatorBrandLlmRanking.rank, CreatorBrandLlmRanking.brand_raw_id,
-                    CreatorBrandLlmRanking.confidence, CreatorBrandLlmRanking.reason, CreatorBrandLlmRanking.computed_at]
-    column_labels = {CreatorBrandLlmRanking.creator_profile_id: "MAVLIT user id", CreatorBrandLlmRanking.brand_raw_id: "Brand id"}
-    column_searchable_list = [CreatorBrandLlmRanking.reason]
-    column_sortable_list   = [c.name for c in CreatorBrandLlmRanking.__table__.columns if c.name != "reasons"]
-    column_default_sort    = [(CreatorBrandLlmRanking.computed_at, True)]
-    column_filters = [OperationColumnFilter(CreatorBrandLlmRanking.creator_profile_id), OperationColumnFilter(CreatorBrandLlmRanking.brand_raw_id),
-                      OperationColumnFilter(CreatorBrandLlmRanking.confidence)]
-    can_create = can_edit = can_delete = False
-    page_size  = 25
-
-
 class CreatorBrandLlmV3RankingAdmin(ModelView, model=CreatorBrandLlmV3Ranking):
     """The v3 AI ranking each creator got (the one shown on Matches; replaced on every re-rank): brand, confidence, rank, 'why it's a match'."""
     name         = "Match Ranking v3"
@@ -1042,6 +989,8 @@ class BrandProfileAdmin(ModelView, model=BrandProfile):
     # array. Must be excluded from column_list (can't combine column_list
     # with column_exclude_list) and from column_sortable_list.
     column_exclude_list = [BrandProfile.embedding]
+    column_details_exclude_list = [BrandProfile.embedding]   # the detail page lists every column unless told otherwise: it would 500 the same way
+    form_excluded_columns = [BrandProfile.embedding]         # and no form can edit a vector
     column_labels = {BrandProfile.brand_raw: "Brand"}
     column_searchable_list = ["brand_raw.name", BrandProfile.typical_creator_tier, BrandProfile.contact_mode]
     column_sortable_list = [c.name for c in BrandProfile.__table__.columns if c.name != "embedding"]
@@ -1223,12 +1172,9 @@ admin.add_view(BrandProfileAdmin)
 admin.add_view(BrandContactAdmin)
 admin.add_view(InitialBrandScoreAdmin)
 admin.add_view(BrandRawAdmin)
-admin.add_view(BrandNicheAdmin)
 admin.add_view(MetaAdAdmin)
 admin.add_view(YoutubeSponsorshipAdmin)
 admin.add_view(InstagramPostAdmin)
-admin.add_view(TestBrandsWithInstagramPostsAdmin)
-admin.add_view(TestNicheAdmin)
 admin.add_view(TestCreatorBrandPartnershipPostAdmin)
 admin.add_view(FacebookBrandedContentCheckAdmin)
 admin.add_view(CreatorNicheAdmin)
@@ -1249,7 +1195,6 @@ admin.add_base_view(SendInviteAdmin)
 admin.add_view(AccountInviteAdmin)
 admin.add_view(PasswordResetTokenAdmin)
 admin.add_view(CreatorBrandLlmV3RankingAdmin)
-admin.add_view(CreatorBrandLlmRankingAdmin)
 admin.add_view(ApifyUsageAdmin)
 admin.add_view(ContactRevealAdmin)
 admin.add_view(UserActivityAdmin)
@@ -1272,9 +1217,6 @@ class SeedRequest(BaseModel):
     niche:          Text200
     limit:          int | None  = Field(default=None, ge=1, le=5000)
     country:        Text200 | None  = None
-    headquarters:   Text200 | None  = None
-    location:       Text200 | None  = None
-    operating_area: Text200 | None  = None
     niche_label:    Text200 | None  = None
 
 
@@ -1378,9 +1320,6 @@ def _run_seed_job(job_id: str, body: SeedRequest) -> None:
             db=db,
             limit=body.limit,
             country=body.country,
-            headquarters=body.headquarters,
-            location=body.location,
-            operating_area=body.operating_area,
             niche_label=body.niche_label,
         )
         _jobs[job_id].update({"status": "done", "inserted": inserted})
@@ -1754,8 +1693,8 @@ def list_brand_category_niches():
     db = SessionLocal()
     try:
         rows = (
-            db.query(BrandNiche.niche)
-            .filter(BrandNiche.niche.isnot(None), BrandNiche.niche != "")
+            db.query(BrandRaw.niche)
+            .filter(BrandRaw.niche.isnot(None), BrandRaw.niche != "")
             .distinct()
             .all()
         )
@@ -1770,10 +1709,10 @@ def list_brand_category_niches():
 def list_brand_category_tags(niche: Annotated[list[Annotated[str, Field(max_length=100)]], Query(max_length=20)] = []):
     """
     Options for the creator-profile "Brand categories to avoid" fields:
-    distinct brands_niches.tags of brands in the requested primary niche(s),
+    distinct brands_raw.tags of brands in the requested primary niche(s),
     e.g. /brand-category-tags?niche=Music&niche=Beauty.
 
-    A niche matches any brands_niches.niche that contains it
+    A niche matches any brands_raw.niche that contains it
     (case-insensitive), so "Health" also covers "Health & Wellness".
     Tags are deduped case-insensitively. Returns {"tags_by_niche": {niche:
     [tags...]}} keyed by each requested niche exactly as passed. Selecting
@@ -1789,7 +1728,7 @@ def list_brand_category_tags(niche: Annotated[list[Annotated[str, Field(max_leng
         for name in requested:
             rows = db.execute(text("""
                 SELECT DISTINCT trim(tag)
-                FROM brands_niches,
+                FROM brands_raw,
                      jsonb_array_elements_text(tags) AS tag
                 WHERE jsonb_typeof(tags) = 'array'
                   AND niche ILIKE :pattern ESCAPE '\\'
@@ -1812,7 +1751,7 @@ def list_creator_sub_niches():
     try:
         rows = db.execute(text("""
             SELECT DISTINCT tag
-            FROM brands_niches,
+            FROM brands_raw,
                  jsonb_array_elements_text(tags) AS tag
             WHERE jsonb_typeof(tags) = 'array'
               AND tag <> ''
@@ -1827,7 +1766,7 @@ def list_creator_sub_niches():
 @cached_niche("brand-niche-tags")
 def list_brand_niche_tags():
     """
-    Sub-niche/category tags from brands_niches.tags — LLM-extracted in
+    Sub-niche/category tags from brands_raw.tags — LLM-extracted in
     shopify_detect.py from each brand's scraped about-page description
     (e.g. ["sustainable clothing", "streetwear"]), grouped by the brand's
     primary niche. Returned both as a flat distinct list and as a
@@ -1835,13 +1774,13 @@ def list_brand_niche_tags():
     multi-select based on the primary niche(s) the creator has chosen.
 
     A brand matches in the Stage 3 hard filter (matcher.py) when the
-    creator's sub_niches overlap with that brand's brands_niches.tags.
+    creator's sub_niches overlap with that brand's brands_raw.tags.
     """
     db = SessionLocal()
     try:
         rows = db.execute(text("""
             SELECT niche, jsonb_array_elements_text(tags) AS tag
-            FROM brands_niches
+            FROM brands_raw
             WHERE jsonb_typeof(tags) = 'array'
         """)).fetchall()
 

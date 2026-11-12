@@ -47,11 +47,11 @@ _BRAND_QUERY_SQL = """
         WHERE tcbp.brand_raw_id = br.id AND tcbp.brand_name IS NOT NULL
         LIMIT 1
       )) AS brand_name,
-      br.has_official_website,
+      (br.website IS NOT NULL AND br.website <> '') AS has_official_website,
       br.description,
       CASE
-        WHEN br.has_official_website = false THEN 'no_website'
-        WHEN br.has_official_website = true AND br.description IS NULL
+        WHEN br.website IS NULL OR br.website = '' THEN 'no_website'
+        WHEN br.description IS NULL
           THEN 'website_but_description_null'
       END AS reason
     FROM brands_raw br
@@ -79,8 +79,8 @@ _BRAND_QUERY_SQL = """
       AND br.product_audience_age_confidence IS NULL
       AND br.audience_analysis_explanation IS NULL
       AND (
-        br.has_official_website = false
-        OR (br.has_official_website = true AND br.description IS NULL)
+        br.website IS NULL OR br.website = ''
+        OR br.description IS NULL
       )
       AND (:beach_only = false OR br.beach_brands = true)
     ORDER BY reason, brand_name

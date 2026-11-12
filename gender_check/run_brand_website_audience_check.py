@@ -106,7 +106,6 @@ _BRAND_QUERY_SQL = """
         FROM instagram_posts ip
         WHERE ip.brand_raw_id = br.id
       ) >= 5
-      AND br.has_official_website = true
       AND br.website IS NOT NULL
       AND br.description IS NOT NULL
       AND (:beach_only = false OR br.beach_brands = true)

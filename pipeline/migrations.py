@@ -203,6 +203,67 @@ class _ViewAcl:
             conn.execute(text(f"GRANT {privilege} ON TABLE {db_grants.quote(self.view)} TO {target}"))
 
 
+def _merge_brands_niches(conn) -> None:
+    """Move the tags of the old brands_niches table onto brands_raw.tags, then drop the table. A brand with one row
+    keeps its tags as they were; a brand with several rows gets the distinct tags of all of them. Nothing is dropped
+    unless the copy ran, and it does nothing once the table is gone."""
+    if not conn.execute(text("SELECT to_regclass('public.brands_niches') IS NOT NULL")).scalar():
+        return
+    conn.execute(text("""
+        UPDATE brands_raw br SET tags = s.tags
+        FROM (
+            SELECT b.brand_raw_id,
+                   CASE WHEN count(*) = 1 THEN (array_agg(b.tags))[1]
+                        ELSE (SELECT jsonb_agg(DISTINCT t) FROM brands_niches b2, jsonb_array_elements_text(b2.tags) AS t
+                              WHERE b2.brand_raw_id = b.brand_raw_id AND jsonb_typeof(b2.tags) = 'array') END AS tags
+            FROM brands_niches b WHERE b.tags IS NOT NULL AND jsonb_typeof(b.tags) = 'array'
+            GROUP BY b.brand_raw_id
+        ) s
+        WHERE br.id = s.brand_raw_id AND br.tags IS NULL
+    """))
+    # a brand whose description exists only in the old table keeps it
+    conn.execute(text("""
+        UPDATE brands_raw br SET description = s.description
+        FROM (SELECT brand_raw_id, max(description) AS description FROM brands_niches
+              WHERE description IS NOT NULL AND description <> '' GROUP BY brand_raw_id) s
+        WHERE br.id = s.brand_raw_id AND (br.description IS NULL OR br.description = '')
+    """))
+    conn.execute(text("DROP TABLE brands_niches"))
+
+
+def _drop_brands_raw_domain(conn) -> None:
+    """brands_raw.domain is now derived from brands_raw.website. Keep any domain that
+    has no website (as a website) so nothing is lost, then drop the column."""
+    has_column = conn.execute(text(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = 'brands_raw' AND column_name = 'domain'"
+    )).first()
+    if not has_column:
+        return
+    conn.execute(text(
+        "UPDATE brands_raw SET website = 'https://' || domain "
+        "WHERE (website IS NULL OR website = '') AND domain IS NOT NULL AND domain <> ''"
+    ))
+    conn.execute(text("ALTER TABLE brands_raw DROP COLUMN domain"))
+
+
+def _seed_rate_benchmarks(conn) -> None:
+    """
+    Fill rate_benchmarks from pipeline/rate_benchmark_seed.py the first time, i.e. ONLY while the table is empty. After that the table is the source of truth
+    (changed with SQL), so a later start never overwrites a changed number or brings back a deleted row.
+    """
+    if conn.execute(text("SELECT to_regclass('public.rate_benchmarks') IS NULL")).scalar():
+        return   # not created yet (the model's create_all runs first, so this only happens on a restricted connection)
+    if conn.execute(text("SELECT EXISTS (SELECT 1 FROM rate_benchmarks)")).scalar():
+        return
+    from pipeline.rate_benchmark_seed import COLUMNS, ROWS
+    conn.execute(
+        text(f"INSERT INTO rate_benchmarks ({', '.join(COLUMNS)}) VALUES ({', '.join(':' + c for c in COLUMNS)}) "
+             "ON CONFLICT (niche, follower_bucket, deliverable) DO NOTHING"),
+        [dict(zip(COLUMNS, row)) for row in ROWS],
+    )
+
+
 def _grant_creator_llm_cost(grant_role: str | None):
     """A migration step: give the runtime role SELECT on the freshly recreated view (no-op without a role)."""
     def step(conn) -> None:
@@ -291,11 +352,7 @@ def _apply_migrations(engine: Engine, lock_timeout_ms: int | None = None, grant_
     stmts = [
         # Original columns (idempotent)
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS country TEXT",
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS headquarters TEXT",
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS location TEXT",
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS operating_area TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS website TEXT",
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS domain TEXT",
         "ALTER TABLE pitches ADD COLUMN IF NOT EXISTS sent_at DATE",
         "ALTER TABLE pitches ADD COLUMN IF NOT EXISTS agreed_rate NUMERIC(12, 2)",
         "ALTER TABLE pitches ADD COLUMN IF NOT EXISTS is_manual BOOLEAN NOT NULL DEFAULT false",
@@ -305,8 +362,6 @@ def _apply_migrations(engine: Engine, lock_timeout_ms: int | None = None, grant_
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS wikidata_id TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS entity_type TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS description TEXT",
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS wikipedia_url TEXT",
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS source_confidence INTEGER",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS refferls BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS beach_brands BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE brands_raw DROP COLUMN IF EXISTS male_pct",
@@ -356,7 +411,6 @@ def _apply_migrations(engine: Engine, lock_timeout_ms: int | None = None, grant_
         "ALTER TABLE brands_raw DROP COLUMN IF EXISTS tiktok_handle",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS linkedin_id TEXT",
         # Signal enrichment — website
-        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS has_official_website BOOLEAN",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS website_source TEXT",
         "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS brand_tier TEXT",
         "ALTER TABLE brands_raw DROP COLUMN IF EXISTS google_discovered_website",
@@ -432,6 +486,8 @@ def _apply_migrations(engine: Engine, lock_timeout_ms: int | None = None, grant_
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS male_pct FLOAT",
         "ALTER TABLE youtube_sponsorships ADD COLUMN IF NOT EXISTS female_pct FLOAT",
         "DROP TABLE IF EXISTS instagram_commenters",
+        "DROP TABLE IF EXISTS test_brands_with_instagram_posts",   # a scratch table from test_active_sponsorships.py (deleted): nothing read it
+        "DROP TABLE IF EXISTS test_niches",                        # a research table filled by scripts/populate_test_niches.py (deleted): nothing read it
         # creator_profiles absorbed the separate `users` table — auth fields
         # now live directly on creator_profiles (see backfill block below).
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS email TEXT",
@@ -660,21 +716,9 @@ def _apply_migrations(engine: Engine, lock_timeout_ms: int | None = None, grant_
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_v3_ranking_status TEXT NOT NULL DEFAULT 'idle'",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_v3_ranking_error TEXT",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS llm_v3_ranked_at TIMESTAMPTZ",
-        # brands_niches: many-to-many mirror of brands_raw.niche (see BrandNiche
-        # docstring). New brands get a row automatically via insert_brand()/
-        # insert_brands_batch(); this backfills every brand that already
-        # existed before this table did. Idempotent — ON CONFLICT DO NOTHING
-        # means this is a no-op on every startup after the first.
-        """
-        INSERT INTO brands_niches (brand_raw_id, niche)
-        SELECT id, niche FROM brands_raw
-        WHERE niche IS NOT NULL
-        ON CONFLICT (brand_raw_id, niche) DO NOTHING
-        """,
-        # brands_niches: description mirrored from shopify_detect.py's scraped
-        # brands_raw.description, plus Mistral-extracted sub-niche tags.
-        "ALTER TABLE brands_niches ADD COLUMN IF NOT EXISTS description TEXT",
-        "ALTER TABLE brands_niches ADD COLUMN IF NOT EXISTS tags JSONB",
+        # brands_raw.tags: LLM-extracted sub-niche tags (they used to live in brands_niches, which is merged
+        # into brands_raw and dropped by _merge_brands_niches below).
+        "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS tags JSONB",
         # creator_profiles: per-platform follower/following counts as plain
         # integers, replacing the old JSONB *_stats columns (never had
         # real data — nothing to migrate).
@@ -763,6 +807,16 @@ def _apply_migrations(engine: Engine, lock_timeout_ms: int | None = None, grant_
         "CREATE INDEX IF NOT EXISTS ix_creator_niches_instagram_user_id ON creator_niches(instagram_user_id)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_niches_username ON creator_niches(username)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_creator_niches_username_normalized ON creator_niches(LOWER(TRIM(username)))",
+        _seed_rate_benchmarks,   # the rate data of Rate Intelligence: filled once, then changed with SQL
+        _merge_brands_niches,   # brands_niches is merged into brands_raw (tags) and dropped
+        _drop_brands_raw_domain,   # the domain is now worked out from the website
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS has_official_website",   # BrandRaw.has_website is computed from website
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS wikipedia_url",    # provenance columns nothing read
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS source_url",
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS source_confidence",
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS headquarters",     # country is the only place column now
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS location",
+        "ALTER TABLE brands_raw DROP COLUMN IF EXISTS operating_area",
     ]
     with engine.connect() as conn:
         _set_lock_timeout(conn, lock_timeout_ms)

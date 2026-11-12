@@ -23,9 +23,6 @@ def ensure_tables():
     with engine.connect() as conn:
         migrations = [
             "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS country TEXT",
-            "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS headquarters TEXT",
-            "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS location TEXT",
-            "ALTER TABLE brands_raw ADD COLUMN IF NOT EXISTS operating_area TEXT",
         ]
         for sql in migrations:
             conn.execute(text(sql))

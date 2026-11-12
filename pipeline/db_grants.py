@@ -53,7 +53,6 @@ CODE = {
     "brand_contacts": "SIU",                      # apollo_contacts in the own-brand job; prod: 8312 ins / 8352 upd
     "brand_instagram_users": "SI",                # instagram_users / signals
     "brand_match_profile": "SIU",                 # brand_signals upserts
-    "brands_niches": "SIU",                       # shopify_detect
     "brands_raw": "SIU",                          # seed, enrichment, own-brand job
     "content_creator_re": "SIU",                  # /content-creator-re/bulk-add
     "contract_reviews": "SI",                     # contract_advice
@@ -78,11 +77,10 @@ CODE = {
     "own_brand_jobs": "SIU",                      # POST /own-brands and the job's progress
     "pitches": "SIUD",                            # /pitches
     "prompts": "S",                               # read by every LLM call; seeded by the migrations
+    "rate_benchmarks": "S",                       # pipeline/rate_intelligence.py reads it; the migration (table owner) seeds it; changes are made with SQL as the table owner
     "rate_estimates": "SI",                       # /rate-intelligence
     "saved_brands": "SID",                        # /saved-brands
-    "test_brands_with_instagram_posts": "",       # CLI only
     "test_creator_brand_partnership_posts": "SIU",  # partnership evidence read by pitches / matching, written by the own-brand job
-    "test_niches": "",                            # CLI only
     "youtube_sponsorships": "SI",                 # youtube_sponsorship signal
 }
 
@@ -95,13 +93,12 @@ ADMIN = {
     "brand_contacts": (True, True, True),
     "brand_instagram_users": (True, True, True),
     "brand_match_profile": (True, True, True),
-    "brands_niches": (True, True, True),
     "brands_raw": (True, True, True),
     "content_creator_re": (True, True, True),
     "contract_reviews": (True, True, True),
     "contact_reveals": (False, False, False),
     "user_activity": (False, False, False),
-    "creator_brand_llm_rankings": (False, False, False),
+    "creator_brand_llm_rankings": None,        # no admin page (the v2 ranking is still written and read by the API; only its admin view was removed)
     "creator_brand_llm_v3_rankings": (False, False, False),
     "creator_instagram_posts": (False, False, True),
     "creator_niches": (True, True, True),
@@ -120,11 +117,10 @@ ADMIN = {
     "own_brand_jobs": (False, False, True),
     "pitches": (True, True, True),
     "prompts": (True, True, True),
+    "rate_benchmarks": None,                   # no admin page: the rate data is read by the API and changed with SQL by the table owner
     "rate_estimates": (True, True, True),
     "saved_brands": (True, True, True),
-    "test_brands_with_instagram_posts": (True, True, True),
     "test_creator_brand_partnership_posts": (True, True, True),
-    "test_niches": (True, True, True),
     "youtube_sponsorships": (True, True, True),
 }
 

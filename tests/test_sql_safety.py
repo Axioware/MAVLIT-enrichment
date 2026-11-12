@@ -101,7 +101,7 @@ class NoStringBuiltSql(unittest.TestCase):
             self.assertIn(name, audience._BRAND_QUERY_SQL)
         self.assertIn(":restrict_niches", pitching._PARTNER_CREATORS_SQL)
         self.assertFalse(hasattr(rate_intelligence, "_ALL_PARTNER_CREATORS_SQL"))
-        for path in ("scripts/embed_test_niches.py", "script_creator_niche/embed_creator_niches.py"):
+        for path in ("script_creator_niche/embed_creator_niches.py",):
             text_ = (ROOT / path).read_text()
             self.assertIn("(:force OR embedding IS NULL)", text_)
             self.assertNotIn("{predicate}", text_)
@@ -168,7 +168,7 @@ class BoundParameterBehaviour(unittest.TestCase):
 
     def setUp(self):
         with self.engine.begin() as conn:
-            conn.execute(self.text("TRUNCATE brands_raw, brands_niches, test_niches, creator_niches, instagram_users, instagram_posts RESTART IDENTITY CASCADE"))
+            conn.execute(self.text("TRUNCATE brands_raw, creator_niches, instagram_users, instagram_posts RESTART IDENTITY CASCADE"))
 
     # -- LIKE escaping -----------------------------------------------------------------------------------------------------------------
     def test_brand_lookup_by_name_treats_percent_and_underscore_literally(self):
@@ -189,8 +189,7 @@ class BoundParameterBehaviour(unittest.TestCase):
     def test_niche_lookup_endpoint_helper_does_not_expand_wildcards(self):
         import api.app as api_app
         with self.engine.begin() as conn:
-            conn.execute(self.text("""INSERT INTO brands_raw (id, name) VALUES (1, 'x')"""))
-            conn.execute(self.text("""INSERT INTO brands_niches (brand_raw_id, niche, tags) VALUES (1, 'Health & Wellness', CAST('["yoga","spa"]' AS jsonb))"""))
+            conn.execute(self.text("""INSERT INTO brands_raw (id, name, niche, tags) VALUES (1, 'x', 'Health & Wellness', CAST('["yoga","spa"]' AS jsonb))"""))
         with mock.patch.object(api_app, "SessionLocal", self.Session):
             self.assertEqual(api_app.list_brand_category_tags(niche=["Health"])["tags_by_niche"]["Health"], ["spa", "yoga"], "a plain word still matches by 'contains'")
             self.assertEqual(api_app.list_brand_category_tags(niche=["%"])["tags_by_niche"]["%"], [], "% is not a wildcard any more")
@@ -217,24 +216,19 @@ class BoundParameterBehaviour(unittest.TestCase):
                 conn.execute(self.text(_PARTNER_CREATORS_SQL), {"bid": 1, "min_conf": 90, "niches": niches, "restrict_niches": restrict}).fetchall()
 
     def test_embedding_loaders_use_a_bound_force_flag(self):
-        from scripts import embed_test_niches as test_niches_script
         from script_creator_niche import embed_creator_niches as creator_script
         with self.engine.begin() as conn:
-            conn.execute(self.text("ALTER TABLE test_niches ADD COLUMN IF NOT EXISTS embedding vector(1024)"))
             conn.execute(self.text("ALTER TABLE creator_niches ADD COLUMN IF NOT EXISTS embedding vector(1024)"))
-            conn.execute(self.text("INSERT INTO test_niches (niche, description, embedding) VALUES ('a', 'd', NULL), ('b', 'd', CAST(:v AS vector))"), {"v": "[" + ",".join(["0.1"] * 1024) + "]"})
             conn.execute(self.text("INSERT INTO instagram_users (id, username, user_type) VALUES (1, 'u1', 'contentcreatorRE'), (2, 'u2', 'contentcreatorRE')"))
             conn.execute(self.text("INSERT INTO creator_niches (instagram_user_id, username, niche, description, embedding) VALUES (1, 'u1', 'n', 'd', NULL), (2, 'u2', 'n', 'd', CAST(:v AS vector))"), {"v": "[" + ",".join(["0.1"] * 1024) + "]"})
-        self.assertEqual([r["niche"] for r in test_niches_script.load_niches(self.engine, False)], ["a"])
-        self.assertEqual(sorted(r["niche"] for r in test_niches_script.load_niches(self.engine, True)), ["a", "b"])
         self.assertEqual([r["username"] for r in creator_script.load_creator_niches(self.engine, False)], ["u1"])
         self.assertEqual(sorted(r["username"] for r in creator_script.load_creator_niches(self.engine, True)), ["u1", "u2"])
 
     def test_audience_check_queries_keep_their_filters_as_bound_flags(self):
         from gender_check import run_brand_gender_check as gender, run_brand_website_audience_check as audience
         with self.engine.begin() as conn:
-            conn.execute(self.text("""INSERT INTO brands_raw (id, name, refferls, geo_reach_score, has_official_website, website, description, beach_brands)
-                                      VALUES (1, 'Web', false, 10, true, 'https://web.example', 'a description', false)"""))
+            conn.execute(self.text("""INSERT INTO brands_raw (id, name, refferls, geo_reach_score, website, description, beach_brands)
+                                      VALUES (1, 'Web', false, 10, 'https://web.example', 'a description', false)"""))
             conn.execute(self.text("""INSERT INTO instagram_posts (brand_raw_id, instagram_handle, post_id, sponsorship_confidence)
                                       SELECT 1, 'web', 'p' || g, 95 FROM generate_series(1, 5) g"""))
 
@@ -252,7 +246,7 @@ class BoundParameterBehaviour(unittest.TestCase):
         self.assertEqual(ids(audience.BRAND_QUERY, force=True, beach_only=False), [1])
         # the website-less query takes the same beach flag
         with self.engine.begin() as conn:
-            conn.execute(self.text("UPDATE brands_raw SET has_official_website = false, target_audience_gender = NULL, beach_brands = false WHERE id = 1"))
+            conn.execute(self.text("UPDATE brands_raw SET website = NULL, target_audience_gender = NULL, beach_brands = false WHERE id = 1"))
         self.assertEqual(ids(gender.BRAND_QUERY, beach_only=False), [1])
         self.assertEqual(ids(gender.BRAND_QUERY, beach_only=True), [])
         with self.engine.begin() as conn:

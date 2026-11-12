@@ -173,7 +173,7 @@ def _pending_for_scoring(db, brand_ids: set[int]) -> set[int]:
         row.id for row in
         db.query(BrandRaw.id).filter(
             BrandRaw.id.in_(brand_ids),
-            BrandRaw.has_official_website == True,
+            BrandRaw.has_website,
             BrandRaw.wikidata_enriched  == True,
             BrandRaw.shopify_checked    == True,
             BrandRaw.tranco_checked     == True,
@@ -279,7 +279,7 @@ def pending_brand_signal_ids(db, limit: int) -> list[int]:
             .join(InitialBrandScore, InitialBrandScore.brand_raw_id == BrandRaw.id)
             .outerjoin(BrandProfile, BrandProfile.brand_raw_id == BrandRaw.id)
             .filter(InitialBrandScore.total_score >= 50)
-            .filter(BrandRaw.has_official_website == True)
+            .filter(BrandRaw.has_website)
             .filter(BrandProfile.brand_raw_id.is_(None))
             .order_by(BrandRaw.id)
             .limit(limit)
@@ -296,7 +296,7 @@ def pending_youtube_ids(db, limit: int) -> list[int]:
             db.query(BrandRaw.id)
             .filter(
                 BrandRaw.name.isnot(None),
-                BrandRaw.has_official_website == True,
+                BrandRaw.has_website,
                 BrandRaw.youtube_checked == False,
             )
             .order_by(BrandRaw.id)

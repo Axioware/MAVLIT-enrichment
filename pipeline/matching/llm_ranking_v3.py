@@ -13,7 +13,7 @@ return confidence = 0.65 x content fit + 0.35 x match evidence.
             free-text brand preferences (creator_profiles.brand_preferences:
             brand types they want to see more of / do not want) — wanted
             brands are ranked higher, unwanted ones last
-  brand   — name, niche, description, brands_niches tags, why_it_matches,
+  brand   — name, niche, description, tags, why_it_matches,
             target_audience_gender, product_audience_gender
 
 Unlike v1/v2, v3 does NOT apply the matcher's gender hard filter: brands of

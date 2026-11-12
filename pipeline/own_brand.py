@@ -38,7 +38,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from sqlalchemy import func, text
-from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+from sqlalchemy.exc import IntegrityError, TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session
 
 from config import APIFY_TOKEN, OPENAI_KEY
@@ -195,6 +195,34 @@ def _fail(db: Session, job: OwnBrandJob, message: str) -> None:
     db.commit()
 
 
+def remove_unusable_brand(db: Session, job: OwnBrandJob) -> bool:
+    """
+    The Instagram account of a brand this job just added turned out to be unusable (it does not exist, is
+    private or has no posts): take the empty brands_raw row back out, so a wrong handle leaves nothing behind.
+    Only a row this job created is removed, and only while nothing else points at it (no other job, no posts, no
+    other rows). The job itself stays, so the user still sees the error. Returns True when the row was removed.
+    """
+    if not job.created_brand or job.brand_raw_id is None:
+        return False
+    brand_id = job.brand_raw_id
+    others = db.query(func.count(OwnBrandJob.id)).filter(OwnBrandJob.brand_raw_id == brand_id, OwnBrandJob.id != job.id).scalar()
+    if others or _post_count(db, brand_id):
+        return False
+    try:
+        with db.begin_nested():   # a row something else still points at stays: the foreign key refuses the delete
+            job.brand_raw_id = None
+            db.flush()
+            db.delete(db.get(BrandRaw, brand_id))
+            db.flush()
+    except IntegrityError:
+        db.refresh(job)
+        logger.info("Own brand: brand_id=%d @%s is still referenced - kept", brand_id, job.instagram_handle)
+        return False
+    db.commit()
+    logger.info("Own brand: removed brand_id=%d (@%s) - its Instagram account is not usable", brand_id, job.instagram_handle)
+    return True
+
+
 def _bounded(value, low: int, high: int) -> int | None:
     try:
         number = int(round(float(value)))
@@ -204,9 +232,7 @@ def _bounded(value, low: int, high: int) -> int | None:
 
 
 def _apply_profile(db: Session, brand: BrandRaw, handle: str, result: dict) -> None:
-    """Save the LLM's brand profile on brands_raw (+ the brands_niches mirror). Existing values are kept."""
-    from pipeline.enrichment.shopify_detect import _upsert_brand_niche   # lazy: avoids loading the scraper stack at import
-
+    """Save the LLM's brand profile on brands_raw (tags included). Existing values are kept."""
     name = result.get("name")
     name = " ".join(name.split()) if isinstance(name, str) else ""
     if not name or name.lower() == "unknown":
@@ -250,9 +276,7 @@ def _apply_profile(db: Session, brand: BrandRaw, handle: str, result: dict) -> N
 
     tags = result.get("tags")
     tags = [t.strip() for t in tags if isinstance(t, str) and t.strip()][:8] if isinstance(tags, list) else []
-    db.flush()
-    if brand.niche:
-        _upsert_brand_niche(db, brand.id, brand.niche, brand.description or "", tags or None)
+    brand.tags = tags or None
 
 
 def _get_prompt(db: Session) -> str:
@@ -344,6 +368,7 @@ def run_own_brand_job(job_id: str) -> None:
                 if saved is None:
                     return _fail(db, job, "Could not reach this Instagram account right now. Please try again.")
                 if saved == 0:
+                    remove_unusable_brand(db, db.get(OwnBrandJob, job_id))
                     return _fail(db, job, "No posts found. The account may not exist, be private or have no posts yet.")
             else:
                 _set_stage(db, job, "Reading the brand's saved Instagram posts", "running")

@@ -34,14 +34,14 @@ real privileges. Nothing was made read-only.
 
 | Admin view flags (create / edit / delete) | Tables | Exercised through the real SQLAdmin forms in the tests |
 |---|---|---|
-| all three | 23: `brand_contacts`, `brand_instagram_users`, `brand_match_profile`, `brands_niches`, `brands_raw`, `content_creator_re`, `contract_reviews`, `creator_niches`, `creator_profiles`, `facebook_branded_content_checks`, `initial_brand_score`, `instagram_creator_commenters`, `instagram_posts`, `instagram_users`, `meta_ads`, `pitches`, `prompts`, `rate_estimates`, `saved_brands`, `test_brands_with_instagram_posts`, `test_creator_brand_partnership_posts`, `test_niches`, `youtube_sponsorships` | **`prompts` and `brands_raw`: create, edit, delete (HTTP POST / DELETE, results checked in the database).** The other 21: list page + privilege check only |
+| all three | 20: `brand_contacts`, `brand_instagram_users`, `brand_match_profile`, `brands_raw`, `content_creator_re`, `contract_reviews`, `creator_niches`, `creator_profiles`, `facebook_branded_content_checks`, `initial_brand_score`, `instagram_creator_commenters`, `instagram_posts`, `instagram_users`, `meta_ads`, `pitches`, `prompts`, `rate_estimates`, `saved_brands`, `test_creator_brand_partnership_posts`, `youtube_sponsorships` | **`prompts` and `brands_raw`: create, edit, delete (HTTP POST / DELETE, results checked in the database).** The other 21: list page + privilege check only |
 | edit + delete (no create) | `early_access_signups` | create refused (403), **edit and delete performed** |
 | delete only | `creator_instagram_posts`, `own_brand_jobs`, `account_invites` | create / edit refused (403), **delete performed** |
 | none (read-only) | `llm_usage` | create / edit / delete refused (403), row still there; the role also has no UPDATE / DELETE in the database |
-| none (read-only pages, under "System") | `apify_usage`, `contact_reveals`, `user_activity`, `feature_usage`, `feature_locks`, `login_failures`, `password_reset_tokens`, `creator_brand_llm_rankings`, `creator_brand_llm_v3_rankings` | list + detail pages only; create / edit / delete refused. Their privileges did not change (SELECT was already in the plan). |
+| none (read-only pages, under "System") | `apify_usage`, `contact_reveals`, `user_activity`, `feature_usage`, `feature_locks`, `login_failures`, `password_reset_tokens`, `creator_brand_llm_v3_rankings` | list + detail pages only; create / edit / delete refused. Their privileges did not change (SELECT was already in the plan). |
 | read-only SQL view | `creator_llm_cost` | list + detail pages work; create / delete refused (403); role has SELECT only and cannot drop or replace it |
 
-Every admin list page (all 36 tables and the view) were opened as `mavlit_app`. Not exercised: create / edit / delete on the other 21 full-access
+Every admin list page (all 35 tables with a page, and the view) were opened as `mavlit_app`. Not exercised: create / edit / delete on the other 19 full-access
 tables (the SQLAdmin login with `ADMIN_PASSKEY` set is now exercised: closed without it, a wrong passkey refused, the right one opens the pages).
 
 ## Pre-existing grants, memberships and inherited access
@@ -77,8 +77,7 @@ re-applied by the migration step, from the explicit list:
 ## Batch runners and schema scripts run as the owner
 Once the API's `DATABASE_URL` is `mavlit_app`, anything that changes the schema or empties a table cannot use `.env`. Those scripts need the table
 owner (`mavlit_user`): `main.py`, `run_reverse_engineering.py` / `run_end_to_end_pipeline.py` / `content_creator_re.py` (their partnership-evidence
-table setup), `gender_check/run_brand_gender_check.py`, `gender_check/run_brand_website_audience_check.py`, `scripts/populate_test_niches.py`
-(TRUNCATE), `scripts/embed_test_niches.py` and `script_creator_niche/embed_creator_niches.py`. They now check `current_user` first and stop with
+table setup), `gender_check/run_brand_gender_check.py`, `gender_check/run_brand_website_audience_check.py` and `script_creator_niche/embed_creator_niches.py`. They now check `current_user` first and stop with
 a clear message when it is the runtime role (`MAVLIT_RUNTIME_ROLE`, default `mavlit_app`; `pipeline/owner_guard.py`); as the owner nothing changes.
 
 Give them their own root-only env file, separate from `.env`, from `.env.migrate` and from the service's environment:
@@ -153,6 +152,6 @@ the real app logs in as the role (`RUN_MIGRATIONS=0`), 15 route calls and the SQ
 - Tested on PostgreSQL 14.23 only (PostgreSQL 15+ schema defaults set explicitly); **PostgreSQL 18 is not verified**. The audit also checks the PostgreSQL 17+ table
   privilege `MAINTAIN` behind a version test; that branch has never run. Repeat the whole procedure on 18 (the tests print the server version and can insist on a
   major with `MAVLIT_EXPECT_PG_MAJOR=18`).
-- Create/edit/delete on 21 of 23 full-access tables are covered by the privilege check only.
+- Create/edit/delete on 20 of 22 full-access tables are covered by the privilege check only.
 - PUBLIC defaults remain (CONNECT, TEMPORARY, and CREATE on `public` before PostgreSQL 15); the audit refuses CREATE and reports TEMPORARY.
 - CLI scripts keep using `mavlit_user`; the operator endpoints and `/admin` now require `ADMIN_PASSKEY` (api/operator.py); the role still limits what a holder of that key can do to DML on the 30 tables.

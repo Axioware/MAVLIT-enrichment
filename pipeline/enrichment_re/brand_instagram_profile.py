@@ -66,8 +66,7 @@ Resolution order, first hit wins:
 
 Existing website is never blindly overwritten (see _apply_result):
   - No website resolved this run + one already saved -> left untouched.
-  - No website resolved this run + none already saved -> has_official_website
-    set False (still distinguishable from "never attempted").
+  - No website resolved this run + none already saved -> nothing is written.
   - A website IS resolved (both LLM calls above only ever return one when
     they're themselves confident it's correct) but its domain matches what
     was already saved -> nothing to change, already correct.
@@ -628,9 +627,7 @@ def _apply_website(brand: BrandRaw, website: str | None, website_source: str | N
     Applies a newly-resolved website to `brand`, WITHOUT ever blindly
     clobbering a website the brand already had:
       - No website resolved this run + one already saved -> untouched.
-      - No website resolved this run + none already saved -> marked
-        has_official_website=False (still distinguishable from "never
-        attempted").
+      - No website resolved this run + none already saved -> nothing written.
       - A website WAS resolved (callers only ever pass one here when their
         own LLM step was itself confident in it) but its domain matches
         what's already saved -> nothing to change, already correct.
@@ -640,13 +637,11 @@ def _apply_website(brand: BrandRaw, website: str | None, website_source: str | N
         value.
     """
     if not website:
-        if not brand.website:
-            brand.has_official_website = False
         return
 
     website = _normalize_website(website)
     new_domain = _extract_domain(website)
-    existing_domain = brand.domain or _extract_domain(brand.website or "")
+    existing_domain = _extract_domain(brand.website or "")
 
     if existing_domain and new_domain == existing_domain:
         logger.info(
@@ -662,8 +657,6 @@ def _apply_website(brand: BrandRaw, website: str | None, website_source: str | N
         )
 
     brand.website = website
-    brand.domain = new_domain
-    brand.has_official_website = True
     brand.website_source = website_source
 
 
@@ -687,8 +680,8 @@ def _apply_result(
         # constraint). Leave this row's NAME bare rather than crash the
         # batch, but still mark checked. db.rollback() discards every staged
         # change on `brand`, not just the colliding name (SQLAlchemy expires
-        # the whole instance) — website/domain/has_official_website/
-        # website_source are unrelated to the collision and must be
+        # the whole instance) — website/website_source/
+        # (domain is derived) are unrelated to the collision and must be
         # re-applied here too, or a name collision would silently wipe out
         # perfectly good website data as well.
         db.rollback()

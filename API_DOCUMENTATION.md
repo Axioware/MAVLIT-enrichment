@@ -412,7 +412,7 @@ Public liveness check. Returns `200` `{ "status": "ok" }`.
 
 - **Purpose:** Start a background brand seed and poll it.
 - **Auth:** None in the route implementation.
-- **Start body:** `{ "niche": "fitness", "limit": 100, "country": "US", "headquarters": null, "location": null, "operating_area": null, "niche_label": null }`.
+- **Start body:** `{ "niche": "fitness", "limit": 100, "country": "US", "niche_label": null }`.
 - **Start response:** `200` `{ "job_id": "a1b2c3d4", "status": "running", "niche": "fitness", "message": "Seeding 'fitness' started" }`.
 - **Status response:** `200` `{ "status": "running|done|error", "niche": "fitness", "inserted": 42, "error": null }`.
 - **Errors:** `404` unknown job ID; `422` invalid request; job failures are represented by `status: "error"`.

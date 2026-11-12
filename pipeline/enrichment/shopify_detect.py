@@ -15,7 +15,7 @@ Fetches each brand's homepage to:
      it gets the Instagram bio + posts alone; with no stored posts either, the
      niche stays NULL.
   5. Send that description to the LLM (brand_niche_tags) to extract
-     sub-niche/category tags, stored in brands_niches.tags — and, for any of
+     sub-niche/category tags, stored in brands_raw.tags — and, for any of
      brands_raw.name / .niche that's currently unset (bare brands created by
      content_creator_re / brand_wikidata_lookup / brand_instagram_profile
      that never got one), ask the same call to also determine a best-fit
@@ -43,7 +43,7 @@ Fetches each brand's homepage to:
      BRAND_BEACH_TAGS_NOTE so the tags describe the brand's beach / ocean /
      water products and services (beach-related tags first).
 
-     Skipped entirely if OPENAI_KEY isn't set. brands_niches is upserted
+     Skipped entirely if OPENAI_KEY isn't set. the tags are saved on brands_raw
      (not just updated) since a bare brand has no existing row there yet.
   6. Beach relevance — with the same description and Instagram evidence, a
      second LLM call (brand_beach_related prompt) decides whether the brand,
@@ -55,7 +55,7 @@ Fetches each brand's homepage to:
 
 Social fields are only written if the column is currently NULL, so they
 don't overwrite more-authoritative Wikidata data fetched earlier.
-description (brands_raw AND its brands_niches mirror) is always
+description (brands_raw) is always
 overwritten with freshly scraped text on every run, regardless of any
 existing value.
 
@@ -65,7 +65,7 @@ Reader (r.jina.ai), which renders it in a headless browser on Jina's side
 and returns the page HTML. Set JINA_API_KEY in .env for higher rate limits.
 
 Sets shopify_checked=True for every processed brand.
-Only runs for brands that have a website (has_official_website=True).
+Only runs for brands that have a website (website is set).
 """
 
 import json
@@ -80,7 +80,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from config import OPENAI_KEY
-from pipeline.db import BrandNiche, BrandRaw, InstagramPost, Prompt, normalize_niche
+from pipeline.db import BrandRaw, InstagramPost, Prompt, normalize_niche
 from pipeline.helpers.gpt_llm import LLMUnavailableError, call_gpt_json, fill_template
 from pipeline.helpers.http import fetch_html_with_jina_fallback
 from pipeline.helpers.normalize import normalize
@@ -475,26 +475,11 @@ def _detect_beach_brand(db: Session, brand: BrandRaw, description: str) -> bool:
     return True
 
 
-def _upsert_brand_niche(db: Session, brand_id: int, niche: str, description: str, tags: list[str] | None) -> None:
-    """Insert a brands_niches row if this brand doesn't have one yet for this niche, else update it."""
-    stmt = (
-        pg_insert(BrandNiche)
-        .values(brand_raw_id=brand_id, niche=normalize_niche(niche), description=description, tags=tags)
-        .on_conflict_do_update(
-            index_elements=["brand_raw_id", "niche"],
-            set_={"description": description, "tags": tags},
-        )
-    )
-    db.execute(stmt)
-
-
 def _update_brand_niche_description_and_tags(db: Session, brand: BrandRaw, description: str) -> None:
     """
     Extracts a name fill-or-correction, sub-niche tags, and a niche backfill
     (if brand.niche was NULL) from the scraped description via the LLM, then
-    upserts brands_niches — a plain UPDATE would silently no-op for bare
-    brands (content_creator_re / brand_wikidata_lookup rows) that have no
-    brands_niches row yet.
+    saves the tags on the brand (brands_raw.tags).
 
     Name is filled OR corrected here (not just filled when NULL) — but only
     when brand.wikidata_id is unset. A wikidata_id means the current name
@@ -539,9 +524,7 @@ def _update_brand_niche_description_and_tags(db: Session, brand: BrandRaw, descr
         brand.niche = normalize_niche(niche)
         logger.info("Shopify/socials check: %s niche backfilled → '%s'", brand.name or f"brand_id={brand.id}", niche)
 
-    effective_niche = brand.niche
-    if effective_niche:
-        _upsert_brand_niche(db, brand.id, effective_niche, description or None, tags or None)
+    brand.tags = tags or None
 
 
 def _niche_from_instagram_only(db: Session, brand: BrandRaw) -> bool:
@@ -562,7 +545,7 @@ def enrich_shopify(
     beach_brands_only: bool = False,
 ) -> int:
     """
-    Fetch homepage for each brand with has_official_website=True and
+    Fetch homepage for each brand with a website and
     shopify_checked=False. Sets is_shopify / is_woocommerce and fills any
     NULL social URL columns from links found on the page. Returns number of
     rows updated.
@@ -576,12 +559,11 @@ def enrich_shopify(
     brands_raw.beach_brands = true (the other filters above still apply).
 
     Pass brand_id to target one specific brand directly — this bypasses the
-    has_official_website/shopify_checked filters (so you can re-run/test a
+    website/shopify_checked filters (so you can re-run/test a
     brand that was already processed), but website must still be set.
     """
     query = db.query(BrandRaw).filter(
-        BrandRaw.website.isnot(None),
-        BrandRaw.has_official_website.is_(True),
+        BrandRaw.has_website,
         or_(BrandRaw.brand_tier.is_(None), BrandRaw.brand_tier != "extreme"),  # never Fortune-500 / household-name brands (brand_tier.py 'extreme')
     )
     if beach_brands_only:

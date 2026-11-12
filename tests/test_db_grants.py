@@ -80,7 +80,6 @@ class Plan(unittest.TestCase):
 
     def test_without_admin_writes_the_plan_is_the_code_requirements_only(self):
         tight = db_grants.table_privileges(include_admin=False)
-        self.assertNotIn("test_niches", tight)
         self.assertEqual(tight["prompts"], "S")
         self.assertEqual(tight["rate_estimates"], "SI")
 

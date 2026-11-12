@@ -660,7 +660,7 @@ def enrich_youtube_sponsorships(
     # content_creator_re / brand_wikidata_lookup, name IS NULL) has none of.
     query = db.query(BrandRaw).filter(
         BrandRaw.name.isnot(None),
-        BrandRaw.has_official_website.is_(True),
+        BrandRaw.has_website,
         BrandRaw.refferls.is_(False),
         or_(
             BrandRaw.geo_reach_score.is_(None),

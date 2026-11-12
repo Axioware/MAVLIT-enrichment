@@ -339,9 +339,6 @@ def _build_geo_block(geo_qids: dict[str, str]) -> str:
 def search_wikidata_brands(
     niche: str,
     country: str | None = None,
-    headquarters: str | None = None,
-    location: str | None = None,
-    operating_area: str | None = None,
 ) -> list[dict]:
     """
     Return deduplicated entity records from Wikidata for any niche.
@@ -354,7 +351,6 @@ def search_wikidata_brands(
         "domain":        str,   # bare domain extracted from website, or ""
         "description":   str,   # Wikidata description (English), or ""
         "entity_type":   str,   # label of first P31 (instance-of) value, or ""
-        "wikipedia_url": str,   # always "" — schema:about omitted (causes 500s on WDQS)
       }
 
     SPARQL patterns:
@@ -363,11 +359,8 @@ def search_wikidata_brands(
 
     Both patterns fetch P856 (official website) via OPTIONAL.
 
-    Optional geo filters (OR logic, fixes #1 & #2):
+    Optional geo filter:
       country        — P17   direct match
-      headquarters   — P159  two-hop via P17 (hq city → country)
-      location       — P276  two-hop via P17 (location → country)
-      operating_area — P2541 direct match
     """
     search_results = _search_qids(niche)
     if not search_results:
@@ -380,9 +373,6 @@ def search_wikidata_brands(
     # Resolve geo param names → validated QIDs
     raw_geo = {
         "P17":   country,
-        "P159":  headquarters,
-        "P276":  location,
-        "P2541": operating_area,
     }
     geo_qids: dict[str, str] = {}
     for prop, name in raw_geo.items():
@@ -505,7 +495,6 @@ LIMIT 500
             "domain":        _extract_domain(website),
             "description":   meta.get("description", ""),
             "entity_type":   meta.get("entity_type", ""),
-            "wikipedia_url": "",   # not fetched via SPARQL; schema:about causes 500s
         })
 
     website_count = sum(1 for r in records if r["website"])

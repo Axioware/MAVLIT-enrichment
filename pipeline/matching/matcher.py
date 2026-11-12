@@ -7,7 +7,7 @@ Runs on every page load; designed to be cheap:
   Step A — Hard filters: drop brands with essentially zero sponsorship
            activity (a low floor, not a strict cutoff — unscored brands
            are kept, only confirmed-zero-activity ones are dropped). Also
-           drops brands carrying any brands_niches tag in the creator's
+           drops brands carrying any brands_raw tag in the creator's
            excluded_categories ("Brand categories to avoid").
 
            Instagram-specific filters, all gated on primary_platform ==
@@ -125,11 +125,10 @@ import logging
 import os
 
 from sqlalchemy import exists, func, or_, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from pipeline.db import (
     BrandInstagramUser,
-    BrandNiche,
     BrandProfile,
     BrandRaw,
     ContentCreatorRE,
@@ -297,7 +296,7 @@ def _hard_filtered_query(db: Session, creator: CreatorProfile, apply_gender_filt
     # Brand-only rules (geo, referral, partnership, avoided niches), shared with
     # the stored v2/v3 rankings (apply_brand_hard_filters).
     query = apply_brand_hard_filters(query)
-    # "Brand categories to avoid" are brands_niches.tags (picked on the
+    # "Brand categories to avoid" are brands_raw.tags (picked on the
     # creator-profile page from the tags of their primary niche) — drop any
     # brand carrying one of them (exact tag, case-insensitive).
     excluded_tags = sorted({
@@ -305,12 +304,13 @@ def _hard_filtered_query(db: Session, creator: CreatorProfile, apply_gender_filt
         if isinstance(c, str) and c.strip()
     })
     if excluded_tags:
+        tagged = aliased(BrandRaw, name="tagged")   # its own alias: the subquery must not merge into the outer brands_raw
         tagged_brand_ids = (
-            db.query(BrandNiche.brand_raw_id)
+            db.query(tagged.id)
             .filter(
-                func.jsonb_typeof(BrandNiche.tags) == "array",
+                func.jsonb_typeof(tagged.tags) == "array",
                 text(
-                    "EXISTS (SELECT 1 FROM jsonb_array_elements_text(brands_niches.tags) AS t(tag) "
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements_text(tagged.tags) AS t(tag) "
                     "WHERE lower(trim(t.tag)) = ANY(:excluded_tags))"
                 ).bindparams(excluded_tags=excluded_tags),
             )

@@ -127,7 +127,7 @@ ORDER BY niche ASC, brand_name ASC;
 
 
 SELECT DISTINCT niche
-FROM brands_niches;
+FROM brands_raw;
 
 sudo -u postgres psql
 \c mavlit_enrichment_test
@@ -137,7 +137,7 @@ sudo systemctl status mavlit
 
 
 SELECT niche
-FROM brands_niches
+FROM brands_raw
 WHERE niche IS NOT NULL
 
 UNION
@@ -159,7 +159,7 @@ WHERE niche IS NOT NULL;
 -- To see why the other brands were excluded:from initial brand scoring 
 
 SELECT
-    COUNT(*) FILTER (WHERE NOT has_official_website) AS no_official_website,
+    COUNT(*) FILTER (WHERE website IS NULL OR website = '') AS no_official_website,
     COUNT(*) FILTER (WHERE NOT shopify_checked) AS shopify_not_checked,
     COUNT(*) FILTER (WHERE NOT tranco_checked) AS tranco_not_checked,
     COUNT(*) FILTER (WHERE NOT youtube_checked) AS youtube_not_checked,

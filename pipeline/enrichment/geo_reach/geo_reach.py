@@ -651,7 +651,6 @@ def _crawl_and_score(brand: BrandRaw, bio: str) -> tuple[int | None, str | None,
                 break
             logger.info("geo_reach: %s is a link page — using the brand site %s", url, real)
             brand.website = real
-            brand.domain = urlparse(real).netloc.lower().removeprefix("www.")
             brand.website_source = "geo_reach_link_page"
             origin = _normalize_origin(real)
             queue = [(0, 0, origin)]

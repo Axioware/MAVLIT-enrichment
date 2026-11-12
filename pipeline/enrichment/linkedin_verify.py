@@ -63,6 +63,7 @@ from config import APIFY_TOKEN, OPENAI_KEY
 from pipeline.db import BrandContact, Prompt
 from pipeline.helpers.apify import run_apify_actor
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
+from pipeline.helpers.website import website_domain
 from pipeline.helpers.prompts import (
     LINKEDIN_COMPANY_MATCH_DEFAULT_PROMPT,
     LINKEDIN_COMPANY_MATCH_PROMPT_NAME,
@@ -171,7 +172,7 @@ def _apply_verification(db: Session, contact: BrandContact, item: dict | None) -
     company_name = current_company.get("name") or None
 
     contact.still_at_brand, contact.still_at_brand_confidence = _llm_employment_status(
-        db, contact.brand_raw.name, contact.brand_raw.domain, current_company, item.get("experience"),
+        db, contact.brand_raw.name, website_domain(contact.brand_raw.website), current_company, item.get("experience"),
     )
     contact.linkedin_verified_at = func.now()
     db.commit()

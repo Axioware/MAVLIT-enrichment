@@ -6,12 +6,12 @@ Populates brands_raw with raw brand names (and official websites) from
 Wikidata.
 
 Wikipedia (pipeline/sources/wikipedia.py) was removed from this pipeline —
-its country/location/operating_area filters were silently no-ops (the
+its country filter were silently no-ops (the
 function swallowed them via **_kwargs without ever applying them), so a
 frontend country selection only ever actually filtered Wikidata results.
 The module file itself is kept on disk but no longer imported/called here.
 
-Deduplication priority: wikidata_id > domain > normalized name (fuzzy).
+Deduplication priority: wikidata_id > normalized name (fuzzy).
 Source confidence: wikidata=100.
 
 Usage:
@@ -25,7 +25,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from pipeline.db import SOURCE_CONFIDENCE, insert_brands_batch
+from pipeline.db import insert_brands_batch
 from pipeline.helpers.normalize import deduplicate, normalize
 from pipeline.sources.wikidata import search_wikidata_brands
 
@@ -56,15 +56,11 @@ def run_seed(
     db: Session,
     limit: Optional[int] = None,
     country: str | None = None,
-    headquarters: str | None = None,
-    location: str | None = None,
-    operating_area: str | None = None,
     niche_label: str | None = None,
 ) -> int:
     """
     Seed brands_raw for any niche keyword.
-    Optional geo filters narrow the Wikidata SPARQL query to a specific
-    geography.
+    The optional country filter narrows the Wikidata SPARQL query to one country.
 
     `niche` still drives the search query (Wikidata SPARQL) exactly as
     typed. Pass niche_label to store a DIFFERENT value in brands_raw.niche
@@ -76,9 +72,6 @@ def run_seed(
     geo_active = {
         k: v for k, v in {
             "country":        country,
-            "headquarters":   headquarters,
-            "location":       location,
-            "operating_area": operating_area,
         }.items() if v
     }
 
@@ -87,27 +80,20 @@ def run_seed(
     def _row(
         name: str,
         source: str,
-        source_url: str,
         website: str = "",
-        domain: str = "",
         wikidata_id: str = "",
         entity_type: str = "",
         description: str = "",
-        wikipedia_url: str = "",
     ) -> dict:
         """Build a seed row, merging geo context and entity metadata."""
         return {
             "name":             name,
             "niche":            stored_niche,
             "source":           source,
-            "source_url":       source_url,
-            "source_confidence": SOURCE_CONFIDENCE.get(source, 50),
             "website":          website,
-            "domain":           domain,
             "wikidata_id":      wikidata_id or None,
             "entity_type":      entity_type or None,
             "description":      description or None,
-            "wikipedia_url":    wikipedia_url or None,
             **geo_active,
         }
 
@@ -117,21 +103,15 @@ def run_seed(
         wikidata_records = search_wikidata_brands(
             niche,
             country=country,
-            headquarters=headquarters,
-            location=location,
-            operating_area=operating_area,
         )
         for rec in wikidata_records:
             collected.append(_row(
                 name=rec["name"],
                 source="wikidata",
-                source_url="https://query.wikidata.org/sparql",
                 website=rec.get("website", ""),
-                domain=rec.get("domain", ""),
                 wikidata_id=rec.get("wikidata_id", ""),
                 entity_type=rec.get("entity_type", ""),
                 description=rec.get("description", ""),
-                wikipedia_url=rec.get("wikipedia_url", ""),
             ))
         logger.info(
             "Wikidata yielded %d names (%d with website)",
@@ -155,9 +135,7 @@ def run_seed(
     for row in collected:
         qid = row.get("wikidata_id")
         if qid:
-            existing = qid_best.get(qid)
-            if not existing or row["source_confidence"] > existing["source_confidence"]:
-                qid_best[qid] = row
+            qid_best.setdefault(qid, row)   # first record wins
         else:
             no_qid_rows.append(row)
 

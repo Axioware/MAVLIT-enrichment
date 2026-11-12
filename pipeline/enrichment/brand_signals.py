@@ -62,6 +62,7 @@ from pipeline.enrichment.initial_brand_scoring import (
 from pipeline.helpers.creator_tier import bucket_creator_tier
 from pipeline.helpers.gpt_llm import embed_text
 from pipeline.helpers.social import normalize_handle
+from pipeline.helpers.website import website_domain
 
 logger = logging.getLogger(__name__)
 
@@ -441,7 +442,7 @@ def build_brand_embedding_text(brand: BrandRaw, profile: "BrandProfile | None") 
     # back to the domain or Instagram handle, or omit the name entirely.
     name = (
         brand.name
-        or brand.domain
+        or website_domain(brand.website)
         or (normalize_handle(brand.instagram_handle) if brand.instagram_handle else None)
     )
     parts = [name] if name else []
@@ -451,9 +452,8 @@ def build_brand_embedding_text(brand: BrandRaw, profile: "BrandProfile | None") 
     if brand.entity_type:
         parts.append(f"a {brand.entity_type}")
 
-    location = brand.operating_area or brand.country
-    if location:
-        parts.append(f"operating in {location}")
+    if brand.country:
+        parts.append(f"operating in {brand.country}")
 
     if brand.description:
         parts.append(brand.description.strip())

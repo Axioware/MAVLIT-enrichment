@@ -20,8 +20,7 @@ sys.path.insert(0, str(ROOT))
 
 SKIP_DIRS = {".venv", "node_modules", "production_dump", "__pycache__", ".git", "tests", "frontend"}
 CAPPED_SCRIPTS = [
-    "script_creator_niche/mavlit_user_similarity.py", "script_creator_niche/embed_creator_niches.py", "scripts/embed_test_niches.py",
-    "scripts/niche_cosine_similarity.py", "scripts/populate_test_niches.py", "scripts/llm_cost_report.py",
+    "script_creator_niche/mavlit_user_similarity.py", "script_creator_niche/embed_creator_niches.py", "scripts/llm_cost_report.py",
 ]
 # create_engine() is allowed to differ from the one-connection cap only here: the shared engine, and the migration engine (NullPool).
 OTHER_ENGINES = {"pipeline/db.py", "pipeline/migration_settings.py"}
@@ -94,12 +93,6 @@ class UtilityScripts(unittest.TestCase):
                 if not ok:
                     offenders.append(f"{relative}:{node.lineno}")
         self.assertEqual(offenders, [], "give it pool_size=1, max_overflow=0 (or add it to OTHER_ENGINES with a reason)")
-
-    def test_the_module_level_script_engine_really_has_one_slot(self):
-        import importlib
-        os.environ.setdefault("DATABASE_URL", "postgresql+psycopg2://nobody:nobody@127.0.0.1:1/unreachable")
-        module = importlib.import_module("scripts.populate_test_niches")
-        self.assertEqual((module.engine.pool.size(), module.engine.pool._max_overflow), (1, 0))
 
     def test_the_migration_engine_does_not_pool(self):
         self.assertIn("poolclass=NullPool", (ROOT / "pipeline" / "migration_settings.py").read_text())

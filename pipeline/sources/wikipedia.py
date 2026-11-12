@@ -388,7 +388,6 @@ def search_wikipedia_brands(niche: str, **_kwargs) -> list[dict]:
         "website":       str,   # official website URL (P856), or ""
         "domain":        str,   # bare domain, or ""
         "description":   str,   # Wikidata English description, or ""
-        "wikipedia_url": str,   # canonical English Wikipedia URL
       }
 
     Any extra kwargs (geo filters) are accepted but ignored —
@@ -432,7 +431,6 @@ def search_wikipedia_brands(niche: str, **_kwargs) -> list[dict]:
             "website":       website,
             "domain":        _extract_domain(website),
             "description":   meta.get("description", ""),
-            "wikipedia_url": f"{WIKI_BASE}/wiki/{title.replace(' ', '_')}",
         })
 
     website_count = sum(1 for r in records if r["website"])

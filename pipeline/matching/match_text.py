@@ -19,7 +19,6 @@ from pipeline.helpers.creator_gender import creator_match_gender
 from pipeline.db import (
     BrandContact,
     BrandInstagramUser,
-    BrandNiche,
     BrandProfile,
     BrandRaw,
     ContentCreatorRE,
@@ -494,15 +493,9 @@ def _same_niche_partner(creator: CreatorProfile, brand: BrandRaw, db) -> bool:
 
 
 def _brand_tags(brand: BrandRaw, db) -> set[str]:
-    rows = db.query(BrandNiche.tags).filter(
-        BrandNiche.brand_raw_id == brand.id,
-        BrandNiche.tags.isnot(None),
-    ).all()
     return {
         str(tag).strip().lower()
-        for (tags,) in rows
-        if isinstance(tags, list)
-        for tag in tags
+        for tag in (brand.tags if isinstance(brand.tags, list) else [])
         if isinstance(tag, str) and tag.strip()
     }
 

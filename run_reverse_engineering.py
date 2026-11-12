@@ -196,7 +196,7 @@ def _pending_for_scoring(db, brand_ids: set[int]) -> set[int]:
         row.id for row in
         db.query(BrandRaw.id).filter(
             BrandRaw.id.in_(brand_ids),
-            BrandRaw.has_official_website == True,
+            BrandRaw.has_website,
             BrandRaw.wikidata_enriched  == True,
             BrandRaw.shopify_checked    == True,
             BrandRaw.tranco_checked     == True,
@@ -267,12 +267,12 @@ def main() -> None:
             for (row_id,) in db.query(BrandRaw.id)
             .filter(
                 BrandRaw.id.in_(brand_ids),
-                BrandRaw.has_official_website.is_(True),
+                BrandRaw.has_website,
             )
             .all()
         }
         if not website_brand_ids:
-            logger.info("No discovered brands with has_official_website=True — skipping instagram_posts.")
+            logger.info("No discovered brands with a website — skipping instagram_posts.")
         else:
             run_per_brand("10/12 instagram_posts", enrich_instagram_posts, db, website_brand_ids)
 

@@ -35,8 +35,6 @@ GUARDED = [
     ("pipeline/enrichment_re/content_creator_re.py", "_ensure_partnership_evidence_table"),
     ("gender_check/run_brand_gender_check.py", "_ensure_gender_columns"),
     ("gender_check/run_brand_website_audience_check.py", "_ensure_latest_product_columns"),
-    ("scripts/populate_test_niches.py", "populate_test_niches"),
-    ("scripts/embed_test_niches.py", "ensure_embedding_column"),
     ("script_creator_niche/embed_creator_niches.py", "ensure_embedding_column"),
 ]
 
@@ -99,11 +97,6 @@ class EveryDdlScriptIsGuarded(unittest.TestCase):
                 risky = [line for line, name in calls if name in ("execute", "create_all", "begin", "connect", "insert")]
                 self.assertTrue(risky, "the function no longer runs DDL: update GUARDED")
                 self.assertLess(guard_line, min(risky))
-
-    def test_populate_script_main_guards_before_create_all(self):
-        source = (ROOT / "scripts/populate_test_niches.py").read_text()
-        main = source[source.index('if __name__ == "__main__":'):]
-        self.assertLess(main.index("require_owner_role"), main.index("create_all"))
 
     def test_scripts_stop_before_any_ddl_as_the_runtime_role(self):
         import main as main_module

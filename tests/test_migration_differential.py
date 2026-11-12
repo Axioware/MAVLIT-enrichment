@@ -210,7 +210,7 @@ class _Differential:
 
     def test_a_second_start_matches_too(self):
         self.assertEqual(self._comparable(self.head_again), self._comparable(self.new_again))
-        # Repeatable: nothing changes on a second run, except that INSERT ... ON CONFLICT DO NOTHING (the brands_niches backfill) consumes
+        # Repeatable: nothing changes on a second run, except that INSERT ... ON CONFLICT DO NOTHING consumes
         # sequence values even when it inserts nothing. The original does exactly the same, so the sequences are compared by how far each moved.
         without_sequences = lambda snap: {k: v for k, v in self._comparable(snap).items() if k != "sequences"}   # noqa: E731
         self.assertEqual(without_sequences(self.new), without_sequences(self.new_again), "the extracted migration is repeatable")
@@ -278,10 +278,9 @@ class _Differential:
         hashes = {r["id"]: r["password_hash"] for r in self._rows(self.new, "creator_profiles")}
         self.assertEqual(hashes, {1: "hash-one", 2: "already-set", 3: None})
 
-    def test_new_columns_got_their_defaults_over_existing_rows_and_brands_niches_were_backfilled(self):
+    def test_new_columns_got_their_defaults_over_existing_rows(self):
         self.assertEqual({r["refferls"] for r in self._rows(self.new, "brands_raw")}, {False})
         self.assertEqual({r["is_manual"] for r in self._rows(self.new, "pitches")}, {False})
-        self.assertEqual(sorted((r["brand_raw_id"], r["niche"]) for r in self._rows(self.new, "brands_niches")), [(1, "beauty"), (2, "fitness"), (3, "music")])
         nullable = {(t, c): not nn for t, c, ty, nn, *_ in self.new["columns"]}
         for pair in (("brands_raw", "name"), ("brands_raw", "niche"), ("instagram_posts", "post_id"), ("creator_profiles", "full_name"), ("rate_estimates", "brand_raw_id")):
             self.assertTrue(nullable[pair], pair)

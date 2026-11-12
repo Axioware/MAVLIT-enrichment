@@ -89,7 +89,7 @@ _SUB_NICHES_MAX = 4
 def sub_niche_options(db: Session, niche: str) -> list[str]:
     """
     The sub-niches a creator of `niche` can pick from: the tags of the brands in that
-    niche (brands_niches.tags - the same tags the profile page's sub-niche picker lists),
+    niche (brands_raw.tags - the same tags the profile page's sub-niche picker lists),
     most common first, at most _SUB_NICHE_OPTIONS_LIMIT.
     """
     niches = [n.strip().lower() for n in (niche or "").split(",") if n.strip()]
@@ -97,7 +97,7 @@ def sub_niche_options(db: Session, niche: str) -> list[str]:
         return []
     rows = db.execute(text("""
         SELECT min(btrim(tag)) AS tag, COUNT(*) AS n
-        FROM brands_niches bn, jsonb_array_elements_text(bn.tags) AS tag
+        FROM brands_raw bn, jsonb_array_elements_text(bn.tags) AS tag
         WHERE jsonb_typeof(bn.tags) = 'array' AND lower(btrim(bn.niche)) = ANY(:niches) AND btrim(tag) <> ''
         GROUP BY lower(btrim(tag))
         ORDER BY n DESC, 1

@@ -12,23 +12,22 @@ What the LLM is given (prompt: rate_intelligence_estimate):
   - the creators the brand has paid (confirmed partnership posts, sponsorship confidence >= 90, from instagram_posts
     and test_creator_brand_partnership_posts) with their follower counts, niches and buckets, and the views and
     likes of that sponsored post;
-  - rate data from pipeline/data/rate_buckets_with_views_by_niche.csv (self-reported rate cards of ~2,400 Instagram
-    creators): the row for the creator's niche x follower bucket x deliverable (creators, price points, min, max,
+  - rate data from the rate_benchmarks table (self-reported rate cards of ~2,400 Instagram creators; first filled from
+    pipeline/rate_benchmark_seed.py, changed with SQL): the row for the creator's niche x follower bucket x deliverable (creators, price points, min, max,
     average, median, and the views of those creators), the same niche and deliverable across all buckets, and the
     same row for each partner creator;
   - the views check: a creator whose typical views (median of their last 20 posts) are well above their follower
     bucket's, and close to the next bucket's, is priced from the next bucket (views_adjustment).
 """
 
-import csv
 import logging
-from functools import lru_cache
-from pathlib import Path
+import threading
+import time
 
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from pipeline.db import BrandRaw, CreatorInstagramPost, CreatorProfile, Prompt, RateEstimate
+from pipeline.db import BrandRaw, CreatorInstagramPost, CreatorProfile, Prompt, RateBenchmark, RateEstimate
 from pipeline.helpers.db import escape_like
 from pipeline.helpers.gpt_llm import call_gpt_json, capture_llm_usage, fill_template, llm_usage_scope
 from pipeline.helpers.prompts import RATE_INTEL_DEFAULT_PROMPT, RATE_INTEL_PROMPT_NAME
@@ -38,7 +37,10 @@ logger = logging.getLogger(__name__)
 
 MIN_PARTNERSHIP_CONFIDENCE = 90
 PARTNER_CREATORS_MAX = 10
-_DATA_FILE = Path(__file__).parent / "data" / "rate_buckets_with_views_by_niche.csv"
+# The rate data is the rate_benchmarks table (see _rate_rows); it is read through a cache that is at most this old.
+RATE_CACHE_SECONDS = 60
+_rate_cache: tuple[float, tuple[dict, ...]] | None = None
+_rate_cache_lock = threading.Lock()
 
 # The follower buckets of the rate data (lower end included), smallest first.
 FOLLOWER_BUCKETS = [
@@ -70,25 +72,41 @@ def _get_rate_intel_prompt(db: Session) -> str:
     return row.content if row else RATE_INTEL_DEFAULT_PROMPT
 
 
-def _float(value: str | None) -> float | None:
+def _float(value: float | str | None) -> float | None:
     return float(value) if value not in (None, "") else None
 
 
-@lru_cache(maxsize=1)
-def _rate_rows() -> tuple[dict, ...]:
-    with open(_DATA_FILE, newline="", encoding="utf-8") as fh:
-        rows = []
-        for row in csv.DictReader(fh):
-            rows.append({
-                "niche": row["niche"], "bucket": row["follower_bucket"], "deliverable": row["deliverable"],
-                "creators": int(row["creators_in_bucket"]), "points": int(row["price_points"]),
-                "min": float(row["min_usd"]), "max": float(row["max_usd"]),
-                "avg": float(row["avg_usd"]), "median": float(row["median_usd"]),
-                "views_creators": int(row["views_creators"] or 0),
-                "views_min": _float(row["views_min"]), "views_max": _float(row["views_max"]),
-                "views_avg": _float(row["views_avg"]), "views_median": _float(row["views_median"]),
-            })
-    return tuple(rows)
+def invalidate_rate_cache() -> None:
+    """Forget the cached rate rows: the next estimate reads the table again (tests call it between cases; a change made in the table shows up by itself within RATE_CACHE_SECONDS)."""
+    global _rate_cache
+    _rate_cache = None
+
+
+def _rate_rows(db: Session) -> tuple[dict, ...]:
+    """
+    The rate data from the rate_benchmarks table, as dicts. Kept in memory for RATE_CACHE_SECONDS (the table is 72 small rows and changes by hand in the admin),
+    so an estimate normally costs no query; a change made in the table shows up within a minute.
+    """
+    global _rate_cache
+    cached = _rate_cache
+    if cached and time.monotonic() - cached[0] < RATE_CACHE_SECONDS:
+        return cached[1]
+    with _rate_cache_lock:
+        cached = _rate_cache
+        if cached and time.monotonic() - cached[0] < RATE_CACHE_SECONDS:
+            return cached[1]
+        rows = tuple(
+            {
+                "niche": r.niche, "bucket": r.follower_bucket, "deliverable": r.deliverable,
+                "creators": int(r.creators_in_bucket), "points": int(r.price_points),
+                "min": float(r.min_usd), "max": float(r.max_usd), "avg": float(r.avg_usd), "median": float(r.median_usd),
+                "views_creators": int(r.views_creators or 0),
+                "views_min": _float(r.views_min), "views_max": _float(r.views_max), "views_avg": _float(r.views_avg), "views_median": _float(r.views_median),
+            }
+            for r in db.query(RateBenchmark).order_by(RateBenchmark.id).all()
+        )
+        _rate_cache = (time.monotonic(), rows)
+        return rows
 
 
 def follower_bucket(followers: int | None) -> str | None:
@@ -116,8 +134,8 @@ def dataset_deliverable(deliverable_type: str) -> str | None:
     return _DATASET_DELIVERABLE.get((deliverable_type or "").strip().lower())
 
 
-def rate_row(niche: str | None, bucket: str | None, deliverable: str | None) -> dict | None:
-    return next((r for r in _rate_rows() if (r["niche"], r["bucket"], r["deliverable"]) == (niche, bucket, deliverable)), None)
+def rate_row(db: Session, niche: str | None, bucket: str | None, deliverable: str | None) -> dict | None:
+    return next((r for r in _rate_rows(db) if (r["niche"], r["bucket"], r["deliverable"]) == (niche, bucket, deliverable)), None)
 
 
 def _money(value: float) -> str:
@@ -132,12 +150,12 @@ def _row_text(row: dict, deliverable_label: str) -> str:
     return text_
 
 
-def _rate_data_text(niche: str | None, bucket: str | None, deliverable: str | None, followers: int | None) -> tuple[str, str]:
+def _rate_data_text(db: Session, niche: str | None, bucket: str | None, deliverable: str | None, followers: int | None) -> tuple[str, str]:
     """(the creator's matching row, the ladder across buckets) as prompt text."""
     if not niche or not deliverable:
         why = "the creator's niche is not covered by the rate data (Music, Beauty, Fitness and Health are)" if not niche else "this deliverable type has no rate data"
         return f"No matching rate data: {why}.", "none"
-    ladder_rows = [r for r in _rate_rows() if r["niche"] == niche and r["deliverable"] == deliverable]
+    ladder_rows = [r for r in _rate_rows(db) if r["niche"] == niche and r["deliverable"] == deliverable]
     ladder_rows.sort(key=lambda r: [name for _, name in FOLLOWER_BUCKETS].index(r["bucket"]))
     ladder = "\n".join(
         f"- {r['bucket']}{'  <- the creator' if r['bucket'] == bucket else ''}: {_row_text(r, deliverable)}" for r in ladder_rows
@@ -148,7 +166,7 @@ def _rate_data_text(niche: str | None, bucket: str | None, deliverable: str | No
             f", which is below the smallest bucket (5k), so there is no exact row. " + \
             (f"The smallest bucket, {smallest['bucket']}, is the nearest reference: {_row_text(smallest, deliverable)}." if smallest else "")
         return row_text.strip(), ladder
-    row = rate_row(niche, bucket, deliverable)
+    row = rate_row(db, niche, bucket, deliverable)
     if not row:
         return f"No rate data for {niche}, {bucket}, {deliverable}.", ladder
     return f"{niche}, {bucket} followers, {deliverable}: {_row_text(row, deliverable)}", ladder
@@ -175,7 +193,7 @@ def creator_typical_views(db: Session, creator: CreatorProfile) -> tuple[int | N
     return int(views[mid] if len(views) % 2 else (views[mid - 1] + views[mid]) / 2), len(views)
 
 
-def views_adjustment(niche: str | None, bucket: str | None, deliverable: str | None, creator_views: int | None) -> dict:
+def views_adjustment(db: Session, niche: str | None, bucket: str | None, deliverable: str | None, creator_views: int | None) -> dict:
     """
     Price a creator whose views beat their follower bucket from the next bucket. Returns {"applied", "reason", ...}.
 
@@ -191,8 +209,8 @@ def views_adjustment(niche: str | None, bucket: str | None, deliverable: str | N
         return no(f"the views check is only used for {' and '.join(VIEWS_DELIVERABLES)} rates")
     if not creator_views:
         return no(f"fewer than {MIN_POSTS_WITH_VIEWS} of the creator's last {VIEWS_POSTS_WINDOW} posts have a view count")
-    own, nxt_name = rate_row(niche, bucket, deliverable), next_bucket(bucket)
-    nxt = rate_row(niche, nxt_name, deliverable) if nxt_name else None
+    own, nxt_name = rate_row(db, niche, bucket, deliverable), next_bucket(bucket)
+    nxt = rate_row(db, niche, nxt_name, deliverable) if nxt_name else None
     if not own or not own["views_median"]:
         return no("no views data for the creator's follower bucket")
     base = {"creator_views": creator_views, "bucket": bucket, "bucket_median_views": own["views_median"], "bucket_median_price": own["median"]}
@@ -261,7 +279,7 @@ def creator_best_posts(db: Session, creator: CreatorProfile) -> dict:
     }
 
 
-def _partner_text(creators: list[dict], deliverable: str | None) -> str:
+def _partner_text(db: Session, creators: list[dict], deliverable: str | None) -> str:
     if not creators:
         return "none on file"
     lines = []
@@ -276,7 +294,7 @@ def _partner_text(creators: list[dict], deliverable: str | None) -> str:
         if c.get("posted_at"):
             parts.append(f"sponsored post on {str(c['posted_at'])[:10]}")
         parts.append(f"that post: {_count(c.get('views'))} views, {_count(c.get('likes_count'))} likes")
-        row = rate_row(niche, bucket, deliverable)
+        row = rate_row(db, niche, bucket, deliverable)
         if row:
             parts.append(f"rate data for their bucket ({bucket}, {niche}): median {_money(row['median'])}, "
                          f"min {_money(row['min'])}, max {_money(row['max'])} per {deliverable}")
@@ -347,11 +365,11 @@ def estimate_rate(
     niche = dataset_niche(creator.instagram_primary_niche, creator.content_niche)
     bucket = follower_bucket(followers)
     deliverable = dataset_deliverable(deliverable_type)
-    row_text, ladder_text = _rate_data_text(niche, bucket, deliverable, followers)
+    row_text, ladder_text = _rate_data_text(db, niche, bucket, deliverable, followers)
     partners = partner_creators_all(db, brand.id) if brand else []
     best = creator_best_posts(db, creator)
     typical_views, posts_counted = creator_typical_views(db, creator)
-    views_adj = views_adjustment(niche, bucket, deliverable, typical_views)
+    views_adj = views_adjustment(db, niche, bucket, deliverable, typical_views)
     if views_adj["applied"]:
         row_text += f" Views-adjusted median for this creator: {_money(views_adj['adjusted_median_price'])} (see the VIEWS CHECK)."
 
@@ -372,7 +390,7 @@ def estimate_rate(
         usage=usage or "none specified",
         brand_name=name,
         brand_followers=_brand_instagram_followers(db, brand.id) if brand else "unknown (the brand is not in MAVLIT's database)",
-        partner_creators=_partner_text(partners, deliverable),
+        partner_creators=_partner_text(db, partners, deliverable),
         data_creators="about 2,400",
         rate_row=row_text,
         rate_ladder=ladder_text,
@@ -423,7 +441,7 @@ def estimate_rate(
         "adjustments": [{"factor": str(a.get("factor") or ""), "effect": str(a["effect"])} for a in adjustments],
         "creator_niche": niche, "follower_bucket": bucket, "creator_followers": followers,
         "creator_highest_views": best["views"], "creator_highest_likes": best["likes"],
-        "data_row": rate_row(niche, bucket, deliverable),
+        "data_row": rate_row(db, niche, bucket, deliverable),
         "creator_typical_views": typical_views, "views_adjustment": views_adj,
         "brand_followers": _brand_instagram_followers(db, brand.id) if brand else None,
         "partner_creators": [

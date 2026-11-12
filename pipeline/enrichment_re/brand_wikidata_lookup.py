@@ -203,12 +203,8 @@ def _apply_match(db: Session, brand: BrandRaw, data: dict, handle: str) -> None:
     brand.entity_type       = data.get("entity_type") or None
     brand.description       = data.get("description") or None
     brand.website           = website
-    brand.domain            = _extract_domain(website) or None
-    brand.has_official_website = bool(website)
     brand.website_source    = "wikidata" if website else None
     brand.source            = "wikidata"
-    brand.source_confidence = 100
-    brand.source_url        = _SPARQL_URL
     brand.instagram_wikidata_checked = True
 
     try:
@@ -242,8 +238,6 @@ def _fill_blank_fields(db: Session, brand: BrandRaw, data: dict, handle: str) ->
     website = data.get("website") or None
     if not brand.website and website:
         brand.website = website
-        brand.domain = brand.domain or _extract_domain(website) or None
-        brand.has_official_website = True
         brand.website_source = "wikidata"
         filled.append("website")
     brand.instagram_wikidata_checked = True

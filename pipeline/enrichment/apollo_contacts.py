@@ -90,6 +90,7 @@ from config import APOLLO_API_KEY, ENABLE_APOLLO_PHONE_REVEAL, OPENAI_KEY
 from pipeline.db import BrandContact, BrandProfile, BrandRaw, InitialBrandScore, Prompt
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import APOLLO_RANK_DEFAULT_PROMPT, APOLLO_RANK_PROMPT_NAME
+from pipeline.helpers.website import website_domain
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +199,7 @@ class _ApolloAuthError(Exception):
 
 
 def _brand_location(brand: BrandRaw) -> str | None:
-    return brand.headquarters or brand.location or brand.country or None
+    return brand.country or None
 
 
 def _apollo_search(payload: dict, brand_name: str) -> list[dict]:
@@ -229,8 +230,8 @@ def _search_people(brand: BrandRaw) -> list[dict]:
         "include_similar_titles": True,
         "per_page":               _SEARCH_PER_PAGE,
     }
-    if brand.domain:
-        payload["q_organization_domains_list"] = [brand.domain]
+    if website_domain(brand.website):
+        payload["q_organization_domains_list"] = [website_domain(brand.website)]
     else:
         payload["organization_names"] = [brand.name]
 
@@ -252,8 +253,8 @@ def _search_c_suite(brand: BrandRaw) -> list[dict]:
         "person_seniorities": _C_SUITE_SENIORITIES,
         "per_page":           _SEARCH_PER_PAGE,
     }
-    if brand.domain:
-        payload["q_organization_domains_list"] = [brand.domain]
+    if website_domain(brand.website):
+        payload["q_organization_domains_list"] = [website_domain(brand.website)]
     else:
         payload["organization_names"] = [brand.name]
 
@@ -635,7 +636,7 @@ def run_apollo_contacts(db: Session, limit: int = 20, brand_id: int | None = Non
         query = query.filter(BrandRaw.id == brand_id)
     else:
         query = (
-            query.filter(BrandRaw.has_official_website == True)
+            query.filter(BrandRaw.has_website)
             .outerjoin(BrandContact, BrandContact.brand_raw_id == BrandRaw.id)
             .filter(BrandContact.id.is_(None))
         )
