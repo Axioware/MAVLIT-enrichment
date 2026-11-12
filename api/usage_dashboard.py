@@ -1,5 +1,5 @@
 """
-Numbers for the admin "Usage & Cost" page (api/app.py UsageDashboardAdmin, api/usage_api.py). Read-only SQL over llm_usage and apify_usage (spend),
+Numbers for the admin Usage & Cost page of the app (GET /usage/summary in api/usage_api.py; the page itself is in the frontend at /admin). Read-only SQL over llm_usage and apify_usage (spend),
 feature_usage, contact_reveals, feature_locks, login_failures, own_brand_jobs, creator_profiles, early_access_signups and account_invites. Costs are
 the logged cost_usd values (NULL counts as 0; Apify's is an estimate).
 

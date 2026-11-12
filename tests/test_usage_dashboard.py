@@ -1,4 +1,5 @@
-"""Admin > Usage & Cost: the page renders the logged OpenAI and Apify spend. Needs MAVLIT_TEST_PG_URL."""
+"""The numbers behind the admin Usage & Cost page (api/usage_dashboard.py), and the fact that the old backend-admin page is gone. Needs MAVLIT_TEST_PG_URL."""
+import json
 import os
 import re
 import sys
@@ -19,7 +20,7 @@ from sqlalchemy.pool import NullPool  # noqa: E402
 
 
 @unittest.skipUnless(TEST_URL, "set MAVLIT_TEST_PG_URL to a disposable local PostgreSQL database to run these tests")
-class UsageCostPage(unittest.TestCase):
+class UsageDashboardData(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         url = make_url(TEST_URL)
@@ -78,16 +79,16 @@ class UsageCostPage(unittest.TestCase):
             conn.execute(text("INSERT INTO apify_usage (creator_profile_id, feature, platform, handle, posts_scraped, cost_usd) VALUES "
                               "(1, 'description', 'instagram', 'me', 20, 0.046), (NULL, NULL, 'instagram', 'nike', 40, 0.092)"))
 
-    def test_the_page_shows_only_what_users_spent_not_the_enrichment_scripts(self):
+    def test_the_backend_admin_no_longer_has_a_usage_and_cost_page(self):
+        import api.app as api_app
         self.seed()
-        page = self.client.get("/admin/usage-cost")
-        self.assertEqual(page.status_code, 200, page.text[:300])
-        for text_ in ("Usage &amp; Cost", "$0.546", "member@example.test", "Pitches", "Sign-up funnel", "Failed sign-ins"):
-            self.assertIn(text_, page.text)
-        for gone in ("$0.888", "script-model", "demographics", "Enrichment scripts", "nike"):   # the script's call and Apify run are not shown anywhere
-            self.assertNotIn(gone, page.text)
-        if os.environ.get("UC_SAVE"):
-            Path(os.environ["UC_SAVE"]).write_text(page.text)
+        self.assertEqual(self.client.get("/admin/usage-cost").status_code, 404)                  # signed in to the backend admin: no such page any more
+        self.assertEqual(self.client.get("/admin/usage-cost?days=7").status_code, 404)
+        self.assertFalse([v for v in api_app.admin.views if getattr(v, "identity", "") == "usage-cost" or getattr(v, "name", "") == "Usage & Cost"])   # and no sidebar entry
+        self.assertFalse(hasattr(api_app, "UsageDashboardAdmin"))
+        self.assertFalse((ROOT / "templates" / "sqladmin" / "usage_cost.html").exists())
+        self.assertEqual(self.client.get("/admin/send-invite").status_code, 200)                 # the other custom admin page is untouched
+        self.assertTrue([v for v in api_app.admin.views if getattr(v, "identity", "") == "user-activity"])   # and so are the model pages
 
     def test_every_cost_figure_leaves_the_enrichment_scripts_out(self):
         from api import usage_dashboard
@@ -104,28 +105,31 @@ class UsageCostPage(unittest.TestCase):
         self.assertNotIn("split", d)
 
     def test_the_window_and_user_options_work(self):
-        self.seed()
-        for q in ("?days=7", "?days=90", "?days=999", "?user=1", "?user=999", "?user=abc"):
-            self.assertEqual(self.client.get("/admin/usage-cost" + q).status_code, 200, q)
-
-    def test_the_limits_show_up_and_there_is_no_budget_anywhere(self):
         from api import usage_dashboard
         self.seed()
-        with self.engine.begin() as conn:
-            conn.execute(text("INSERT INTO feature_usage (creator_profile_id, feature, used_on, uses) VALUES (1, 'pitches', current_date, 29)"))
+        self.assertEqual([usage_dashboard.parse_days(v) for v in ("7", "30", "90", "999", "abc", None)], [7, 30, 90, 30, 30, 30])
+        with Session(self.engine) as db:
+            for days in (7, 30, 90):
+                self.assertEqual(usage_dashboard.load(db, days)["days"], days)
+            self.assertEqual(usage_dashboard.load(db, 30, user_id=1)["user"]["email"], "member@example.test")
+            self.assertEqual(usage_dashboard.load(db, 30, user_id=999)["user"]["features"], [])   # an unknown user shows nothing
+
+    def test_there_is_no_budget_anywhere(self):
+        from api import usage_dashboard
+        self.seed()
         with mock.patch.dict(os.environ, {"USAGE_MONTHLY_BUDGET_USD": "10"}):   # the old setting does nothing now
-            page = self.client.get("/admin/usage-cost").text
             with Session(self.engine) as db:
                 data = usage_dashboard.load(db, 30)
-        self.assertIn("29 / 30", page)
-        self.assertNotIn("budget", page.lower())
         self.assertFalse([k for k in data["cards"] if "budget" in k] + [k for k in data if "budget" in k])
 
-    def test_an_empty_database_still_renders(self):
-        self.assertEqual(self.client.get("/admin/usage-cost").status_code, 200)
-
-    def test_the_page_is_behind_the_admin_login(self):
-        self.assertEqual(TestClient(self.client.app, follow_redirects=False).get("/admin/usage-cost").status_code, 302)
+    def test_an_empty_database_still_loads(self):
+        from api import usage_dashboard
+        with self.engine.begin() as conn:
+            conn.execute(text("TRUNCATE creator_profiles RESTART IDENTITY CASCADE"))
+        with Session(self.engine) as db:
+            d = usage_dashboard.load(db, 30)
+        self.assertEqual((d["cards"]["d30"], d["users"], d["activity_users"], d["window_total"]), (0, [], [], 0))
+        self.assertEqual(len(d["feature_daily"]), 30)
 
     def test_active_users_per_day_counts_each_person_once_and_counts_every_kind_of_activity(self):
         from api import usage_dashboard
@@ -171,9 +175,9 @@ class UsageCostPage(unittest.TestCase):
         self.assertEqual([f["n"] for f in d["funnel"]], [1, 1, 0])                                # the test account's sign-up and invitation are not counted
         self.assertEqual(d["funnel_extra"]["accounts"], 1)
         self.assertEqual((blocked["user"]["features"], blocked["user"]["recent"]), ([], []))     # opening a test account shows nothing
-        page = self.client.get("/admin/usage-cost").text
+        everything = json.dumps(d, default=str).lower()                                           # nothing of theirs appears anywhere in the numbers
         for hidden in ("abdulrauf@axioware.tech", "abdulrauf_99", "abc@gmail.com", "model-4", "model-99", "handle2", "handle99"):
-            self.assertNotIn(hidden.lower(), page.lower())
+            self.assertNotIn(hidden.lower(), everything)
 
     def test_one_users_activity_lists_what_they_did_with_the_time_and_counts_the_most_used_feature(self):
         from api import usage_dashboard

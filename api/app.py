@@ -944,29 +944,6 @@ class SendInviteAdmin(BaseView):
                                                      {"title": "Send Invitation", "subtitle": "Early-access invitations", "form": form, "result": result, "recent": rows})
 
 
-class UsageDashboardAdmin(BaseView):
-    """
-    "Usage & Cost": what USERS spent on OpenAI and Apify (the enrichment scripts' own cost is not counted), plus limits, health and the sign-up
-    funnel, read-only. The queries live in api/usage_dashboard.py. ?days=7|30|90 sets the window, ?user=<id> opens one user.
-    """
-    name = "Usage & Cost"
-    icon = "fa-solid fa-chart-column"
-
-    @expose("/usage-cost", methods=["GET"], identity="usage-cost")
-    async def usage_cost(self, request: Request):
-        from api import usage_dashboard
-        days = usage_dashboard.parse_days(request.query_params.get("days"))
-        user = request.query_params.get("user")
-        user_id = int(user) if user and user.isdigit() else None
-
-        def load():
-            with SessionLocal() as db:
-                return usage_dashboard.load(db, days, user_id)
-        data = await anyio.to_thread.run_sync(load)
-        return await self.templates.TemplateResponse(request, "sqladmin/usage_cost.html",
-                                                     {"title": "Usage & Cost", "subtitle": f"User spend on OpenAI and Apify, last {days} days", "d": data})
-
-
 def invites_default_days() -> int:
     from pipeline.early_access_invites import DEFAULT_DAYS
     return DEFAULT_DAYS
@@ -1269,7 +1246,6 @@ admin.add_view(OwnBrandJobAdmin)
 admin.add_view(RateEstimateAdmin)
 admin.add_view(EarlyAccessSignupAdmin)
 admin.add_base_view(SendInviteAdmin)
-admin.add_base_view(UsageDashboardAdmin)
 admin.add_view(AccountInviteAdmin)
 admin.add_view(PasswordResetTokenAdmin)
 admin.add_view(CreatorBrandLlmV3RankingAdmin)
