@@ -9,7 +9,7 @@ from api.creator_posts import ThumbnailTooLarge, _fetch_thumbnail
 from pipeline.db import BrandRaw, CreatorProfile, Pitch, get_db
 from pipeline.brand_intelligence import brand_creators, brand_stats
 from pipeline.helpers.gpt_llm import LLMUnavailableError
-from pipeline.similar_creators import DEFAULT_LIMIT, MIN_PARTNERSHIP_CONFIDENCE, SIMILARITY_THRESHOLD, audience_range, find_similar_creators, peer_averages, is_partnership_post_code, your_stats, user_query_embedding, user_query_text
+from pipeline.similar_creators import DEFAULT_LIMIT, MIN_PARTNERSHIP_CONFIDENCE, SIMILARITY_THRESHOLD, audience_range, find_similar_creators, peer_averages, peer_content_mix, is_partnership_post_code, your_stats, user_query_embedding, user_query_text
 
 router = APIRouter(prefix="/feed", tags=["feed"])
 
@@ -65,7 +65,7 @@ def market_insights(db: Session = Depends(get_db), user: CreatorProfile = Depend
     stats = brand_stats(db, [m.brand_raw_id for m in missed])
     return {
         "ready": similar["ready"], "you": similar["you"], "audience_range": similar["audience_range"], "threshold": similar["threshold"],
-        "peers": {"count": len(creators), **peer_averages(creators),
+        "peers": {"count": len(creators), **peer_averages(creators), **peer_content_mix(creators),
                   "creators": [{"username": c["username"], "similarity": c["similarity"], "followers": c["followers"]} for c in creators]},
         "missed_brands": [{"brand_raw_id": m.brand_raw_id, "brand_name": m.brand_name, "niche": m.niche, "website": m.website,
                            "rank": m.rank, "confidence": m.confidence, "partnerships": stats[m.brand_raw_id]["partnerships"]} for m in missed],

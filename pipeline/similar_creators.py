@@ -250,6 +250,16 @@ def peer_averages(creators: list[dict]) -> dict:
             "avg_posts_per_week": mean("posts_per_week", 1), "avg_partnerships": mean("partnership_count", 1)}
 
 
+def peer_content_mix(creators: list[dict]) -> dict:
+    """
+    The peers' average content mix, in percent per category: {"content_mix": {name: pct}, "mix_count": n}. Only peers whose mix was estimated count; a category
+    one of them has none of counts as 0% for that peer. Empty when no peer has a mix.
+    """
+    mixes = [{c["name"]: c["pct"] for c in creator["content_categories"]} for creator in creators if creator.get("content_categories")]
+    names = sorted({name for mix in mixes for name in mix})
+    return {"content_mix": {name: round(sum(mix.get(name, 0) for mix in mixes) / len(mixes), 1) for name in names} if mixes else {}, "mix_count": len(mixes)}
+
+
 POSTING_WINDOW_DAYS = 14
 
 

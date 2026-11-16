@@ -23,6 +23,19 @@ def vec(cosine: float) -> list[float]:
     return v
 
 
+class PeerContentMix(unittest.TestCase):
+    def test_the_average_mix_of_the_peers_that_have_one(self):
+        from pipeline.similar_creators import peer_content_mix
+        peers = [
+            {"content_categories": [{"name": "Tutorial", "pct": 40}, {"name": "Lifestyle", "pct": 60}]},
+            {"content_categories": [{"name": "Tutorial", "pct": 20}, {"name": "Promotional", "pct": 80}]},
+            {"content_categories": None},                      # no mix estimated for this peer: it does not count (and does not dilute the others)
+        ]
+        self.assertEqual(peer_content_mix(peers), {"content_mix": {"Lifestyle": 30.0, "Promotional": 40.0, "Tutorial": 30.0}, "mix_count": 2})
+        self.assertEqual(peer_content_mix([{"content_categories": None}]), {"content_mix": {}, "mix_count": 0})
+        self.assertEqual(peer_content_mix([]), {"content_mix": {}, "mix_count": 0})
+
+
 class PeerAverages(unittest.TestCase):
     def test_each_number_is_the_average_over_the_peers_that_have_it(self):
         from pipeline.similar_creators import peer_averages
@@ -107,6 +120,15 @@ class AgainstPostgres(unittest.TestCase):
         self.assertEqual(peers["avg_followers"], 1080)       # (800 + 1200 + 1000 + 1500 + 900) / 5
         self.assertEqual(peers["avg_engagement"], 4.0)       # (4 + 6 + 5 + 2 + 3) / 5
         self.assertEqual(peers["avg_partnerships"], 1.0)
+        self.assertEqual((peers["content_mix"], peers["mix_count"]), ({}, 0))      # no peer has an estimated content mix yet
+
+    def test_the_peers_average_content_mix_is_returned_when_they_have_one(self):
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE creator_niches SET content_categories = CAST('[{\"name\": \"Tutorial\", \"pct\": 60}, {\"name\": \"Lifestyle\", \"pct\": 40}]' AS jsonb) WHERE username IN ('c1', 'c2')"))
+            conn.execute(text("UPDATE creator_niches SET content_categories = CAST('[{\"name\": \"Tutorial\", \"pct\": 20}, {\"name\": \"Promotional\", \"pct\": 80}]' AS jsonb) WHERE username = 'c3'"))
+        peers = self.client().get("/feed/market-insights").json()["peers"]
+        self.assertEqual(peers["mix_count"], 3)
+        self.assertEqual(peers["content_mix"], {"Lifestyle": 26.7, "Promotional": 26.7, "Tutorial": 46.7})   # (60 + 60 + 20) / 3 and so on
 
     def test_you_are_returned_with_your_own_numbers(self):
         you = self.client().get("/feed/market-insights").json()["you"]
