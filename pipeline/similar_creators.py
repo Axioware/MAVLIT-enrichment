@@ -336,8 +336,8 @@ def your_stats(db: Session, user) -> dict:
         "posts_per_week": posts_per_week([r.timestamp for r in rows]),
         "product_focused_pct": user.instagram_product_focused_pct,       # the content mix MAVLIT estimated when it generated the profile
         "content_categories": user.instagram_content_categories,
-        # what the user typed; until then the number of their saved posts they marked as a paid partnership (None when there are none)
-        "brand_partnerships": user.brand_partnerships if user.brand_partnerships is not None else (sum(1 for r in rows if r.partnership_post) or None),
+        # the posts the user marked as a paid partnership (the switch in "Your recent Instagram posts"): each counts as one brand partnership; 0 when none is marked
+        "brand_partnerships": sum(1 for r in rows if r.partnership_post),
     }
 
 

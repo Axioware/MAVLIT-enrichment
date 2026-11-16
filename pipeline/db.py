@@ -696,7 +696,7 @@ class CreatorProfile(Base):
     # The creator's content mix, estimated by the LLM from their captions when MAVLIT generates the Instagram description (percent).
     instagram_product_focused_pct = Column(Integer)       # share of posts that feature, review or promote a product
     instagram_content_categories = Column(JSONB)          # [{"name": "Tutorial", "pct": 32}, ...] the five biggest, e.g. Tutorial 32%, Product review 18%
-    brand_partnerships = Column(Integer)   # how many brand partnerships the creator has had: typed on the profile, shown next to a similar creator's in "Why Them, Not Me?"
+    brand_partnerships = Column(Integer)   # no longer used: it was typed on the profile page; the count now comes from the posts the creator marked as partnerships (creator_instagram_posts.partnership_post)
     instagram_engagement_rate = Column(Float)   # (avg likes + avg comments) / followers * 100 over the scraped posts, calculated when MAVLIT generates the Instagram description
     instagram_highest_views = Column(Integer)   # most views on any of the creator's recent reels / video posts (typed, or read from the 20 posts MAVLIT scrapes)
 

@@ -86,18 +86,11 @@ class EngagementRateOfTheProfile(unittest.TestCase):
         self.assertNotIn("instagram_engagement_rate", request(**self.BODY).model_fields_set)                          # the handler leaves the saved rate alone
         self.assertIn("instagram_engagement_rate", request(**self.BODY, instagram_engagement_rate=None).model_fields_set)   # the handler clears it
 
-    def test_the_users_brand_partnerships_are_a_whole_number_the_user_types(self):
+    def test_brand_partnerships_are_no_longer_typed_on_the_profile(self):
         import api.app as api_app
         from api.schemas import CreatorProfileResponse
-        from pydantic import ValidationError
-        request = api_app.CreatorProfileRequest
-        self.assertIn("brand_partnerships", CreatorProfileResponse.model_fields)
-        self.assertEqual(request(**self.BODY, brand_partnerships=4).brand_partnerships, 4)
-        self.assertEqual(request(**self.BODY, brand_partnerships=0).brand_partnerships, 0)
-        for bad in (-1, 1.5, "x", 10**6):
-            with self.assertRaises(ValidationError):
-                request(**self.BODY, brand_partnerships=bad)
-        self.assertNotIn("brand_partnerships", request(**self.BODY).model_fields_set)                                  # not sent: the saved count is left alone
+        self.assertNotIn("brand_partnerships", api_app.CreatorProfileRequest.model_fields)    # the count comes from the posts marked as partnerships
+        self.assertNotIn("brand_partnerships", CreatorProfileResponse.model_fields)
 
 
 class PostingAndViews(unittest.TestCase):
@@ -225,24 +218,23 @@ class AgainstPostgres(unittest.TestCase):
         from pipeline.similar_creators import your_stats
         from pipeline.db import CreatorProfile
         with self.engine.begin() as conn:
-            conn.execute(text("""INSERT INTO creator_profiles (id, email, full_name, instagram_handle, instagram_followers, instagram_engagement_rate, brand_partnerships)
-                                 VALUES (1, 'u@example.test', 'Nova H', 'me', 5000, 4.2, 3)"""))
+            conn.execute(text("""INSERT INTO creator_profiles (id, email, full_name, instagram_handle, instagram_followers, instagram_engagement_rate)
+                                 VALUES (1, 'u@example.test', 'Nova H', 'me', 5000, 4.2)"""))
             conn.execute(text("""INSERT INTO creator_instagram_posts (creator_profile_id, instagram_handle, post_id, timestamp, video_view_count, video_play_count, likes_count, comments_count) VALUES
                 (1, 'me', 'a', '2026-06-10T10:00:00.000Z', 100, NULL, 200, 20), (1, 'me', 'b', '2026-06-01T10:00:00.000Z', NULL, 500, 100, 10), (1, 'me', 'c', '2026-04-01T10:00:00.000Z', NULL, NULL, -1, -1)"""))
         with self.Session() as db:
             stats = your_stats(db, db.get(CreatorProfile, 1))
-        self.assertEqual(stats, {"name": "Nova H", "handle": "me", "avg_likes": 150, "avg_comments": 15, "followers": 5000, "engagement_rate": 4.2, "avg_reel_views": 300, "posts_per_week": 1.0, "brand_partnerships": 3,
-                                 "product_focused_pct": None, "content_categories": None})   # 2 of 3 posts in the 14 days; the content mix is not generated yet
-        # without a typed count, the posts the user marked as paid partnerships are counted; with none marked there is no number
+        self.assertEqual(stats, {"name": "Nova H", "handle": "me", "avg_likes": 150, "avg_comments": 15, "followers": 5000, "engagement_rate": 4.2, "avg_reel_views": 300, "posts_per_week": 1.0, "brand_partnerships": 0,
+                                 "product_focused_pct": None, "content_categories": None})   # 2 of 3 posts in the 14 days; no post is marked as a partnership: 0; the content mix is not generated yet
+        # each post the user marked as a paid partnership counts as one brand partnership
         with self.engine.begin() as conn:
-            conn.execute(text("UPDATE creator_profiles SET brand_partnerships = NULL WHERE id = 1"))
             conn.execute(text("UPDATE creator_instagram_posts SET partnership_post = true WHERE post_id IN ('a', 'b')"))
         with self.Session() as db:
             self.assertEqual(your_stats(db, db.get(CreatorProfile, 1))["brand_partnerships"], 2)
         with self.engine.begin() as conn:
-            conn.execute(text("UPDATE creator_instagram_posts SET partnership_post = false"))
+            conn.execute(text("UPDATE creator_instagram_posts SET partnership_post = false WHERE post_id = 'a'"))     # switched off again
         with self.Session() as db:
-            self.assertIsNone(your_stats(db, db.get(CreatorProfile, 1))["brand_partnerships"])
+            self.assertEqual(your_stats(db, db.get(CreatorProfile, 1))["brand_partnerships"], 1)
 
     def test_the_audience_filter_keeps_creators_between_a_third_and_double_the_followers(self):
         from pipeline.similar_creators import audience_range
@@ -480,7 +472,7 @@ class AgainstPostgres(unittest.TestCase):
         self.assertEqual(asked, ["Niche: Beauty\nDescription: Skincare\nTags: "])   # the user in the creators' format, embedded once
         self.assertEqual(body["ready"], True)
         self.assertEqual(body["you"]["handle"], "@me")
-        self.assertIsNone(body["you"]["brand_partnerships"])
+        self.assertEqual(body["you"]["brand_partnerships"], 0)     # no post marked as a partnership: 0, not empty
         self.assertEqual((body["your_followers"], body["audience_range"]), (None, None))   # the test user has no follower count
         with self.engine.begin() as conn:
             conn.execute(text("UPDATE creator_profiles SET instagram_followers = 1000 WHERE id = 1"))
