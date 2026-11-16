@@ -410,6 +410,43 @@ class AgainstPostgres(unittest.TestCase):
             row = db.get(CreatorProfile, 1)
             self.assertEqual((row.instagram_product_focused_pct, len(row.instagram_content_categories)), (35, 2))
 
+    def test_the_script_estimates_the_content_mix_only_where_it_is_missing(self):
+        from pipeline.enrichment import creator_niches
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE instagram_users SET caption = 'Gym tutorial: how to squat', niche = 'Fitness', bio = 'coach' WHERE id IN (1, 8)"))   # alice: two posts
+            conn.execute(text("UPDATE creator_niches SET product_focused_pct = 80, content_categories = CAST('[{\"name\": \"Promotional\", \"pct\": 100}]' AS jsonb) WHERE username = 'erin'"))
+        asked = []
+
+        def fake_llm(prompt, context="", **kwargs):
+            asked.append((context, prompt))
+            return {"product_focused_pct": 40, "content_categories": {"Tutorial": 70, "Lifestyle": 30}}
+        with self.Session() as db, mock.patch.object(creator_niches, "call_gpt_json", side_effect=fake_llm):
+            done = creator_niches.fill_content_mix(db, {"alice", "carol", "erin"})
+        self.assertEqual(done, 1)                                     # alice only: carol has no captions; erin already has a mix
+        self.assertEqual(len(asked), 1)
+        self.assertIn("Gym tutorial: how to squat", asked[0][1])
+        with self.engine.connect() as conn:
+            rows = {r[0]: r[1:] for r in conn.execute(text("SELECT username, product_focused_pct, content_categories FROM creator_niches WHERE username IN ('Alice', 'carol', 'erin')"))}
+        self.assertEqual(rows["Alice"], (40, [{"name": "Tutorial", "pct": 70}, {"name": "Lifestyle", "pct": 30}]))
+        self.assertEqual(rows["carol"], (None, None))
+        self.assertEqual(rows["erin"][0], 80)                          # an existing mix is never replaced
+        found = {c["username"]: c for c in self.find(own_handle="me")}
+        self.assertEqual((found["Alice"]["product_focused_pct"], found["Alice"]["content_categories"][0]), (40, {"name": "Tutorial", "pct": 70}))
+        self.assertEqual((found["carol"]["product_focused_pct"], found["carol"]["content_categories"]), (None, None))
+
+    def test_the_content_mix_stops_cleanly_when_openai_is_unavailable(self):
+        from pipeline.enrichment import creator_niches
+        from pipeline.helpers.gpt_llm import LLMUnavailableError
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE instagram_users SET caption = 'a caption', niche = 'Fitness' WHERE id IN (1, 3)"))
+        replies = [{"product_focused_pct": 10, "content_categories": {"Lifestyle": 100}}, LLMUnavailableError("down")]
+        with self.Session() as db, mock.patch.object(creator_niches, "call_gpt_json", side_effect=replies):
+            with self.assertRaises(LLMUnavailableError):
+                creator_niches.fill_content_mix(db, {"alice", "carol"})
+        with self.engine.connect() as conn:
+            saved = conn.execute(text("SELECT count(*) FROM creator_niches WHERE content_categories IS NOT NULL")).scalar()
+        self.assertEqual(saved, 1)                                     # the creator finished before the outage is kept
+
     def test_the_endpoint(self):
         from fastapi.testclient import TestClient
         import api.app as api_app

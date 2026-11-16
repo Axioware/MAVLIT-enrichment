@@ -1109,6 +1109,29 @@ Also estimate, from the captions, how this creator's posts split up, and add two
 Example: "product_focused_pct": 35, "content_categories": {{"Tutorial": 32, "Product review": 18, "Lifestyle": 25, "Entertainment": 25}}
 """
 
+# creator_niches.py: the content mix alone, for a creator that already has a description (the one-time fill of the creators written before the mix existed).
+CREATOR_CONTENT_MIX_PROMPT_NAME = "creator_content_mix"
+CREATOR_CONTENT_MIX_DEFAULT_PROMPT = f"""\
+You are analyzing a content creator on Instagram.
+
+Niche:
+{{niche}}
+
+Bio:
+{{bio}}
+
+Recent captions:
+{{captions}}
+
+Your task: estimate how this creator's posts split up, using only the captions above.
+
+- product_focused_pct: the percentage (0 to 100, a whole number) of the creator's posts that feature, demonstrate, review or promote a specific product or brand.
+- content_categories: an object with the percentage of the creator's posts in each category. The only allowed names are: {_CATEGORY_LIST}. Each post belongs to the one category that fits it best; the percentages are whole numbers and add up to 100. Leave out a category with 0%.
+
+Do not invent facts. Return ONLY valid JSON, for example:
+{{"product_focused_pct": 35, "content_categories": {{"Tutorial": 32, "Product review": 18, "Lifestyle": 25, "Entertainment": 25}}}}
+"""
+
 CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT = """\
 You are analyzing a content creator (Instagram or YouTube).
 

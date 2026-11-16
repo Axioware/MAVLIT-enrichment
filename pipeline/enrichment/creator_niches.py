@@ -22,7 +22,11 @@ from sqlalchemy.orm import Session
 from pipeline.db import CreatorNiche, InstagramUser, Prompt, BatchSessionLocal
 from pipeline.helpers.gpt_llm import LLMUnavailableError, call_gpt_json, fill_template
 from pipeline.similar_creators import embed_pending_creators, fill_engagement_rates, partnership_usernames
+from pipeline.helpers.content_mix import content_mix_from_result
 from pipeline.helpers.prompts import (
+    CREATOR_CONTENT_MIX_DEFAULT_PROMPT,
+    CREATOR_CONTENT_MIX_NOTE,
+    CREATOR_CONTENT_MIX_PROMPT_NAME,
     CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT,
     CREATOR_NICHE_DESCRIPTION_PROMPT_NAME,
 )
@@ -36,7 +40,10 @@ _MAX_CAPTIONS = 10
 
 def _get_prompt(db: Session) -> str:
     row = db.query(Prompt).filter(Prompt.name == CREATOR_NICHE_DESCRIPTION_PROMPT_NAME).first()
-    return row.content if row else CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT
+    if not row:
+        return CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT
+    # a stored copy that predates the content mix gets its instructions appended, so the same call also returns the mix
+    return row.content if "content_categories" in row.content else row.content.rstrip() + "\n" + CREATOR_CONTENT_MIX_NOTE
 
 
 def _caption_text(row: InstagramUser) -> str:
@@ -90,7 +97,7 @@ def _validate_result(result: object) -> dict[str, object] | None:
     description = " ".join(description.split())
     if len(description.split()) > 35 or not 5 <= len(clean_tags) <= 10:
         return None
-    return {"description": description, "tags": clean_tags}
+    return {"description": description, "tags": clean_tags, **content_mix_from_result(result)}
 
 
 def _generate_niche(
@@ -121,6 +128,61 @@ def _generate_niche(
     return None
 
 
+def _get_mix_prompt(db: Session) -> str:
+    row = db.query(Prompt).filter(Prompt.name == CREATOR_CONTENT_MIX_PROMPT_NAME).first()
+    return row.content if row else CREATOR_CONTENT_MIX_DEFAULT_PROMPT
+
+
+def fill_content_mix(db: Session, usernames: set[str], retries: int = _DEFAULT_RETRIES, limit: int | None = None, batch_size: int = _DEFAULT_BATCH_SIZE) -> int:
+    """
+    Estimate the content mix (product-focused share and the five biggest content categories, in percent) with the LLM for the creators of
+    `usernames` that have a creator_niches row without one - the creators written before the mix existed, and any creator whose description
+    call returned none. It reads the creator's bio and newest captions like the description does. A creator with no captions is skipped.
+    Rows are saved as they are done; OpenAI being unavailable saves what is finished and stops. Returns how many creators got a mix.
+    """
+    pending = [
+        r for r in db.query(CreatorNiche).filter(CreatorNiche.content_categories.is_(None)).order_by(CreatorNiche.id).all()
+        if (r.username or "").strip().casefold() in usernames
+    ]
+    if limit is not None:
+        pending = pending[:limit]
+    if not pending:
+        return 0
+    wanted = {r.username.strip().casefold() for r in pending}
+    rows = db.query(InstagramUser).filter(InstagramUser.user_type != "commenter", func.lower(func.trim(InstagramUser.username)).in_(sorted(wanted))).all()
+    contexts = _build_context(rows)
+    template = _get_mix_prompt(db)
+    done = 0
+    for index, creator in enumerate(pending, 1):
+        context = contexts.get(next((u for u in contexts if u.strip().casefold() == creator.username.strip().casefold()), ""))
+        if not context or not context["captions"]:
+            continue
+        prompt = fill_template(template, niche=context["niche"] or creator.niche or "none provided", bio=context["bio"] or "none provided",
+                               captions="\n".join(f"- {caption}" for caption in context["captions"]))
+        mix = None
+        for attempt in range(1, retries + 1):
+            try:
+                mix = content_mix_from_result(call_gpt_json(prompt, context=f"creator content mix @{creator.username} attempt={attempt}"))
+            except LLMUnavailableError:
+                db.commit()
+                raise
+            if mix["content_categories"]:
+                break
+            if attempt < retries:
+                time.sleep(min(8.0, 2 ** (attempt - 1)))
+        if not mix or not mix["content_categories"]:
+            logger.error("Creator content mix: no usable result for @%s", creator.username)
+            continue
+        creator.product_focused_pct = mix["product_focused_pct"]
+        creator.content_categories = mix["content_categories"]
+        done += 1
+        if index % batch_size == 0:
+            db.commit()
+    db.commit()
+    logger.info("Creator content mix: estimated for %d creator(s)", done)
+    return done
+
+
 def run_creator_niches(
     db: Session,
     limit: int | None = None,
@@ -129,7 +191,7 @@ def run_creator_niches(
     instagram_user_id: int | None = None,
 ) -> int:
     """
-    Generate missing profiles without modifying existing output rows, calculate their engagement rate and embed them. Only creators with a partnership
+    Generate missing profiles without modifying existing output rows, calculate their engagement rate, estimate their content mix and embed them. Only creators with a partnership
     scored 90 or more (instagram_posts or test_creator_brand_partnership_posts) are processed - see pipeline/similar_creators.py.
     """
     partners = partnership_usernames(db)
@@ -192,6 +254,8 @@ def run_creator_niches(
                 "niche": row.niche.strip(),
                 "description": niche["description"],
                 "tags": niche["tags"],
+                "product_focused_pct": niche.get("product_focused_pct"),
+                "content_categories": niche.get("content_categories"),
             })
         if inserts:
             from sqlalchemy.dialects.postgresql import insert
@@ -205,6 +269,7 @@ def run_creator_niches(
                 logger.exception("Creator niche: failed to insert batch starting at %d", batch_start)
     logger.info("Creator niche: created=%d", created)
     fill_engagement_rates(db, partners)    # also the rows made by an earlier run that have no engagement rate yet
+    fill_content_mix(db, partners, retries=retries, limit=limit)   # and the content mix of the rows that have none (LLM, one short call per creator)
     embed_pending_creators(db, partners)   # also the rows made by an earlier run that were never embedded
     return created
 

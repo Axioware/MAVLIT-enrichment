@@ -460,6 +460,9 @@ class CreatorNiche(Base):
     embedding = Column(Vector(1024))
     # (average likes + average comments) / followers * 100 over the creator's posts in instagram_users (pipeline/similar_creators.py)
     engagement_rate = Column(Float)
+    # The content mix an LLM estimated from the creator's captions (percent), the same two fields as on creator_profiles:
+    product_focused_pct = Column(Integer)
+    content_categories = Column(JSONB)   # [{"name": "Tutorial", "pct": 32}, ...] the five biggest
 
     created_at = Column(
         TIMESTAMP(timezone=True),

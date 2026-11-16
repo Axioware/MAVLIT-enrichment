@@ -135,7 +135,7 @@ def user_query_embedding(profile) -> list[float] | None:
 
 
 _SIMILAR = text("""
-    SELECT cn.id, cn.instagram_user_id, cn.username, cn.niche, cn.description, cn.tags, cn.engagement_rate,
+    SELECT cn.id, cn.instagram_user_id, cn.username, cn.niche, cn.description, cn.tags, cn.engagement_rate, cn.product_focused_pct, cn.content_categories,
            1 - (cn.embedding <=> :vec) AS similarity
     FROM creator_niches cn
     LEFT JOIN instagram_users fu ON fu.id = cn.instagram_user_id
@@ -361,6 +361,8 @@ def find_similar_creators(
             "avg_comments": round(float(avg_comments)) if avg_comments is not None else None,
             "engagement_rate": r.engagement_rate if r.engagement_rate is not None else engagement_rate(avg_likes, avg_comments, followers),
             # views of their own posts; when we hold none, the views of their partnership posts
+            "product_focused_pct": r.product_focused_pct,
+            "content_categories": r.content_categories if isinstance(r.content_categories, list) else None,
             "avg_reel_views": average_views([p.views for p in posts.get(who, [])]) or average_views([p["views"] for p in partnerships.get(who, [])]),
             "posts_per_week": posts_per_week([p.post_timestamp for p in posts.get(who, [])]),
             "similarity": round(float(r.similarity) * 100),

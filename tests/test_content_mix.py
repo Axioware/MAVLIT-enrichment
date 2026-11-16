@@ -67,6 +67,33 @@ class ThePrompt(unittest.TestCase):
         self.assertIn('"Tutorial": 32', filled)
 
 
+class CreatorNichesScript(unittest.TestCase):
+    def test_the_description_reply_carries_the_mix_for_the_creators_table(self):
+        from pipeline.enrichment import creator_niches
+        reply = {"description": "Fitness creator sharing gym workouts and routines.", "tags": ["a", "b", "c", "d", "e"],
+                 "product_focused_pct": 25, "content_categories": {"Tutorial": 60, "Lifestyle": 40}}
+        out = creator_niches._validate_result(reply)
+        self.assertEqual(out["product_focused_pct"], 25)
+        self.assertEqual(out["content_categories"], [{"name": "Tutorial", "pct": 60}, {"name": "Lifestyle", "pct": 40}])
+        bare = creator_niches._validate_result({"description": reply["description"], "tags": reply["tags"]})   # a reply without the mix is still valid
+        self.assertEqual((bare["product_focused_pct"], bare["content_categories"]), (None, None))
+
+    def test_a_stored_description_prompt_without_the_mix_gets_the_note(self):
+        from pipeline.enrichment import creator_niches
+        db = mock.Mock()
+        db.query.return_value.filter.return_value.first.return_value = mock.Mock(content="old prompt")
+        self.assertIn("ADDITIONAL REQUIRED OUTPUT - CONTENT MIX", creator_niches._get_prompt(db))
+        db.query.return_value.filter.return_value.first.return_value = mock.Mock(content=prompts.CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT)
+        self.assertNotIn("ADDITIONAL REQUIRED OUTPUT - CONTENT MIX", creator_niches._get_prompt(db))
+
+    def test_the_mix_only_prompt_has_what_the_fill_passes_in(self):
+        from pipeline.helpers.gpt_llm import fill_template
+        filled = fill_template(prompts.CREATOR_CONTENT_MIX_DEFAULT_PROMPT, niche="Music", bio="DJ", captions="- new mix out")
+        for placeholder in ("{niche}", "{bio}", "{captions}"):
+            self.assertNotIn(placeholder, filled)
+        self.assertIn("new mix out", filled)
+
+
 class GenerationReturnsTheMix(unittest.TestCase):
     def test_the_generated_profile_carries_the_content_mix(self):
         items = [{"id": str(i), "caption": f"c{i}", "likesCount": 10, "commentsCount": 1, "metaData": {"followersCount": 1000, "biography": "bio"}} for i in range(3)]
