@@ -473,7 +473,7 @@ class WithDatabase(unittest.TestCase):
 
         changed = recover_stuck_jobs(self.factory)
         self.assertEqual(changed, {"instagram_description_status": 1, "youtube_description_status": 1, "llm_ranking_status": 1,
-                                   "llm_v3_ranking_status": 1, "own_brand_jobs": 0, "feature_locks": 6})
+                                   "llm_v3_ranking_status": 1, "own_brand_jobs": 0, "competitor_creators": 0, "feature_locks": 6})
         self.assertEqual(self.row("a", "instagram_description_status", "instagram_description_error", "youtube_description_status",
                                   "youtube_description_error", "llm_ranking_status", "llm_ranking_error", "llm_v3_ranking_status", "llm_v3_ranking_error"),
                          ("failed", RESTART_MESSAGE, "failed", RESTART_MESSAGE, "failed", RESTART_MESSAGE, "failed", RESTART_MESSAGE))

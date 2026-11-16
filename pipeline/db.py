@@ -1027,6 +1027,71 @@ class Pitch(Base):
         return f"Pitch#{self.id} {self.brand_name} ({self.status})"
 
 
+class CompetitorCreator(Base):
+    """
+    A creator a MAVLIT user added as a competitor to compare themselves with (Feed > Similar Creators > Compare). One row per Instagram account, shared by
+    every user who added it. When the account is already in instagram_users its numbers are worked out from those rows (source "instagram_users"); when it
+    is not, MAVLIT reads its latest 20 posts with Apify (saved in competitor_creator_posts, source "apify"). Kept apart from instagram_users on purpose:
+    competitors typed in by users must not enter the creator data that matching and Similar Creators run on.
+    """
+    __tablename__ = "competitor_creators"
+
+    id               = Column(Integer, primary_key=True)
+    instagram_handle = Column(Text, nullable=False, unique=True)   # lower case, no @
+    source           = Column(Text)                                # "instagram_users" | "apify"
+    status           = Column(Text, nullable=False, server_default="queued", default="queued")   # queued | running | ready | failed
+    stage            = Column(Text)                                # what MAVLIT is doing right now, for the page to show
+    error            = Column(Text)
+
+    full_name        = Column(Text)
+    followers_count  = Column(Integer)
+    posts_analyzed   = Column(Integer)
+    avg_likes        = Column(Integer)
+    avg_comments     = Column(Integer)
+    engagement_rate  = Column(Float)      # (average likes + average comments) / followers * 100
+    avg_reel_views   = Column(Integer)
+    posts_per_week   = Column(Float)      # posts in the 14 days before the newest post, / 2
+    product_focused_pct = Column(Integer)
+    content_categories  = Column(JSONB)   # [{"name": "Tutorial", "pct": 32}, ...] the five biggest, from the same LLM prompt as the creators
+    partnership_count   = Column(Integer)
+    partnership_brands  = Column(JSONB)   # [{"brand_raw_id": 1, "handle": "nike", "name": "Nike", "posts": 2}, ...]
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CompetitorCreatorPost(Base):
+    """One of the (up to 20) posts MAVLIT read for a competitor it had to scrape, with the brand an LLM confirmed it is a partnership with."""
+    __tablename__ = "competitor_creator_posts"
+
+    id                    = Column(Integer, primary_key=True)
+    competitor_creator_id = Column(Integer, ForeignKey("competitor_creators.id", ondelete="CASCADE"), nullable=False, index=True)
+    post_id               = Column(Text, unique=True)
+    post_url              = Column(Text)
+    post_type             = Column(Text)
+    timestamp             = Column(Text)
+    caption               = Column(Text)
+    likes_count           = Column(Integer)
+    comments_count        = Column(Integer)
+    video_view_count      = Column(Integer)
+    video_play_count      = Column(Integer)
+    paid_partnership      = Column(Boolean)
+    mentions              = Column(JSONB)
+    tagged_users          = Column(JSONB)
+    coauthor_producers    = Column(JSONB)
+    brand_raw_id          = Column(Integer, ForeignKey("brands_raw.id"), index=True)   # the brand the post is a partnership with (brands_raw gets a bare row when it had none)
+    brand_handle          = Column(Text)
+
+
+class UserCompetitor(Base):
+    """Which competitors a MAVLIT user added (the competitor itself is shared)."""
+    __tablename__ = "creator_competitors"
+
+    creator_profile_id    = Column(Integer, ForeignKey("creator_profiles.id", ondelete="CASCADE"), primary_key=True)
+    competitor_creator_id = Column(Integer, ForeignKey("competitor_creators.id", ondelete="CASCADE"), primary_key=True)
+    created_at            = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class OwnBrandJob(Base):
     """
     A MAVLIT user's "my own brand" request on the pitch page (pipeline/own_brand.py): the

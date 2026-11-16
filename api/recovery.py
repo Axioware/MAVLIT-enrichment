@@ -16,7 +16,7 @@ import logging
 
 from sqlalchemy import delete, update
 
-from pipeline.db import CreatorProfile, FeatureLock, OwnBrandJob, SessionLocal
+from pipeline.db import CompetitorCreator, CreatorProfile, FeatureLock, OwnBrandJob, SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,8 @@ def recover_stuck_jobs(session_factory=None) -> dict[str, int]:
             changed[status_name] = result.rowcount or 0
         changed["own_brand_jobs"] = db.execute(
             update(OwnBrandJob).where(OwnBrandJob.status.in_(_PENDING)).values(status="failed", stage="Stopped", error=RESTART_MESSAGE)).rowcount or 0
+        changed["competitor_creators"] = db.execute(
+            update(CompetitorCreator).where(CompetitorCreator.status.in_(_PENDING)).values(status="failed", stage="Stopped", error=RESTART_MESSAGE)).rowcount or 0
         changed["feature_locks"] = db.execute(delete(FeatureLock)).rowcount or 0
         db.commit()
     if any(changed.values()):

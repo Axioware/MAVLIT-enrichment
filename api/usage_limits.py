@@ -32,6 +32,7 @@ DAILY_CAPS = {
     "contract_advice":        ("CONTRACT_ADVICE_PER_DAY", 10, "contract reviews"),
     "match_refresh":          ("MATCH_REFRESH_PER_DAY", 10, "match refreshes"),
     "own_brands":             ("OWN_BRANDS_PER_DAY", 10, "own-brand lookups"),
+    "competitors":            ("COMPETITORS_PER_DAY", 5, "competitor lookups"),
     "description_generation": ("DESCRIPTION_GENERATIONS_PER_DAY", 20, "description generations"),
 }
 PITCH_LOCK = "pitch"
@@ -116,7 +117,7 @@ def try_acquire_lock(db: Session, creator_id: int, feature: str = PITCH_LOCK, st
     """
     Take this creator's in-flight lock for `feature` in one atomic statement: True if it is now ours, False when another request holds it. A row
     older than `stale_seconds` (default PITCH_LOCK_STALE_SECONDS) is taken over. Commits. Keys in use: "pitch", "ranking:v2", "ranking:v3",
-    "description:instagram", "description:youtube", "own_brand".
+    "description:instagram", "description:youtube", "own_brand", "competitor".
     """
     stale = timedelta(seconds=stale_seconds if stale_seconds is not None else lock_stale_seconds())
     stmt = (

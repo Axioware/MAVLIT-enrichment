@@ -33,6 +33,7 @@ from api.early_access import router as early_access_router
 from api.invites import router as invites_router
 from api.usage_api import router as usage_api_router
 from api.feed_api import router as feed_api_router
+from api.competitors_api import router as competitors_router
 from api.password_reset import router as password_reset_router
 from api.auth import (
     get_completed_user,
@@ -103,7 +104,10 @@ from pipeline.db import (
     CreatorLlmCost,
     LlmUsage,
     MetaAd,
+    CompetitorCreator,
+    CompetitorCreatorPost,
     OwnBrandJob,
+    UserCompetitor,
     Pitch,
     Prompt,
     RateEstimate,
@@ -195,6 +199,7 @@ async def _pool_exhausted(request: Request, exc: PoolTimeoutError):
 
 app.include_router(auth_router)
 app.include_router(feed_api_router)
+app.include_router(competitors_router)
 app.include_router(brands_router)
 app.include_router(saved_brands_router)
 app.include_router(pitches_router)
@@ -724,6 +729,62 @@ class ContactRevealAdmin(ModelView, model=ContactReveal):
     page_size  = 25
 
 
+class CompetitorCreatorAdmin(ModelView, model=CompetitorCreator):
+    """The competitors MAVLIT users added in Feed > Similar Creators > Compare (see pipeline/competitor_creators.py), with the numbers worked out for them."""
+    name         = "Competitor Creator"
+    name_plural  = "Competitor Creators"
+    category     = "System"
+    icon         = "fa-solid fa-user-group"
+    column_list  = [
+        CompetitorCreator.id, CompetitorCreator.instagram_handle, CompetitorCreator.source, CompetitorCreator.status, CompetitorCreator.stage, CompetitorCreator.error,
+        CompetitorCreator.full_name, CompetitorCreator.followers_count, CompetitorCreator.posts_analyzed, CompetitorCreator.engagement_rate, CompetitorCreator.avg_reel_views,
+        CompetitorCreator.posts_per_week, CompetitorCreator.product_focused_pct, CompetitorCreator.content_categories, CompetitorCreator.partnership_count,
+        CompetitorCreator.partnership_brands, CompetitorCreator.created_at,
+    ]
+    column_labels = {CompetitorCreator.instagram_handle: "Instagram handle", CompetitorCreator.followers_count: "Followers", CompetitorCreator.posts_analyzed: "Posts read"}
+    column_searchable_list = [CompetitorCreator.instagram_handle, CompetitorCreator.full_name, CompetitorCreator.status]
+    column_sortable_list   = [c.name for c in CompetitorCreator.__table__.columns]
+    column_default_sort    = [(CompetitorCreator.created_at, True)]
+    can_create = can_edit = can_delete = False
+    can_export = False
+    page_size  = 25
+
+
+class CompetitorCreatorPostAdmin(ModelView, model=CompetitorCreatorPost):
+    """The (up to 20) posts MAVLIT read for a competitor it had to scrape, with the brand an LLM confirmed each is a partnership with."""
+    name         = "Competitor Creator Post"
+    name_plural  = "Competitor Creator Posts"
+    category     = "System"
+    icon         = "fa-solid fa-image"
+    column_list  = [
+        CompetitorCreatorPost.id, CompetitorCreatorPost.competitor_creator_id, CompetitorCreatorPost.post_url, CompetitorCreatorPost.post_type, CompetitorCreatorPost.timestamp,
+        CompetitorCreatorPost.likes_count, CompetitorCreatorPost.comments_count, CompetitorCreatorPost.video_view_count, CompetitorCreatorPost.video_play_count,
+        CompetitorCreatorPost.paid_partnership, CompetitorCreatorPost.brand_raw_id, CompetitorCreatorPost.brand_handle,
+    ]
+    column_labels = {CompetitorCreatorPost.competitor_creator_id: "Competitor id", CompetitorCreatorPost.brand_raw_id: "Brand id"}
+    column_searchable_list = [CompetitorCreatorPost.post_url, CompetitorCreatorPost.brand_handle, CompetitorCreatorPost.caption]
+    column_sortable_list   = [c.name for c in CompetitorCreatorPost.__table__.columns]
+    column_default_sort    = [(CompetitorCreatorPost.id, True)]
+    can_create = can_edit = can_delete = False
+    can_export = False
+    page_size  = 25
+
+
+class UserCompetitorAdmin(ModelView, model=UserCompetitor):
+    """Which MAVLIT user added which competitor."""
+    name         = "User Competitor"
+    name_plural  = "User Competitors"
+    category     = "System"
+    icon         = "fa-solid fa-link"
+    column_list  = [UserCompetitor.creator_profile_id, UserCompetitor.competitor_creator_id, UserCompetitor.created_at]
+    column_labels = {UserCompetitor.creator_profile_id: "MAVLIT user id", UserCompetitor.competitor_creator_id: "Competitor id"}
+    column_sortable_list = [c.name for c in UserCompetitor.__table__.columns]
+    column_default_sort  = [(UserCompetitor.created_at, True)]
+    can_create = can_edit = can_delete = False
+    can_export = False
+    page_size  = 25
+
+
 class UserActivityAdmin(ModelView, model=UserActivity):
     """What users did that no other table records (an Instagram post added or removed). Feeds the Usage & Cost page's activity views."""
     name         = "User Activity"
@@ -1200,6 +1261,9 @@ admin.add_view(CreatorBrandLlmV3RankingAdmin)
 admin.add_view(ApifyUsageAdmin)
 admin.add_view(ContactRevealAdmin)
 admin.add_view(UserActivityAdmin)
+admin.add_view(CompetitorCreatorAdmin)
+admin.add_view(CompetitorCreatorPostAdmin)
+admin.add_view(UserCompetitorAdmin)
 admin.add_view(FeatureUsageAdmin)
 admin.add_view(FeatureLockAdmin)
 admin.add_view(LoginFailureAdmin)

@@ -74,6 +74,9 @@ CODE = {
     "instagram_users": "SIU",                     # own-brand job
     "llm_usage": "SI",                            # gpt_llm usage tracking
     "meta_ads": "",                               # the step is disabled; CLI only
+    "competitor_creators": "SIUD",                # a competitor a user added to Compare Creators; the job fills it, and drops a wrong handle
+    "competitor_creator_posts": "SIU",            # the posts MAVLIT read for such a competitor (removed with the competitor by the foreign key)
+    "creator_competitors": "SID",                 # which competitors a user added
     "own_brand_jobs": "SIU",                      # POST /own-brands and the job's progress
     "pitches": "SIUD",                            # /pitches
     "prompts": "S",                               # read by every LLM call; seeded by the migrations
@@ -114,6 +117,9 @@ ADMIN = {
     "instagram_users": (True, True, True),
     "llm_usage": (False, False, False),
     "meta_ads": (True, True, True),
+    "competitor_creators": (False, False, False),   # admin pages, read only: who added what, and the numbers worked out for it
+    "competitor_creator_posts": (False, False, False),
+    "creator_competitors": (False, False, False),
     "own_brand_jobs": (False, False, True),
     "pitches": (True, True, True),
     "prompts": (True, True, True),
