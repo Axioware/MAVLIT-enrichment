@@ -84,6 +84,17 @@ def embed_pending_creators(db: Session, usernames: set[str], batch_size: int = _
     return done
 
 
+AUDIENCE_UP = 2     # "same audience size": up to 2x the user's followers ...
+AUDIENCE_DOWN = 3   # ... and down to a third of them
+
+
+def audience_range(followers) -> tuple[int, int] | None:
+    """The follower range of the "same audience size" filter: from followers / 3 (rounded up) to followers * 2. None without a follower count."""
+    if not followers or followers <= 0:
+        return None
+    return -(-int(followers) // AUDIENCE_DOWN), int(followers) * AUDIENCE_UP
+
+
 def user_query_text(profile) -> str | None:
     """
     The user's profile written in the creators' format (Niche / Description / Tags), so a user and a creator who are alike get alike
@@ -125,8 +136,10 @@ _SIMILAR = text("""
     SELECT cn.id, cn.instagram_user_id, cn.username, cn.niche, cn.description, cn.tags, cn.engagement_rate,
            1 - (cn.embedding <=> :vec) AS similarity
     FROM creator_niches cn
+    LEFT JOIN instagram_users fu ON fu.id = cn.instagram_user_id
     WHERE cn.embedding IS NOT NULL
       AND lower(btrim(cn.username)) = ANY(:partners)
+      AND (:lo IS NULL OR fu.followers_count BETWEEN :lo AND :hi)
       AND lower(btrim(cn.username)) <> :own
       AND 1 - (cn.embedding <=> :vec) >= :threshold
     ORDER BY similarity DESC, cn.id
@@ -194,16 +207,19 @@ def fill_engagement_rates(db: Session, usernames: set[str]) -> int:
 def find_similar_creators(
     db: Session, user_embedding, own_handle: str | None = None, limit: int = DEFAULT_LIMIT,
     threshold: float = SIMILARITY_THRESHOLD, minimum: int = MIN_PARTNERSHIP_CONFIDENCE,
+    followers_range: tuple[int, int] | None = None,
 ) -> list[dict]:
     """
     The partnership creators at least `threshold` similar to `user_embedding`, most similar first, each with its
     profile numbers and its partnerships. `own_handle` (the user's own Instagram handle) is never returned.
+    `followers_range` (low, high) is a hard filter: only creators whose follower count is inside it (a creator with no follower count is left out).
     """
     own = (own_handle or "").strip().lstrip("@").lower() or "\x00"
     partners = sorted(partnership_usernames(db, minimum))
     if not partners:
         return []
-    found = db.execute(_SIMILAR, {"vec": list(user_embedding), "partners": partners, "own": own, "threshold": threshold, "limit": limit}).all()
+    found = db.execute(_SIMILAR, {"vec": list(user_embedding), "partners": partners, "own": own, "threshold": threshold, "limit": limit,
+                                    "lo": followers_range[0] if followers_range else None, "hi": followers_range[1] if followers_range else None}).all()
     if not found:
         return []
     names = [r.username.strip().lower() for r in found]

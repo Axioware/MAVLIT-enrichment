@@ -66,11 +66,25 @@ class ProfileGenerationCalculatesTheEngagementRate(unittest.TestCase):
 
 
 class EngagementRateOfTheProfile(unittest.TestCase):
-    def test_the_api_returns_it_but_a_save_cannot_set_it(self):
+    BODY = {"full_name": "A", "creator_handle": "a"}
+
+    def test_the_api_returns_it_and_a_save_may_correct_it_within_0_to_100(self):
         import api.app as api_app
         from api.schemas import CreatorProfileResponse
+        from pydantic import ValidationError
         self.assertIn("instagram_engagement_rate", CreatorProfileResponse.model_fields)
-        self.assertNotIn("instagram_engagement_rate", api_app.CreatorProfileRequest.model_fields)   # only MAVLIT's generation writes it
+        request = api_app.CreatorProfileRequest
+        self.assertEqual(request(**self.BODY, instagram_engagement_rate=4.2).instagram_engagement_rate, 4.2)
+        self.assertEqual(request(**self.BODY, instagram_engagement_rate=0).instagram_engagement_rate, 0)
+        for bad in (-1, 100.5, "x"):
+            with self.assertRaises(ValidationError):
+                request(**self.BODY, instagram_engagement_rate=bad)
+
+    def test_a_request_without_it_is_told_apart_from_one_that_clears_it(self):
+        import api.app as api_app
+        request = api_app.CreatorProfileRequest
+        self.assertNotIn("instagram_engagement_rate", request(**self.BODY).model_fields_set)                          # the handler leaves the saved rate alone
+        self.assertIn("instagram_engagement_rate", request(**self.BODY, instagram_engagement_rate=None).model_fields_set)   # the handler clears it
 
 
 class TextOfAnEmbedding(unittest.TestCase):
@@ -149,6 +163,24 @@ class AgainstPostgres(unittest.TestCase):
         with self.engine.begin() as conn:
             conn.execute(text("UPDATE creator_niches SET embedding = CAST(:e AS vector) WHERE username = 'erin'"), {"e": str(vec(0.69))})
         self.assertNotIn("erin", [c["username"] for c in self.find(own_handle="me")])
+
+    def test_the_audience_filter_keeps_creators_between_a_third_and_double_the_followers(self):
+        from pipeline.similar_creators import audience_range
+        self.assertEqual(audience_range(1000), (334, 2000))     # a third rounded up, and twice
+        self.assertEqual(audience_range(3), (1, 6))
+        self.assertIsNone(audience_range(None))
+        self.assertIsNone(audience_range(0))
+        # alice has 1200 followers, carol 700 (both above the 70 % match); erin 500 is not similar enough anyway
+        names = lambda rng: [c["username"] for c in self.find(own_handle="me", followers_range=rng)]
+        self.assertEqual(names(None), ["Alice", "carol"])
+        self.assertEqual(names(audience_range(1000)), ["Alice", "carol"])      # 334 to 2000
+        self.assertEqual(names(audience_range(3000)), ["Alice"])               # 1000 to 6000: alice (1200) is in, carol (700) is out
+        self.assertEqual(names((701, 5000)), ["Alice"])                        # carol (700) is out when the range starts at 701
+        self.assertEqual(names((1, 650)), [])
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE instagram_users SET followers_count = NULL WHERE id = 3"))   # carol: no follower count
+        self.assertEqual(names(audience_range(1000)), ["Alice"])               # a creator with no follower count is left out by the hard filter
+        self.assertEqual(names(None), ["Alice", "carol"])                      # and stays in without the filter
 
     def test_profile_numbers_and_the_partnerships_come_from_both_tables(self):
         alice = self.find(own_handle="me")[0]
@@ -255,6 +287,19 @@ class AgainstPostgres(unittest.TestCase):
             client.get("/feed/similar-creators")
         self.assertEqual(asked, ["Niche: Beauty\nDescription: Skincare\nTags: "])   # the user in the creators' format, embedded once
         self.assertEqual(body["ready"], True)
+        self.assertEqual((body["your_followers"], body["audience_range"]), (None, None))   # the test user has no follower count
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE creator_profiles SET instagram_followers = 1000 WHERE id = 1"))
+        names = lambda url: [c["username"] for c in client.get(url).json()["creators"]]
+        self.assertEqual(names("/feed/similar-creators?same_audience=true"), ["Alice", "carol"])       # 334 to 2000
+        self.assertEqual(client.get("/feed/similar-creators").json()["audience_range"], {"min": 334, "max": 2000})
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE creator_profiles SET instagram_followers = 3000 WHERE id = 1"))
+        self.assertEqual(names("/feed/similar-creators?same_audience=true"), ["Alice"])                # 1000 to 6000
+        self.assertEqual(names("/feed/similar-creators"), ["Alice", "carol"])                          # without the filter everyone similar stays
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE creator_profiles SET instagram_followers = NULL WHERE id = 1"))
+        self.assertEqual(names("/feed/similar-creators?same_audience=true"), [])                       # no follower count: the filter shows nothing
         self.assertEqual((body["ready"], body["threshold"], [c["username"] for c in body["creators"]]), (True, 70, ["Alice", "carol"]))
         api_app.app.dependency_overrides[get_current_user] = as_user(2)
         self.assertEqual(client.get("/feed/similar-creators").json()["creators"], [])
