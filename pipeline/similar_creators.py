@@ -283,7 +283,7 @@ _CREATOR_POSTS = text("""
 """)
 
 _YOUR_POSTS = text("""
-    SELECT timestamp, coalesce(video_view_count, video_play_count) AS views FROM creator_instagram_posts WHERE creator_profile_id = :id
+    SELECT timestamp, coalesce(video_view_count, video_play_count) AS views, partnership_post FROM creator_instagram_posts WHERE creator_profile_id = :id
 """)
 
 
@@ -296,7 +296,8 @@ def your_stats(db: Session, user) -> dict:
         "engagement_rate": user.instagram_engagement_rate,
         "avg_reel_views": average_views([r.views for r in rows]),
         "posts_per_week": posts_per_week([r.timestamp for r in rows]),
-        "brand_partnerships": user.brand_partnerships,
+        # what the user typed; until then the number of their saved posts they marked as a paid partnership (None when there are none)
+        "brand_partnerships": user.brand_partnerships if user.brand_partnerships is not None else (sum(1 for r in rows if r.partnership_post) or None),
     }
 
 
@@ -357,7 +358,8 @@ def find_similar_creators(
             "avg_likes": round(float(avg_likes)) if avg_likes is not None else None,
             "avg_comments": round(float(avg_comments)) if avg_comments is not None else None,
             "engagement_rate": r.engagement_rate if r.engagement_rate is not None else engagement_rate(avg_likes, avg_comments, followers),
-            "avg_reel_views": average_views([p.views for p in posts.get(who, [])]),
+            # views of their own posts; when we hold none, the views of their partnership posts
+            "avg_reel_views": average_views([p.views for p in posts.get(who, [])]) or average_views([p["views"] for p in partnerships.get(who, [])]),
             "posts_per_week": posts_per_week([p.post_timestamp for p in posts.get(who, [])]),
             "similarity": round(float(r.similarity) * 100),
             "partnership_count": len(shown),

@@ -215,7 +215,8 @@ class AgainstPostgres(unittest.TestCase):
     def test_creators_get_average_reel_views_and_posts_per_week(self):
         found = {c["username"]: c for c in self.find(own_handle="me")}
         self.assertEqual((found["Alice"]["avg_reel_views"], found["Alice"]["posts_per_week"]), (2000, 1.0))   # views 1000 and 3000; 2 posts in 14 days
-        self.assertEqual((found["carol"]["avg_reel_views"], found["carol"]["posts_per_week"]), (None, None))   # no view counts and no post date known
+        # carol has no view counts on her own posts, so the average falls back to her partnership posts (the one with 900 views)
+        self.assertEqual((found["carol"]["avg_reel_views"], found["carol"]["posts_per_week"]), (900, None))
 
     def test_the_users_own_numbers(self):
         from pipeline.similar_creators import your_stats
@@ -228,6 +229,16 @@ class AgainstPostgres(unittest.TestCase):
         with self.Session() as db:
             stats = your_stats(db, db.get(CreatorProfile, 1))
         self.assertEqual(stats, {"handle": "me", "followers": 5000, "engagement_rate": 4.2, "avg_reel_views": 300, "posts_per_week": 1.0, "brand_partnerships": 3})   # 2 of 3 posts in the 14 days
+        # without a typed count, the posts the user marked as paid partnerships are counted; with none marked there is no number
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE creator_profiles SET brand_partnerships = NULL WHERE id = 1"))
+            conn.execute(text("UPDATE creator_instagram_posts SET partnership_post = true WHERE post_id IN ('a', 'b')"))
+        with self.Session() as db:
+            self.assertEqual(your_stats(db, db.get(CreatorProfile, 1))["brand_partnerships"], 2)
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE creator_instagram_posts SET partnership_post = false"))
+        with self.Session() as db:
+            self.assertIsNone(your_stats(db, db.get(CreatorProfile, 1))["brand_partnerships"])
 
     def test_the_audience_filter_keeps_creators_between_a_third_and_double_the_followers(self):
         from pipeline.similar_creators import audience_range
