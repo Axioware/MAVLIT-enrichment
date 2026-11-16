@@ -84,7 +84,7 @@ def brand_intelligence(limit: int = Query(30, ge=1, le=100), db: Session = Depen
 
 @router.get("/brand-intelligence/{brand_id}/creators")
 def brand_intelligence_creators(brand_id: int, db: Session = Depends(get_db), user: CreatorProfile = Depends(get_current_user)):
-    """The unique creators a brand works with (the creators behind its partnership posts scored 90 or more), for the "View insights" window."""
+    """All the unique creators a brand works with (the creators behind its partnership posts scored 90 or more), for the "View insights" window."""
     brand = db.get(BrandRaw, brand_id)
     if brand is None:
         raise HTTPException(status_code=404, detail="Brand not found")

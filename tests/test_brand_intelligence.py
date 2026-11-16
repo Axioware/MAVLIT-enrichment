@@ -100,6 +100,20 @@ class AgainstPostgres(unittest.TestCase):
             self.assertEqual(brand_creators(db, 3), [])                                  # a brand with no partnership posts
             self.assertEqual(len(brand_creators(db, 1, limit=2)), 2)
 
+    def test_every_unique_creator_is_listed_not_just_the_first_fifty(self):
+        from pipeline.brand_intelligence import brand_creators
+        with self.engine.begin() as conn:
+            conn.execute(text("""INSERT INTO test_creator_brand_partnership_posts (brand_raw_id, brand_name, creator_username, post_url, sponsorship_confidence)
+                SELECT 3, 'Initech', 'creator' || g, 'https://www.instagram.com/p/post' || g || '/', 95 FROM generate_series(1, 120) g"""))
+            conn.execute(text("""INSERT INTO test_creator_brand_partnership_posts (brand_raw_id, brand_name, creator_username, post_url, sponsorship_confidence)
+                VALUES (3, 'Initech', 'Creator7', 'https://www.instagram.com/p/another7/', 95)"""))   # the same creator again, in another case: still one creator
+        with self.Session() as db:
+            rows = brand_creators(db, 3)
+        self.assertEqual(len(rows), 120)
+        self.assertEqual(rows[0]["username"], "creator7")      # the one with 2 posts first
+        self.assertEqual(rows[0]["partnership_posts"], 2)
+        self.assertEqual(len({r["username"] for r in rows}), 120)
+
     def test_the_endpoint_lists_the_matched_brands_best_first_with_the_numbers(self):
         from fastapi.testclient import TestClient
         import api.app as api_app

@@ -99,8 +99,8 @@ def brand_stats(db: Session, brand_ids: list[int], minimum: int = MIN_PARTNERSHI
     return out
 
 
-def brand_creators(db: Session, brand_id: int, limit: int = 50, minimum: int = MIN_PARTNERSHIP_CONFIDENCE) -> list[dict]:
-    """The unique creators behind a brand's partnership posts, the ones with the most posts first, then the biggest."""
+def brand_creators(db: Session, brand_id: int, limit: int | None = None, minimum: int = MIN_PARTNERSHIP_CONFIDENCE) -> list[dict]:
+    """Every unique creator behind a brand's partnership posts (`limit` caps the list when given), the ones with the most posts first, then the biggest."""
     posts, creators, stored = _load(db, [brand_id], minimum)
     count: dict[str, int] = {}
     for entry in posts[brand_id].values():
@@ -116,4 +116,4 @@ def brand_creators(db: Session, brand_id: int, limit: int = 50, minimum: int = M
             "engagement_rate": _rate(who, creators, stored), "partnership_posts": n,
         })
     rows.sort(key=lambda r: (-r["partnership_posts"], -(r["followers"] or 0), r["username"]))
-    return rows[:limit]
+    return rows if limit is None else rows[:limit]
