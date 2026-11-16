@@ -170,9 +170,9 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
 
 #### `GET /feed/similar-creators`
 
-- **Purpose:** The Feed's "Similar Creators" tab. Creators with a confirmed partnership (a score of 90 or more in `instagram_posts` or `test_creator_brand_partnership_posts`, not commenters) whose embedding is at least 70% cosine-similar to the signed-in creator's own profile embedding. The creator's own Instagram handle is never returned. At most 60, most similar first.
+- **Purpose:** The Feed's "Similar Creators" tab. Creators with a confirmed partnership (a score of 90 or more in `instagram_posts` or `test_creator_brand_partnership_posts`, not commenters) whose embedding is at least 70% cosine-similar to the signed-in creator's profile, written in the same Niche / Description / Tags format as the creators and embedded on the fly (kept in memory, so a reload makes no OpenAI call). The creator's own Instagram handle is never returned. At most 60, most similar first.
 - **Auth:** Signed-in creator.
-- **Response:** `200` `{ "ready": true, "threshold": 70, "min_partnership_score": 90, "creators": [{ "username", "full_name", "profile_url", "niche", "description", "tags", "country", "followers", "similarity", "partnership_count", "partnerships": [{ "brand", "post_url", "date", "confidence" }] }] }`. `ready: false` with an empty list when the user's profile has no embedding yet.
+- **Response:** `200` `{ "ready": true, "threshold": 70, "min_partnership_score": 90, "creators": [{ "username", "full_name", "profile_url", "niche", "description", "tags", "country", "followers", "similarity", "partnership_count", "partnerships": [{ "brand", "post_url", "date", "confidence" }] }] }`. `ready: false` with an empty list when the user's profile has no niche and no description yet; `503` when OpenAI is unavailable.
 - **Data:** the creators' descriptions and embeddings are made by `python pipeline/enrichment/creator_niches.py` (only for creators with such a partnership).
 
 #### `GET /brand-niches`

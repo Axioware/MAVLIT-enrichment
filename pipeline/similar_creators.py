@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from pgvector.sqlalchemy import Vector
 
 from pipeline.db import CreatorNiche, InstagramUser
-from pipeline.helpers.gpt_llm import embed_text_batch
+from pipeline.helpers.gpt_llm import embed_text, embed_text_batch
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +81,43 @@ def embed_pending_creators(db: Session, usernames: set[str], batch_size: int = _
         done += len(batch)
     logger.info("Similar creators: embedded %d creator(s)", done)
     return done
+
+
+def user_query_text(profile) -> str | None:
+    """
+    The user's profile written in the creators' format (Niche / Description / Tags), so a user and a creator who are alike get alike
+    vectors. creator_profiles.embedding is built from a differently worded sentence and is left alone (matching uses it); comparing it with
+    the creators' vectors scored a test user only 69 % against their own creator row. None when the profile has no niche and no description.
+    """
+    niche = (profile.instagram_primary_niche or profile.content_niche or "").strip()
+    description = ((profile.instagram_description or profile.youtube_description or "")).strip()
+    if not niche and not description:
+        return None
+    tags: list = []
+    for group in (profile.instagram_sub_niches, profile.youtube_sub_niches, profile.content_tags):
+        if isinstance(group, list):
+            tags.extend(t.strip() for t in group if isinstance(t, str) and t.strip())
+    return embedding_text(niche, description, list(dict.fromkeys(tags)))
+
+
+_QUERY_CACHE: dict[str, list[float]] = {}
+_QUERY_CACHE_MAX = 512
+
+
+def user_query_embedding(profile) -> list[float] | None:
+    """The embedding of user_query_text(profile): None when there is no text; kept in memory so a reload costs no OpenAI call."""
+    query = user_query_text(profile)
+    if query is None:
+        return None
+    vector = _QUERY_CACHE.get(query)
+    if vector is None:
+        vector = embed_text(query, context="similar creators: the user's profile")
+        if not vector:
+            return None
+        if len(_QUERY_CACHE) >= _QUERY_CACHE_MAX:
+            _QUERY_CACHE.clear()
+        _QUERY_CACHE[query] = vector
+    return vector
 
 
 _SIMILAR = text("""
@@ -181,9 +218,11 @@ def diagnose(db: Session, email: str) -> dict:
     }
     user = db.query(CreatorProfile).filter(CreatorProfile.email == email.strip().lower()).first()
     out["user_found"] = user is not None
-    out["user_has_embedding"] = bool(user is not None and user.embedding is not None)
-    if out["user_has_embedding"]:
-        top = db.execute(_TOP_ANY, {"vec": list(user.embedding), "partners": sorted(partners)}).all()
+    query = user_query_embedding(user) if user is not None else None
+    out["user_has_embedding"] = query is not None
+    if query is not None:
+        out["user_query_text"] = user_query_text(user)
+        top = db.execute(_TOP_ANY, {"vec": list(query), "partners": sorted(partners)}).all()
         out["closest_creators_any"] = [{"username": r.username, "similarity": round(float(r.similarity) * 100, 1), "has_partnership": bool(r.has_partnership)} for r in top]
     return out
 

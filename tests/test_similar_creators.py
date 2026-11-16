@@ -24,6 +24,20 @@ def vec(cosine: float) -> list[float]:
     return v
 
 
+class TextOfTheUser(unittest.TestCase):
+    def test_the_user_is_written_like_a_creator(self):
+        from types import SimpleNamespace
+        from pipeline.similar_creators import user_query_text
+        profile = SimpleNamespace(instagram_primary_niche="Music", content_niche="Music, DJ", instagram_description=" Vinyl DJ. ", youtube_description=None,
+                                  instagram_sub_niches=["vinyl", " "], youtube_sub_niches=["vinyl", "djing"], content_tags=["records"])
+        self.assertEqual(user_query_text(profile), "Niche: Music\nDescription: Vinyl DJ.\nTags: vinyl, djing, records")
+        profile.instagram_primary_niche = None
+        self.assertTrue(user_query_text(profile).startswith("Niche: Music, DJ\n"))
+        empty = SimpleNamespace(instagram_primary_niche=None, content_niche=None, instagram_description=None, youtube_description=None,
+                                instagram_sub_niches=None, youtube_sub_niches=None, content_tags=None)
+        self.assertIsNone(user_query_text(empty))
+
+
 class TextOfAnEmbedding(unittest.TestCase):
     def test_same_format_as_the_embedding_script(self):
         from pipeline.similar_creators import embedding_text
@@ -139,9 +153,11 @@ class AgainstPostgres(unittest.TestCase):
 
     def test_diagnose_shows_where_the_list_gets_empty(self):
         from pipeline.similar_creators import diagnose
+        from pipeline import similar_creators
         with self.engine.begin() as conn:
-            conn.execute(text("INSERT INTO creator_profiles (id, email, embedding) VALUES (1, 'u@example.test', CAST(:e AS vector))"), {"e": str(vec(1.0))})
-        with self.Session() as db:
+            conn.execute(text("INSERT INTO creator_profiles (id, email, instagram_primary_niche, instagram_description) VALUES (1, 'u@example.test', 'Beauty', 'Skincare')"))
+        with self.Session() as db, mock.patch.object(similar_creators, "embed_text", return_value=vec(1.0)):
+            similar_creators._QUERY_CACHE.clear()
             report = diagnose(db, "U@example.test")
         self.assertEqual((report["partnership_creators"], report["creator_niches_rows"], report["creator_niches_with_embedding"]), (5, 7, 6))
         self.assertEqual(report["partnership_creators_with_an_embedding"], 4)    # frank has a row but no embedding
@@ -154,7 +170,7 @@ class AgainstPostgres(unittest.TestCase):
         from api.auth import get_current_user
         from pipeline.db import CreatorProfile, get_db
         with self.engine.begin() as conn:
-            conn.execute(text("INSERT INTO creator_profiles (id, email, instagram_handle, embedding) VALUES (1, 'u@example.test', '@me', CAST(:e AS vector)), (2, 'v@example.test', NULL, NULL)"), {"e": str(vec(1.0))})
+            conn.execute(text("INSERT INTO creator_profiles (id, email, instagram_handle, instagram_primary_niche, instagram_description) VALUES (1, 'u@example.test', '@me', 'Beauty', 'Skincare'), (2, 'v@example.test', NULL, NULL, NULL)"))
 
         def override_db():
             with self.Session() as session:
@@ -169,7 +185,14 @@ class AgainstPostgres(unittest.TestCase):
         self.addCleanup(api_app.app.dependency_overrides.clear)
         client = TestClient(api_app.app, raise_server_exceptions=False)
         api_app.app.dependency_overrides[get_current_user] = as_user(1)
-        body = client.get("/feed/similar-creators").json()
+        from pipeline import similar_creators
+        similar_creators._QUERY_CACHE.clear()
+        asked = []
+        with mock.patch.object(similar_creators, "embed_text", side_effect=lambda t, context="": asked.append(t) or vec(1.0)):
+            body = client.get("/feed/similar-creators").json()
+            client.get("/feed/similar-creators")
+        self.assertEqual(asked, ["Niche: Beauty\nDescription: Skincare\nTags: "])   # the user in the creators' format, embedded once
+        self.assertEqual(body["ready"], True)
         self.assertEqual((body["ready"], body["threshold"], [c["username"] for c in body["creators"]]), (True, 70, ["Alice", "carol"]))
         api_app.app.dependency_overrides[get_current_user] = as_user(2)
         self.assertEqual(client.get("/feed/similar-creators").json()["creators"], [])
