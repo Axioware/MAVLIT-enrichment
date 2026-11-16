@@ -24,7 +24,7 @@ THREAD_RESERVE = 52   # worker threads kept for everything that is not a slow ro
 
 _SLOW_POST = {"/pitches", "/pitches/stream", "/rate-intelligence", "/contract-advice", "/creator-profile/me/posts",
               "/creator-profile/me/generate-description", "/matches/me/v2/refresh", "/matches/me/v3/refresh", "/own-brands"}
-_THUMBNAIL = re.compile(r"^/creator-profile/me/posts/[^/]+/thumbnail$")
+_THUMBNAIL = re.compile(r"^(?:/creator-profile/me/posts/[^/]+/thumbnail|/feed/post-thumbnail)$")   # fetched from Instagram by the server: slow
 
 
 def slow_route_concurrency() -> int:

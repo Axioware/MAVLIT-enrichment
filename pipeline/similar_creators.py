@@ -21,6 +21,7 @@ from pgvector.sqlalchemy import Vector
 
 from pipeline.db import CreatorNiche, InstagramUser
 from pipeline.helpers.engagement import engagement_rate
+from pipeline.pitch_posts import post_code
 from pipeline.helpers.gpt_llm import embed_text, embed_text_batch
 
 logger = logging.getLogger(__name__)
@@ -226,6 +227,19 @@ def fill_engagement_rates(db: Session, usernames: set[str]) -> int:
     return filled
 
 
+_IS_PARTNERSHIP_POST = text("""
+    SELECT 1 FROM instagram_posts WHERE sponsorship_confidence >= :min AND position(:slash_code in post_url) > 0
+    UNION ALL
+    SELECT 1 FROM test_creator_brand_partnership_posts WHERE sponsorship_confidence >= :min AND position(:slash_code in post_url) > 0
+    LIMIT 1
+""")
+
+
+def is_partnership_post_code(db: Session, code: str, minimum: int = MIN_PARTNERSHIP_CONFIDENCE) -> bool:
+    """True when `code` (an Instagram short code) is the post of a partnership scored at least `minimum`: the only pictures the Feed fetches."""
+    return db.execute(_IS_PARTNERSHIP_POST, {"min": minimum, "slash_code": f"/{code}"}).first() is not None
+
+
 def find_similar_creators(
     db: Session, user_embedding, own_handle: str | None = None, limit: int = DEFAULT_LIMIT,
     threshold: float = SIMILARITY_THRESHOLD, minimum: int = MIN_PARTNERSHIP_CONFIDENCE,
@@ -254,6 +268,8 @@ def find_similar_creators(
         partnerships.setdefault(row.who, []).append({
             "brand": row.brand, "category": row.category, "post_url": row.post_url, "date": row.at, "confidence": row.confidence,
             "type": post_kind(row.post_url, row.post_type, row.views), "likes": row.likes, "comments": row.comments, "views": row.views,
+            # the picture is fetched by the server (api/feed_api.py), like the pictures of the user's own posts
+            "thumbnail_url": f"/feed/post-thumbnail?code={code}" if (code := post_code(row.post_url or "")) else None,
         })
     engagement = {r.who: (r.avg_likes, r.avg_comments) for r in db.execute(_ENGAGEMENT, {"names": names}).all()}
     profiles = {u.id: u for u in db.query(InstagramUser).filter(InstagramUser.id.in_([r.instagram_user_id for r in found])).all()}

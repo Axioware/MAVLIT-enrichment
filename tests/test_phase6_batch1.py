@@ -44,14 +44,14 @@ def _python(code, **env):
 
 
 SLOW = [("POST", "/pitches"), ("POST", "/pitches/stream"), ("POST", "/rate-intelligence"), ("POST", "/contract-advice"),
-        ("POST", "/creator-profile/me/posts"), ("GET", "/creator-profile/me/posts/12/thumbnail"),
+        ("POST", "/creator-profile/me/posts"), ("GET", "/creator-profile/me/posts/12/thumbnail"), ("GET", "/feed/post-thumbnail"),
         ("POST", "/creator-profile/me/generate-description"), ("POST", "/matches/me/v2/refresh"), ("POST", "/matches/me/v3/refresh"),
         ("POST", "/own-brands")]
 NOT_SLOW = [("POST", "/auth/login"), ("POST", "/auth/logout"), ("POST", "/auth/logout-all"), ("GET", "/auth/me"), ("GET", "/health"), ("GET", "/health/db"),
             ("POST", "/admin/login"), ("GET", "/admin/"), ("GET", "/pitches/me"), ("POST", "/pitches/manual"), ("PATCH", "/pitches/3"),
             ("GET", "/matches/me"), ("GET", "/rate-intelligence/latest"), ("GET", "/creator-profile/me"), ("PUT", "/creator-profile/me"),
             ("GET", "/creator-profile/me/posts"), ("PATCH", "/creator-profile/me/posts/3"), ("POST", "/saved-brands"), ("GET", "/own-brands/jobs/x"),
-            ("GET", "/matches/me/v3"), ("GET", "/pitches"), ("POST", "/early-access")]
+            ("GET", "/matches/me/v3"), ("GET", "/pitches"), ("POST", "/early-access"), ("GET", "/feed/similar-creators")]
 
 
 class SlowRouteClassification(unittest.TestCase):

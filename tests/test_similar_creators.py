@@ -210,10 +210,12 @@ class AgainstPostgres(unittest.TestCase):
         post = by_url["https://i/p-alice"]
         self.assertEqual((post["type"], post["likes"], post["comments"], post["views"], post["engagement"]), ("Video", 100, 20, 5000, 10.0))   # (100 + 20) / 1200 * 100
         self.assertEqual(post["category"], None)                                                                                              # brands_raw.niche is empty in the test data
+        self.assertIsNone(post["thumbnail_url"])                                                                                              # "https://i/p-alice" is not an Instagram post link
         bare = by_url["https://i/alice-3"]
         self.assertEqual((bare["type"], bare["likes"], bare["views"], bare["engagement"]), ("Post", None, None, None))                       # nothing is known about that post
         first = carol["partnerships"][0]
         self.assertEqual((first["type"], first["likes"], first["comments"], first["views"], first["engagement"]), ("Reel", 50, 10, 900, 8.6))   # (50 + 10) / 700 * 100
+        self.assertEqual(first["thumbnail_url"], "/feed/post-thumbnail?code=XYZ")                                                           # fetched by the server, see the endpoint test
 
     def test_the_engagement_rate_is_average_likes_plus_comments_over_followers(self):
         found = {c["username"]: c for c in self.find(own_handle="me")}
@@ -280,6 +282,46 @@ class AgainstPostgres(unittest.TestCase):
         self.assertEqual(report["partnership_creators_with_an_embedding"], 4)    # frank has a row but no embedding
         self.assertTrue(report["user_has_embedding"])
         self.assertEqual(report["closest_creators_any"][0], {"username": "me", "similarity": 100.0, "has_partnership": True})
+
+    def test_only_partnership_posts_have_a_picture_to_fetch(self):
+        from pipeline.similar_creators import is_partnership_post_code
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE instagram_posts SET post_url = 'https://www.instagram.com/p/AbC_123/' WHERE post_id = 'p-alice'"))
+            conn.execute(text("UPDATE instagram_posts SET post_url = 'https://www.instagram.com/p/LowScore1/' WHERE post_id = 'p-bob'"))   # bob's post is scored 80
+        with self.Session() as db:
+            self.assertTrue(is_partnership_post_code(db, "AbC_123"))     # brand-side post scored 95
+            self.assertTrue(is_partnership_post_code(db, "XYZ"))         # test-table post scored 92
+            self.assertFalse(is_partnership_post_code(db, "LowScore1"))  # scored below 90
+            self.assertFalse(is_partnership_post_code(db, "Unknown99"))
+
+    def test_the_picture_endpoint_serves_only_partnership_posts(self):
+        from fastapi.testclient import TestClient
+        import api.app as api_app
+        import api.feed_api as feed_api
+        from api.auth import get_current_user
+        from pipeline.db import get_db
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE instagram_posts SET post_url = 'https://www.instagram.com/p/AbC_123/' WHERE post_id = 'p-alice'"))
+
+        def override_db():
+            with self.Session() as session:
+                yield session
+        api_app.app.dependency_overrides[get_db] = override_db
+        api_app.app.dependency_overrides[get_current_user] = lambda: object()
+        self.addCleanup(api_app.app.dependency_overrides.clear)
+        client = TestClient(api_app.app, raise_server_exceptions=False)
+        asked = []
+        with mock.patch.object(feed_api, "_fetch_thumbnail", side_effect=lambda code: asked.append(code) or (b"jpegbytes", "image/jpeg")):
+            ok = client.get("/feed/post-thumbnail?code=AbC_123")
+            self.assertEqual((ok.status_code, ok.content, ok.headers["content-type"]), (200, b"jpegbytes", "image/jpeg"))
+            self.assertIn("private", ok.headers["cache-control"])
+            self.assertEqual(client.get("/feed/post-thumbnail?code=Unknown99").status_code, 404)    # not a partnership post: never fetched
+            self.assertEqual(client.get("/feed/post-thumbnail?code=a/b").status_code, 404)           # not a short code
+            self.assertEqual(asked, ["AbC_123"])
+        with mock.patch.object(feed_api, "_fetch_thumbnail", return_value=None):
+            self.assertEqual(client.get("/feed/post-thumbnail?code=AbC_123").status_code, 404)       # Instagram has no picture
+        with mock.patch.object(feed_api, "_fetch_thumbnail", side_effect=feed_api.ThumbnailTooLarge()):
+            self.assertEqual(client.get("/feed/post-thumbnail?code=AbC_123").status_code, 502)
 
     def test_the_endpoint(self):
         from fastapi.testclient import TestClient

@@ -1,11 +1,14 @@
 """GET /feed/similar-creators: the creators shown in the Feed's "Similar Creators" tab (real data, pipeline/similar_creators.py)."""
-from fastapi import APIRouter, Depends, HTTPException, Query
+import re
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
+from api.creator_posts import ThumbnailTooLarge, _fetch_thumbnail
 from pipeline.db import CreatorProfile, get_db
 from pipeline.helpers.gpt_llm import LLMUnavailableError
-from pipeline.similar_creators import MIN_PARTNERSHIP_CONFIDENCE, SIMILARITY_THRESHOLD, audience_range, find_similar_creators, user_query_embedding, user_query_text
+from pipeline.similar_creators import MIN_PARTNERSHIP_CONFIDENCE, SIMILARITY_THRESHOLD, audience_range, find_similar_creators, is_partnership_post_code, user_query_embedding, user_query_text
 
 router = APIRouter(prefix="/feed", tags=["feed"])
 
@@ -33,3 +36,25 @@ def similar_creators(same_audience: bool = Query(False), db: Session = Depends(g
         raise HTTPException(status_code=503, detail="Similar creators are not available right now. Please try again in a few minutes.")
     return {**base, "ready": True,
             "creators": find_similar_creators(db, vector, own_handle=user.instagram_handle, followers_range=span if same_audience else None)}
+
+
+_CODE = re.compile(r"^[A-Za-z0-9_-]{5,40}$")
+
+
+@router.get("/post-thumbnail")
+def post_thumbnail(code: str = Query(...), db: Session = Depends(get_db), user: CreatorProfile = Depends(get_current_user)):
+    """
+    The picture of a partnership post shown in the Similar Creators dialog (404 when there is none: private, deleted or Instagram not answering).
+    Only the posts of confirmed partnerships can be asked for, and the server fetches the picture itself: the browser cannot load it straight
+    from Instagram (see api/creator_posts.py, whose cache and size limit this shares).
+    """
+    if not _CODE.match(code) or not is_partnership_post_code(db, code):
+        raise HTTPException(status_code=404, detail="No picture for this post")
+    try:
+        found = _fetch_thumbnail(code)
+    except ThumbnailTooLarge:
+        raise HTTPException(status_code=502, detail="This post's picture is too large to show")
+    if found is None:
+        raise HTTPException(status_code=404, detail="No picture for this post")
+    content, kind = found
+    return Response(content=content, media_type=kind, headers={"Cache-Control": "private, max-age=3600"})
