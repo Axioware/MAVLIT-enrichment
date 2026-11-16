@@ -8,7 +8,7 @@ from api.auth import get_current_user
 from api.creator_posts import ThumbnailTooLarge, _fetch_thumbnail
 from pipeline.db import CreatorProfile, get_db
 from pipeline.helpers.gpt_llm import LLMUnavailableError
-from pipeline.similar_creators import MIN_PARTNERSHIP_CONFIDENCE, SIMILARITY_THRESHOLD, audience_range, find_similar_creators, is_partnership_post_code, user_query_embedding, user_query_text
+from pipeline.similar_creators import MIN_PARTNERSHIP_CONFIDENCE, SIMILARITY_THRESHOLD, audience_range, find_similar_creators, is_partnership_post_code, your_stats, user_query_embedding, user_query_text
 
 router = APIRouter(prefix="/feed", tags=["feed"])
 
@@ -23,7 +23,8 @@ def similar_creators(same_audience: bool = Query(False), db: Session = Depends(g
     followers = user.instagram_followers or user.follower_count
     span = audience_range(followers)
     base = {"threshold": round(SIMILARITY_THRESHOLD * 100), "min_partnership_score": MIN_PARTNERSHIP_CONFIDENCE,
-            "your_followers": followers, "audience_range": {"min": span[0], "max": span[1]} if span else None}
+            "your_followers": followers, "audience_range": {"min": span[0], "max": span[1]} if span else None,
+            "you": your_stats(db, user)}   # the user's own numbers, for "Why Them, Not Me?"
     if user_query_text(user) is None:   # no niche and no description yet: nothing to compare
         return {**base, "ready": False, "creators": []}
     if same_audience and span is None:   # the filter needs the user's follower count: nothing to show, and no embedding call

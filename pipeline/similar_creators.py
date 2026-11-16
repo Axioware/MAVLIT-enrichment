@@ -14,6 +14,7 @@ A MAVLIT user is shown the partnership creators whose embedding is at least SIMI
 to the user's own profile embedding (creator_profiles.embedding) - the same threshold matching/match_text.py uses.
 """
 import logging
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
@@ -240,6 +241,65 @@ def is_partnership_post_code(db: Session, code: str, minimum: int = MIN_PARTNERS
     return db.execute(_IS_PARTNERSHIP_POST, {"min": minimum, "slash_code": f"/{code}"}).first() is not None
 
 
+POSTING_WINDOW_DAYS = 14
+
+
+def _parse_time(value) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def posts_per_week(timestamps) -> float | None:
+    """
+    Posts per week over the last 14 days (2 weeks), one decimal. The 14 days end at the newest post we hold for the creator, not at today:
+    our copies of a creator's posts were read at different times, and counting back from today would give every creator whose posts were
+    read a month ago zero. None when no post has a readable date.
+    """
+    times = [t for t in (_parse_time(v) for v in timestamps) if t is not None]
+    if not times:
+        return None
+    newest = max(times)
+    recent = sum(1 for t in times if t >= newest - timedelta(days=POSTING_WINDOW_DAYS))
+    return round(recent / (POSTING_WINDOW_DAYS / 7), 1)
+
+
+def average_views(values) -> int | None:
+    """The average of the view counts that exist (zero or hidden counts are left out); None when there are none."""
+    numbers = [v for v in values if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0]
+    return round(sum(numbers) / len(numbers)) if numbers else None
+
+
+_CREATOR_POSTS = text("""
+    SELECT lower(btrim(username)) AS who, post_timestamp, coalesce(video_view_count, video_play_count) AS views
+    FROM instagram_users
+    WHERE user_type != 'commenter' AND lower(btrim(username)) = ANY(:names)
+""")
+
+_YOUR_POSTS = text("""
+    SELECT timestamp, coalesce(video_view_count, video_play_count) AS views FROM creator_instagram_posts WHERE creator_profile_id = :id
+""")
+
+
+def your_stats(db: Session, user) -> dict:
+    """The signed-in user's numbers for "Why Them, Not Me?": from the user's own saved posts (creator_instagram_posts) and profile."""
+    rows = db.execute(_YOUR_POSTS, {"id": user.id}).all()
+    return {
+        "handle": user.instagram_handle,
+        "followers": user.instagram_followers or user.follower_count,
+        "engagement_rate": user.instagram_engagement_rate,
+        "avg_reel_views": average_views([r.views for r in rows]),
+        "posts_per_week": posts_per_week([r.timestamp for r in rows]),
+        "brand_partnerships": user.brand_partnerships,
+    }
+
+
 def find_similar_creators(
     db: Session, user_embedding, own_handle: str | None = None, limit: int = DEFAULT_LIMIT,
     threshold: float = SIMILARITY_THRESHOLD, minimum: int = MIN_PARTNERSHIP_CONFIDENCE,
@@ -272,6 +332,9 @@ def find_similar_creators(
             "thumbnail_url": f"/feed/post-thumbnail?code={code}" if (code := post_code(row.post_url or "")) else None,
         })
     engagement = {r.who: (r.avg_likes, r.avg_comments) for r in db.execute(_ENGAGEMENT, {"names": names}).all()}
+    posts: dict[str, list] = {}
+    for row in db.execute(_CREATOR_POSTS, {"names": names}).all():
+        posts.setdefault(row.who, []).append(row)
     profiles = {u.id: u for u in db.query(InstagramUser).filter(InstagramUser.id.in_([r.instagram_user_id for r in found])).all()}
 
     result = []
@@ -294,6 +357,8 @@ def find_similar_creators(
             "avg_likes": round(float(avg_likes)) if avg_likes is not None else None,
             "avg_comments": round(float(avg_comments)) if avg_comments is not None else None,
             "engagement_rate": r.engagement_rate if r.engagement_rate is not None else engagement_rate(avg_likes, avg_comments, followers),
+            "avg_reel_views": average_views([p.views for p in posts.get(who, [])]),
+            "posts_per_week": posts_per_week([p.post_timestamp for p in posts.get(who, [])]),
             "similarity": round(float(r.similarity) * 100),
             "partnership_count": len(shown),
             "partnerships": shown[:MAX_PARTNERSHIPS_SHOWN],

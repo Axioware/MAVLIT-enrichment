@@ -27,6 +27,7 @@ class CreatorProfileResponse(BaseModel):
     instagram_handle: str | None = None
     instagram_followers: int | None = None
     instagram_highest_views: int | None = None
+    brand_partnerships: int | None = None   # typed by the creator on the profile page
     instagram_engagement_rate: float | None = None   # (average likes + average comments) / followers * 100, calculated when MAVLIT generates the profile
 
     primary_platform: str | None = None
@@ -96,6 +97,7 @@ def profile_to_response(row: CreatorProfile) -> CreatorProfileResponse:
         instagram_handle=row.instagram_handle,
         instagram_followers=row.instagram_followers,
         instagram_highest_views=row.instagram_highest_views,
+        brand_partnerships=row.brand_partnerships,
         instagram_engagement_rate=row.instagram_engagement_rate,
         primary_platform=row.primary_platform,
         follower_count=row.follower_count,

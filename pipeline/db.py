@@ -690,6 +690,7 @@ class CreatorProfile(Base):
     #  Platform profile fields used by creator-profile.html
     instagram_handle = Column(Text)
     instagram_followers = Column(Integer)
+    brand_partnerships = Column(Integer)   # how many brand partnerships the creator has had: typed on the profile, shown next to a similar creator's in "Why Them, Not Me?"
     instagram_engagement_rate = Column(Float)   # (avg likes + avg comments) / followers * 100 over the scraped posts, calculated when MAVLIT generates the Instagram description
     instagram_highest_views = Column(Integer)   # most views on any of the creator's recent reels / video posts (typed, or read from the 20 posts MAVLIT scrapes)
 

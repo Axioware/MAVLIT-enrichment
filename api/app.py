@@ -1629,6 +1629,7 @@ class CreatorProfileRequest(BaseModel):
     instagram_highest_views: int | None = Field(default=None, ge=0, le=10**10)
     # MAVLIT calculates it when it generates the profile; the creator may correct it. Left alone when a request does not send it (see the PUT handler).
     instagram_engagement_rate: float | None = Field(default=None, ge=0, le=100)
+    brand_partnerships: int | None = Field(default=None, ge=0, le=100000)   # the creator's own count; left alone when a request does not send it
 
     primary_platform: str | None = Field(default=None, max_length=100)
     follower_count:   Count | None = None
@@ -2080,6 +2081,8 @@ def upsert_my_creator_profile(
     db = SessionLocal()
     try:
         payload = body.model_dump()
+        if "brand_partnerships" not in body.model_fields_set:
+            payload.pop("brand_partnerships")   # a client that does not know the field must not wipe the saved count
         if "instagram_engagement_rate" not in body.model_fields_set:
             payload.pop("instagram_engagement_rate")   # a client that does not know the field must not wipe the saved rate
         else:

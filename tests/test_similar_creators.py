@@ -86,6 +86,36 @@ class EngagementRateOfTheProfile(unittest.TestCase):
         self.assertNotIn("instagram_engagement_rate", request(**self.BODY).model_fields_set)                          # the handler leaves the saved rate alone
         self.assertIn("instagram_engagement_rate", request(**self.BODY, instagram_engagement_rate=None).model_fields_set)   # the handler clears it
 
+    def test_the_users_brand_partnerships_are_a_whole_number_the_user_types(self):
+        import api.app as api_app
+        from api.schemas import CreatorProfileResponse
+        from pydantic import ValidationError
+        request = api_app.CreatorProfileRequest
+        self.assertIn("brand_partnerships", CreatorProfileResponse.model_fields)
+        self.assertEqual(request(**self.BODY, brand_partnerships=4).brand_partnerships, 4)
+        self.assertEqual(request(**self.BODY, brand_partnerships=0).brand_partnerships, 0)
+        for bad in (-1, 1.5, "x", 10**6):
+            with self.assertRaises(ValidationError):
+                request(**self.BODY, brand_partnerships=bad)
+        self.assertNotIn("brand_partnerships", request(**self.BODY).model_fields_set)                                  # not sent: the saved count is left alone
+
+
+class PostingAndViews(unittest.TestCase):
+    def test_posts_per_week_counts_the_14_days_before_the_newest_post(self):
+        from pipeline.similar_creators import posts_per_week
+        self.assertEqual(posts_per_week(["2026-05-10T10:00:00.000Z", "2026-05-08T10:00:00Z", "2026-04-26T10:00:01Z", "2026-03-01T00:00:00Z"]), 1.5)   # 3 posts in 14 days: 1.5 a week
+        self.assertEqual(posts_per_week(["2026-05-10T10:00:00Z", "2026-04-26T10:00:00Z"]), 1.0)                  # exactly 14 days back still counts
+        self.assertEqual(posts_per_week(["2026-01-01T00:00:00Z"]), 0.5)                                          # a single post: 1 in 2 weeks, however old it is
+        self.assertEqual(posts_per_week(["2026-05-10", None, "not a date", ""]), 0.5)                            # unreadable dates are ignored
+        self.assertIsNone(posts_per_week([None, "", "garbage"]))
+        self.assertIsNone(posts_per_week([]))
+
+    def test_average_views_ignores_missing_and_zero(self):
+        from pipeline.similar_creators import average_views
+        self.assertEqual(average_views([1000, 3000, None, 0, -1]), 2000)
+        self.assertIsNone(average_views([None, 0]))
+        self.assertIsNone(average_views([]))
+
 
 class PostKind(unittest.TestCase):
     def test_what_a_partnership_post_is_called(self):
@@ -142,11 +172,15 @@ class AgainstPostgres(unittest.TestCase):
                 (7, 'me', 'mention', 'p-me', 100, NULL, NULL)"""))
             # alice's likes and comments: two posts, (100 + 200) / 2 likes and (20 + 40) / 2 comments; one post has hidden counts (-1) that must not count
             conn.execute(text("UPDATE instagram_users SET likes_count = 100, comments_count = 20 WHERE id = 1"))
+            # alice's own posts: two inside the 14 days before her newest post (views 1000 and 3000), one months older without views
+            conn.execute(text("UPDATE instagram_users SET post_timestamp = '2026-05-10T10:00:00.000Z', video_view_count = 1000 WHERE id = 1"))
             conn.execute(text("UPDATE instagram_posts SET post_type = 'Video', video_view_count = 5000 WHERE post_id = 'p-alice'"))
             # carol's partnership post is in the test table only; her own scraped row for that post holds its likes and comments, the test row its views
             conn.execute(text("UPDATE instagram_users SET post_id = 'cp-1', likes_count = 50, comments_count = 10 WHERE id = 3"))
             conn.execute(text("""INSERT INTO instagram_users (id, username, user_type, followers_count, likes_count, comments_count) VALUES
                 (8, 'Alice', 'mention', 1200, 200, 40), (9, 'Alice', 'mention', 1200, -1, -1)"""))
+            conn.execute(text("UPDATE instagram_users SET post_timestamp = '2026-05-08T10:00:00.000Z', video_play_count = 3000 WHERE id = 8"))
+            conn.execute(text("UPDATE instagram_users SET post_timestamp = '2026-03-01T10:00:00.000Z' WHERE id = 9"))
             conn.execute(text("""INSERT INTO test_creator_brand_partnership_posts (brand_raw_id, brand_name, creator_username, post_url, post_timestamp, sponsorship_confidence, post_id, video_play_count)
                 VALUES (2, 'Globex', 'carol', 'https://www.instagram.com/reel/XYZ/', '2026-04-01', 92, 'cp-1', 900), (1, 'Acme', 'Alice', 'https://i/alice-2', '2026-06-01', 60, NULL, NULL),
                        (1, 'Acme', 'Alice', 'https://i/alice-3', '2026-03-01', 97, NULL, NULL)"""))
@@ -177,6 +211,23 @@ class AgainstPostgres(unittest.TestCase):
         with self.engine.begin() as conn:
             conn.execute(text("UPDATE creator_niches SET embedding = CAST(:e AS vector) WHERE username = 'erin'"), {"e": str(vec(0.69))})
         self.assertNotIn("erin", [c["username"] for c in self.find(own_handle="me")])
+
+    def test_creators_get_average_reel_views_and_posts_per_week(self):
+        found = {c["username"]: c for c in self.find(own_handle="me")}
+        self.assertEqual((found["Alice"]["avg_reel_views"], found["Alice"]["posts_per_week"]), (2000, 1.0))   # views 1000 and 3000; 2 posts in 14 days
+        self.assertEqual((found["carol"]["avg_reel_views"], found["carol"]["posts_per_week"]), (None, None))   # no view counts and no post date known
+
+    def test_the_users_own_numbers(self):
+        from pipeline.similar_creators import your_stats
+        from pipeline.db import CreatorProfile
+        with self.engine.begin() as conn:
+            conn.execute(text("""INSERT INTO creator_profiles (id, email, instagram_handle, instagram_followers, instagram_engagement_rate, brand_partnerships)
+                                 VALUES (1, 'u@example.test', 'me', 5000, 4.2, 3)"""))
+            conn.execute(text("""INSERT INTO creator_instagram_posts (creator_profile_id, instagram_handle, post_id, timestamp, video_view_count, video_play_count) VALUES
+                (1, 'me', 'a', '2026-06-10T10:00:00.000Z', 100, NULL), (1, 'me', 'b', '2026-06-01T10:00:00.000Z', NULL, 500), (1, 'me', 'c', '2026-04-01T10:00:00.000Z', NULL, NULL)"""))
+        with self.Session() as db:
+            stats = your_stats(db, db.get(CreatorProfile, 1))
+        self.assertEqual(stats, {"handle": "me", "followers": 5000, "engagement_rate": 4.2, "avg_reel_views": 300, "posts_per_week": 1.0, "brand_partnerships": 3})   # 2 of 3 posts in the 14 days
 
     def test_the_audience_filter_keeps_creators_between_a_third_and_double_the_followers(self):
         from pipeline.similar_creators import audience_range
@@ -352,6 +403,8 @@ class AgainstPostgres(unittest.TestCase):
             client.get("/feed/similar-creators")
         self.assertEqual(asked, ["Niche: Beauty\nDescription: Skincare\nTags: "])   # the user in the creators' format, embedded once
         self.assertEqual(body["ready"], True)
+        self.assertEqual(body["you"]["handle"], "@me")
+        self.assertIsNone(body["you"]["brand_partnerships"])
         self.assertEqual((body["your_followers"], body["audience_range"]), (None, None))   # the test user has no follower count
         with self.engine.begin() as conn:
             conn.execute(text("UPDATE creator_profiles SET instagram_followers = 1000 WHERE id = 1"))
