@@ -147,20 +147,42 @@ _SIMILAR = text("""
 """).bindparams(bindparam("vec", type_=Vector(1024)))
 
 _PARTNERSHIPS = text("""
-    SELECT who, brand, post_url, at, confidence FROM (
-        SELECT lower(btrim(u.username)) AS who, b.name AS brand, p.post_url, p.timestamp AS at, p.sponsorship_confidence AS confidence
+    SELECT who, brand, category, post_url, at, confidence, post_type, likes, comments, views FROM (
+        SELECT lower(btrim(u.username)) AS who, b.name AS brand, b.niche AS category, p.post_url, p.timestamp AS at,
+               p.sponsorship_confidence AS confidence, p.post_type,
+               CASE WHEN coalesce(p.likes_count, u.likes_count) >= 0 THEN coalesce(p.likes_count, u.likes_count) END AS likes,
+               CASE WHEN coalesce(p.comments_count, u.comments_count) >= 0 THEN coalesce(p.comments_count, u.comments_count) END AS comments,
+               coalesce(p.video_view_count, p.video_play_count, u.video_view_count, u.video_play_count) AS views
         FROM instagram_users u
         JOIN instagram_posts p ON p.post_id = u.post_id
         LEFT JOIN brands_raw b ON b.id = p.brand_raw_id
         WHERE u.user_type != 'commenter' AND p.sponsorship_confidence >= :min AND lower(btrim(u.username)) = ANY(:names)
         UNION
-        SELECT lower(btrim(t.creator_username)), coalesce(t.brand_name, b.name), t.post_url, t.post_timestamp, t.sponsorship_confidence
+        SELECT lower(btrim(t.creator_username)), coalesce(t.brand_name, b.name), b.niche, t.post_url, t.post_timestamp,
+               t.sponsorship_confidence, NULL,
+               CASE WHEN ux.likes_count >= 0 THEN ux.likes_count END, CASE WHEN ux.comments_count >= 0 THEN ux.comments_count END,
+               coalesce(t.video_view_count, t.video_play_count, ux.video_view_count, ux.video_play_count)
         FROM test_creator_brand_partnership_posts t
         LEFT JOIN brands_raw b ON b.id = t.brand_raw_id
+        LEFT JOIN instagram_users ux ON ux.post_id = nullif(t.post_id, '')
         WHERE t.sponsorship_confidence >= :min AND lower(btrim(t.creator_username)) = ANY(:names)
     ) all_partnerships
     ORDER BY who, at DESC NULLS LAST
 """)
+
+
+def post_kind(post_url: str | None, post_type: str | None, views) -> str:
+    """What to call a partnership post: a Reel (by its link), else Video / Carousel / Photo from Instagram's own post type, else Video when it has views."""
+    if post_url and "/reel/" in post_url:
+        return "Reel"
+    kind = (post_type or "").strip().lower()
+    if kind in ("video", "reel"):
+        return "Video"
+    if kind == "sidecar":
+        return "Carousel"
+    if kind == "image":
+        return "Photo"
+    return "Video" if views else "Post"
 
 
 # Average likes and comments over the posts we hold for each creator (one instagram_users row per post). Instagram hides some counts as -1: left out.
@@ -225,11 +247,14 @@ def find_similar_creators(
     names = [r.username.strip().lower() for r in found]
     partnerships: dict[str, list[dict]] = {}
     seen: set[tuple[str, str | None]] = set()
-    for who, brand, post_url, at, confidence in db.execute(_PARTNERSHIPS, {"min": minimum, "names": names}).all():
-        if (who, post_url) in seen:
+    for row in db.execute(_PARTNERSHIPS, {"min": minimum, "names": names}).all():
+        if (row.who, row.post_url) in seen:
             continue
-        seen.add((who, post_url))
-        partnerships.setdefault(who, []).append({"brand": brand, "post_url": post_url, "date": at, "confidence": confidence})
+        seen.add((row.who, row.post_url))
+        partnerships.setdefault(row.who, []).append({
+            "brand": row.brand, "category": row.category, "post_url": row.post_url, "date": row.at, "confidence": row.confidence,
+            "type": post_kind(row.post_url, row.post_type, row.views), "likes": row.likes, "comments": row.comments, "views": row.views,
+        })
     engagement = {r.who: (r.avg_likes, r.avg_comments) for r in db.execute(_ENGAGEMENT, {"names": names}).all()}
     profiles = {u.id: u for u in db.query(InstagramUser).filter(InstagramUser.id.in_([r.instagram_user_id for r in found])).all()}
 
@@ -237,9 +262,10 @@ def find_similar_creators(
     for r in found:
         user = profiles.get(r.instagram_user_id)
         who = r.username.strip().lower()
-        shown = partnerships.get(who, [])
         avg_likes, avg_comments = engagement.get(who, (None, None))
         followers = user.followers_count if user else None
+        # one post's engagement: its likes + comments over the creator's followers
+        shown = [{**p, "engagement": engagement_rate(p["likes"], p["comments"], followers)} for p in partnerships.get(who, [])]
         result.append({
             "username": r.username.strip(),
             "full_name": user.full_name if user else None,

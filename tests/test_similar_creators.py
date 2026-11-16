@@ -87,6 +87,17 @@ class EngagementRateOfTheProfile(unittest.TestCase):
         self.assertIn("instagram_engagement_rate", request(**self.BODY, instagram_engagement_rate=None).model_fields_set)   # the handler clears it
 
 
+class PostKind(unittest.TestCase):
+    def test_what_a_partnership_post_is_called(self):
+        from pipeline.similar_creators import post_kind
+        self.assertEqual(post_kind("https://www.instagram.com/reel/A/", "Image", None), "Reel")    # the link wins
+        self.assertEqual(post_kind("https://www.instagram.com/p/A/", "Video", None), "Video")
+        self.assertEqual(post_kind("https://www.instagram.com/p/A/", "Sidecar", None), "Carousel")
+        self.assertEqual(post_kind("https://www.instagram.com/p/A/", "Image", 10), "Photo")
+        self.assertEqual(post_kind(None, None, 120), "Video")                                       # views mean video
+        self.assertEqual(post_kind(None, None, None), "Post")
+
+
 class TextOfAnEmbedding(unittest.TestCase):
     def test_same_format_as_the_embedding_script(self):
         from pipeline.similar_creators import embedding_text
@@ -131,11 +142,14 @@ class AgainstPostgres(unittest.TestCase):
                 (7, 'me', 'mention', 'p-me', 100, NULL, NULL)"""))
             # alice's likes and comments: two posts, (100 + 200) / 2 likes and (20 + 40) / 2 comments; one post has hidden counts (-1) that must not count
             conn.execute(text("UPDATE instagram_users SET likes_count = 100, comments_count = 20 WHERE id = 1"))
+            conn.execute(text("UPDATE instagram_posts SET post_type = 'Video', video_view_count = 5000 WHERE post_id = 'p-alice'"))
+            # carol's partnership post is in the test table only; her own scraped row for that post holds its likes and comments, the test row its views
+            conn.execute(text("UPDATE instagram_users SET post_id = 'cp-1', likes_count = 50, comments_count = 10 WHERE id = 3"))
             conn.execute(text("""INSERT INTO instagram_users (id, username, user_type, followers_count, likes_count, comments_count) VALUES
                 (8, 'Alice', 'mention', 1200, 200, 40), (9, 'Alice', 'mention', 1200, -1, -1)"""))
-            conn.execute(text("""INSERT INTO test_creator_brand_partnership_posts (brand_raw_id, brand_name, creator_username, post_url, post_timestamp, sponsorship_confidence)
-                VALUES (2, 'Globex', 'carol', 'https://i/carol-1', '2026-04-01', 92), (1, 'Acme', 'Alice', 'https://i/alice-2', '2026-06-01', 60),
-                       (1, 'Acme', 'Alice', 'https://i/alice-3', '2026-03-01', 97)"""))
+            conn.execute(text("""INSERT INTO test_creator_brand_partnership_posts (brand_raw_id, brand_name, creator_username, post_url, post_timestamp, sponsorship_confidence, post_id, video_play_count)
+                VALUES (2, 'Globex', 'carol', 'https://www.instagram.com/reel/XYZ/', '2026-04-01', 92, 'cp-1', 900), (1, 'Acme', 'Alice', 'https://i/alice-2', '2026-06-01', 60, NULL, NULL),
+                       (1, 'Acme', 'Alice', 'https://i/alice-3', '2026-03-01', 97, NULL, NULL)"""))
             for uid, name, cosine in [(1, "Alice", 0.9), (2, "bob", 0.95), (3, "carol", 0.75), (4, "dave", 0.99), (5, "erin", 0.5), (7, "me", 1.0)]:
                 conn.execute(text("INSERT INTO creator_niches (instagram_user_id, username, niche, description, tags, embedding) VALUES (:i, :u, 'Beauty', 'desc', CAST('[\"skincare\"]' AS jsonb), :e)"),
                              {"i": uid, "u": name, "e": str(vec(cosine))})
@@ -190,13 +204,22 @@ class AgainstPostgres(unittest.TestCase):
         self.assertEqual(sorted(links), ["https://i/alice-3", "https://i/p-alice"])   # the 60-scored post is not a partnership
         self.assertEqual(alice["partnership_count"], 2)
         carol = self.find(own_handle="me")[1]
-        self.assertEqual([(p["brand"], p["post_url"]) for p in carol["partnerships"]], [("Globex", "https://i/carol-1")])
+        self.assertEqual([(p["brand"], p["post_url"]) for p in carol["partnerships"]], [("Globex", "https://www.instagram.com/reel/XYZ/")])
+        # what the partnership dialog shows for each post
+        by_url = {p["post_url"]: p for p in alice["partnerships"]}
+        post = by_url["https://i/p-alice"]
+        self.assertEqual((post["type"], post["likes"], post["comments"], post["views"], post["engagement"]), ("Video", 100, 20, 5000, 10.0))   # (100 + 20) / 1200 * 100
+        self.assertEqual(post["category"], None)                                                                                              # brands_raw.niche is empty in the test data
+        bare = by_url["https://i/alice-3"]
+        self.assertEqual((bare["type"], bare["likes"], bare["views"], bare["engagement"]), ("Post", None, None, None))                       # nothing is known about that post
+        first = carol["partnerships"][0]
+        self.assertEqual((first["type"], first["likes"], first["comments"], first["views"], first["engagement"]), ("Reel", 50, 10, 900, 8.6))   # (50 + 10) / 700 * 100
 
     def test_the_engagement_rate_is_average_likes_plus_comments_over_followers(self):
         found = {c["username"]: c for c in self.find(own_handle="me")}
         alice = found["Alice"]
         self.assertEqual((alice["avg_likes"], alice["avg_comments"], alice["engagement_rate"]), (150, 30, 15.0))   # (150 + 30) / 1200 * 100
-        self.assertIsNone(found["carol"]["engagement_rate"])                                                       # no likes known
+        self.assertEqual(found["carol"]["engagement_rate"], 8.6)                                                   # (50 + 10) / 700 * 100
         from pipeline.similar_creators import engagement_rate
         self.assertEqual(engagement_rate(50, 10, 2000), 3.0)
         self.assertIsNone(engagement_rate(50, 10, 0))
@@ -208,10 +231,10 @@ class AgainstPostgres(unittest.TestCase):
         with self.engine.begin() as conn:
             conn.execute(text("UPDATE creator_niches SET engagement_rate = 99.0 WHERE username = 'erin'"))
         with self.Session() as db:
-            self.assertEqual(fill_engagement_rates(db, {"alice", "carol", "erin"}), 1)    # alice only: carol has no likes; erin already has a value
+            self.assertEqual(fill_engagement_rates(db, {"alice", "carol", "erin"}), 2)    # alice and carol; erin already has a value
         with self.engine.connect() as conn:
             rates = dict(conn.execute(text("SELECT username, engagement_rate FROM creator_niches WHERE username IN ('Alice', 'carol', 'erin')")).all())
-        self.assertEqual(rates, {"Alice": 15.0, "carol": None, "erin": 99.0})
+        self.assertEqual(rates, {"Alice": 15.0, "carol": 8.6, "erin": 99.0})
         found = {c["username"]: c for c in self.find(own_handle="me")}
         self.assertEqual(found["Alice"]["engagement_rate"], 15.0)                          # the saved value is what the tab shows
 
