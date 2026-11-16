@@ -458,6 +458,8 @@ class CreatorNiche(Base):
     description = Column(Text)
     tags = Column(JSONB)
     embedding = Column(Vector(1024))
+    # (average likes + average comments) / followers * 100 over the creator's posts in instagram_users (pipeline/similar_creators.py)
+    engagement_rate = Column(Float)
 
     created_at = Column(
         TIMESTAMP(timezone=True),
@@ -688,6 +690,7 @@ class CreatorProfile(Base):
     #  Platform profile fields used by creator-profile.html
     instagram_handle = Column(Text)
     instagram_followers = Column(Integer)
+    instagram_engagement_rate = Column(Float)   # (avg likes + avg comments) / followers * 100 over the scraped posts, calculated when MAVLIT generates the Instagram description
     instagram_highest_views = Column(Integer)   # most views on any of the creator's recent reels / video posts (typed, or read from the 20 posts MAVLIT scrapes)
 
     primary_platform = Column(Text)

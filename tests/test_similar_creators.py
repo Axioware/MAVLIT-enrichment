@@ -38,6 +38,33 @@ class TextOfTheUser(unittest.TestCase):
         self.assertIsNone(user_query_text(empty))
 
 
+class EngagementRate(unittest.TestCase):
+    def test_average_likes_plus_average_comments_over_followers(self):
+        from pipeline.helpers.engagement import engagement_rate, engagement_rate_from_posts
+        self.assertEqual(engagement_rate(150, 30, 1200), 15.0)
+        self.assertIsNone(engagement_rate(None, 30, 1200))
+        self.assertIsNone(engagement_rate(100, 10, 0))
+        self.assertIsNone(engagement_rate(100, 10, None))
+        # posts: (likes, comments); -1 is a count Instagram hides and None is missing - neither counts
+        self.assertEqual(engagement_rate_from_posts([(100, 10), (300, 30), (-1, -1), (None, None)], 2000), 11.0)   # (average likes 200 + average comments 20) / 2000 * 100
+        self.assertIsNone(engagement_rate_from_posts([(-1, 5), (None, None)], 2000))
+        self.assertEqual(engagement_rate_from_posts([(50, None), (150, None)], 1000), 10.0)                      # no comments known: likes only
+        self.assertEqual(engagement_rate_from_posts([(True, 1)], 100), None)                                       # a bool is not a count
+
+
+class ProfileGenerationCalculatesTheEngagementRate(unittest.TestCase):
+    def test_the_generated_profile_has_the_engagement_rate_of_its_posts(self):
+        from pipeline.creator_content import instagram_description as d
+        items = [{"id": str(i), "caption": f"c{i}", "likesCount": likes, "commentsCount": comments, "metaData": {"followersCount": 1000, "biography": "bio"}}
+                 for i, (likes, comments) in enumerate([(80, 10), (120, 10), (-1, -1)])]
+        with mock.patch.object(d, "_saved_items", return_value=items), mock.patch.object(d, "_POSTS_LIMIT", 3), \
+                mock.patch.object(d, "sub_niche_options", return_value=[]), mock.patch.object(d, "_get_description_prompt", return_value="{niche}{bio}{captions}{sub_niche_options}{followers}"), \
+                mock.patch.object(d, "call_gpt_json", return_value={"description": "a creator"}):
+            result = d.generate_instagram_description(mock.Mock(), "someone", "Music")
+        self.assertEqual(result["followers_count"], 1000)
+        self.assertEqual(result["engagement_rate"], 11.0)    # (average likes 100 + average comments 10) / 1000 * 100; the hidden post is left out
+
+
 class TextOfAnEmbedding(unittest.TestCase):
     def test_same_format_as_the_embedding_script(self):
         from pipeline.similar_creators import embedding_text
@@ -80,6 +107,10 @@ class AgainstPostgres(unittest.TestCase):
                 (3, 'carol', 'contentcreatorRE', NULL, 700, 'UK', NULL), (4, 'dave', 'commenter', 'p-dave', 50, NULL, NULL),
                 (5, 'erin', 'tagged_user', 'p-erin', 500, NULL, NULL), (6, 'frank', 'tagged_user', 'p-frank', 400, NULL, NULL),
                 (7, 'me', 'mention', 'p-me', 100, NULL, NULL)"""))
+            # alice's likes and comments: two posts, (100 + 200) / 2 likes and (20 + 40) / 2 comments; one post has hidden counts (-1) that must not count
+            conn.execute(text("UPDATE instagram_users SET likes_count = 100, comments_count = 20 WHERE id = 1"))
+            conn.execute(text("""INSERT INTO instagram_users (id, username, user_type, followers_count, likes_count, comments_count) VALUES
+                (8, 'Alice', 'mention', 1200, 200, 40), (9, 'Alice', 'mention', 1200, -1, -1)"""))
             conn.execute(text("""INSERT INTO test_creator_brand_partnership_posts (brand_raw_id, brand_name, creator_username, post_url, post_timestamp, sponsorship_confidence)
                 VALUES (2, 'Globex', 'carol', 'https://i/carol-1', '2026-04-01', 92), (1, 'Acme', 'Alice', 'https://i/alice-2', '2026-06-01', 60),
                        (1, 'Acme', 'Alice', 'https://i/alice-3', '2026-03-01', 97)"""))
@@ -120,6 +151,29 @@ class AgainstPostgres(unittest.TestCase):
         self.assertEqual(alice["partnership_count"], 2)
         carol = self.find(own_handle="me")[1]
         self.assertEqual([(p["brand"], p["post_url"]) for p in carol["partnerships"]], [("Globex", "https://i/carol-1")])
+
+    def test_the_engagement_rate_is_average_likes_plus_comments_over_followers(self):
+        found = {c["username"]: c for c in self.find(own_handle="me")}
+        alice = found["Alice"]
+        self.assertEqual((alice["avg_likes"], alice["avg_comments"], alice["engagement_rate"]), (150, 30, 15.0))   # (150 + 30) / 1200 * 100
+        self.assertIsNone(found["carol"]["engagement_rate"])                                                       # no likes known
+        from pipeline.similar_creators import engagement_rate
+        self.assertEqual(engagement_rate(50, 10, 2000), 3.0)
+        self.assertIsNone(engagement_rate(50, 10, 0))
+        self.assertIsNone(engagement_rate(None, 10, 2000))
+        self.assertEqual(engagement_rate(50, None, 1000), 5.0)
+
+    def test_the_script_fills_the_engagement_rate_only_where_it_is_missing(self):
+        from pipeline.similar_creators import fill_engagement_rates
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE creator_niches SET engagement_rate = 99.0 WHERE username = 'erin'"))
+        with self.Session() as db:
+            self.assertEqual(fill_engagement_rates(db, {"alice", "carol", "erin"}), 1)    # alice only: carol has no likes; erin already has a value
+        with self.engine.connect() as conn:
+            rates = dict(conn.execute(text("SELECT username, engagement_rate FROM creator_niches WHERE username IN ('Alice', 'carol', 'erin')")).all())
+        self.assertEqual(rates, {"Alice": 15.0, "carol": None, "erin": 99.0})
+        found = {c["username"]: c for c in self.find(own_handle="me")}
+        self.assertEqual(found["Alice"]["engagement_rate"], 15.0)                          # the saved value is what the tab shows
 
     def test_creators_are_embedded_only_when_they_have_a_partnership_and_no_embedding(self):
         from pipeline import similar_creators

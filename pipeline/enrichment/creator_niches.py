@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from pipeline.db import CreatorNiche, InstagramUser, Prompt, BatchSessionLocal
 from pipeline.helpers.gpt_llm import LLMUnavailableError, call_gpt_json, fill_template
-from pipeline.similar_creators import embed_pending_creators, partnership_usernames
+from pipeline.similar_creators import embed_pending_creators, fill_engagement_rates, partnership_usernames
 from pipeline.helpers.prompts import (
     CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT,
     CREATOR_NICHE_DESCRIPTION_PROMPT_NAME,
@@ -129,7 +129,7 @@ def run_creator_niches(
     instagram_user_id: int | None = None,
 ) -> int:
     """
-    Generate missing profiles without modifying existing output rows, and embed them. Only creators with a partnership
+    Generate missing profiles without modifying existing output rows, calculate their engagement rate and embed them. Only creators with a partnership
     scored 90 or more (instagram_posts or test_creator_brand_partnership_posts) are processed - see pipeline/similar_creators.py.
     """
     partners = partnership_usernames(db)
@@ -204,6 +204,7 @@ def run_creator_niches(
                 db.rollback()
                 logger.exception("Creator niche: failed to insert batch starting at %d", batch_start)
     logger.info("Creator niche: created=%d", created)
+    fill_engagement_rates(db, partners)    # also the rows made by an earlier run that have no engagement rate yet
     embed_pending_creators(db, partners)   # also the rows made by an earlier run that were never embedded
     return created
 

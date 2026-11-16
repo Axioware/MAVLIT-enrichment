@@ -19,6 +19,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from pipeline.db import CreatorInstagramPost, Prompt
 from pipeline.enrichment.instagram_posts import _scrape_handle, _usernames_only
+from pipeline.helpers.engagement import engagement_rate_from_posts
 from pipeline.helpers.gpt_llm import call_gpt_json, fill_template
 from pipeline.helpers.prompts import (
     CREATOR_AUDIENCE_DESCRIPTION_NOTE,
@@ -340,5 +341,5 @@ def generate_instagram_description(
         raise DescriptionError("MAVLIT could not write the description this time. Please try again.")
 
     return {"description": description, "posts_analyzed": len(captions), "bio_found": bool(bio),
-            "followers_count": followers, "highest_views": highest_views_from_items(items[:_POSTS_LIMIT]), "sub_niches": sub_niches_from_result(result, options),
+            "followers_count": followers, "engagement_rate": engagement_rate_from_posts([(i.get("likesCount"), i.get("commentsCount")) for i in items[:_POSTS_LIMIT]], followers), "highest_views": highest_views_from_items(items[:_POSTS_LIMIT]), "sub_niches": sub_niches_from_result(result, options),
             **audience_from_result(result)}

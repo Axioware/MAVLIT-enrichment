@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from pgvector.sqlalchemy import Vector
 
 from pipeline.db import CreatorNiche, InstagramUser
+from pipeline.helpers.engagement import engagement_rate
 from pipeline.helpers.gpt_llm import embed_text, embed_text_batch
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,7 @@ def user_query_embedding(profile) -> list[float] | None:
 
 
 _SIMILAR = text("""
-    SELECT cn.id, cn.instagram_user_id, cn.username, cn.niche, cn.description, cn.tags,
+    SELECT cn.id, cn.instagram_user_id, cn.username, cn.niche, cn.description, cn.tags, cn.engagement_rate,
            1 - (cn.embedding <=> :vec) AS similarity
     FROM creator_niches cn
     WHERE cn.embedding IS NOT NULL
@@ -149,6 +150,47 @@ _PARTNERSHIPS = text("""
 """)
 
 
+# Average likes and comments over the posts we hold for each creator (one instagram_users row per post). Instagram hides some counts as -1: left out.
+_ENGAGEMENT = text("""
+    SELECT lower(btrim(username)) AS who,
+           avg(likes_count) FILTER (WHERE likes_count >= 0) AS avg_likes,
+           avg(comments_count) FILTER (WHERE comments_count >= 0) AS avg_comments
+    FROM instagram_users
+    WHERE user_type != 'commenter' AND lower(btrim(username)) = ANY(:names)
+    GROUP BY 1
+""")
+
+
+_FILL_SOURCE = text("""
+    SELECT cn.id, u.followers_count, e.avg_likes, e.avg_comments
+    FROM creator_niches cn
+    LEFT JOIN instagram_users u ON u.id = cn.instagram_user_id
+    LEFT JOIN (
+        SELECT lower(btrim(username)) AS who,
+               avg(likes_count) FILTER (WHERE likes_count >= 0) AS avg_likes,
+               avg(comments_count) FILTER (WHERE comments_count >= 0) AS avg_comments
+        FROM instagram_users WHERE user_type != 'commenter' GROUP BY 1
+    ) e ON e.who = lower(btrim(cn.username))
+    WHERE cn.engagement_rate IS NULL AND lower(btrim(cn.username)) = ANY(:names)
+""")
+
+
+def fill_engagement_rates(db: Session, usernames: set[str]) -> int:
+    """Calculate creator_niches.engagement_rate for the rows of `usernames` that have none yet (average likes + average comments / followers * 100).
+    A creator without likes data or without a follower count stays empty. Returns how many rows got a value."""
+    if not usernames:
+        return 0
+    filled = 0
+    for row in db.execute(_FILL_SOURCE, {"names": sorted(usernames)}).all():
+        rate = engagement_rate(row.avg_likes, row.avg_comments, row.followers_count)
+        if rate is not None:
+            db.query(CreatorNiche).filter(CreatorNiche.id == row.id).update({"engagement_rate": rate})
+            filled += 1
+    db.commit()
+    logger.info("Similar creators: engagement rate calculated for %d creator(s)", filled)
+    return filled
+
+
 def find_similar_creators(
     db: Session, user_embedding, own_handle: str | None = None, limit: int = DEFAULT_LIMIT,
     threshold: float = SIMILARITY_THRESHOLD, minimum: int = MIN_PARTNERSHIP_CONFIDENCE,
@@ -172,6 +214,7 @@ def find_similar_creators(
             continue
         seen.add((who, post_url))
         partnerships.setdefault(who, []).append({"brand": brand, "post_url": post_url, "date": at, "confidence": confidence})
+    engagement = {r.who: (r.avg_likes, r.avg_comments) for r in db.execute(_ENGAGEMENT, {"names": names}).all()}
     profiles = {u.id: u for u in db.query(InstagramUser).filter(InstagramUser.id.in_([r.instagram_user_id for r in found])).all()}
 
     result = []
@@ -179,6 +222,8 @@ def find_similar_creators(
         user = profiles.get(r.instagram_user_id)
         who = r.username.strip().lower()
         shown = partnerships.get(who, [])
+        avg_likes, avg_comments = engagement.get(who, (None, None))
+        followers = user.followers_count if user else None
         result.append({
             "username": r.username.strip(),
             "full_name": user.full_name if user else None,
@@ -187,7 +232,10 @@ def find_similar_creators(
             "description": r.description,
             "tags": r.tags if isinstance(r.tags, list) else [],
             "country": user.country if user else None,
-            "followers": user.followers_count if user else None,
+            "followers": followers,
+            "avg_likes": round(float(avg_likes)) if avg_likes is not None else None,
+            "avg_comments": round(float(avg_comments)) if avg_comments is not None else None,
+            "engagement_rate": r.engagement_rate if r.engagement_rate is not None else engagement_rate(avg_likes, avg_comments, followers),
             "similarity": round(float(r.similarity) * 100),
             "partnership_count": len(shown),
             "partnerships": shown[:MAX_PARTNERSHIPS_SHOWN],
@@ -230,8 +278,8 @@ def diagnose(db: Session, email: str) -> dict:
 if __name__ == "__main__":   # python -m pipeline.similar_creators you@example.com
     import json
     import sys
-    from pipeline.db import SessionLocal
+    from pipeline.db import BatchSessionLocal
     if len(sys.argv) != 2:
         raise SystemExit("usage: python -m pipeline.similar_creators <email of the MAVLIT user>")
-    with SessionLocal() as session:
+    with BatchSessionLocal() as session:
         print(json.dumps(diagnose(session, sys.argv[1]), indent=2))

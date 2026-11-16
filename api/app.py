@@ -1854,6 +1854,9 @@ def _run_creator_description_job(
             row.instagram_followers = result["followers_count"]
             if (row.primary_platform or "").split(",")[0].strip().lower() == "instagram":
                 row.follower_count = result["followers_count"]
+        # (average likes + average comments) / followers * 100 over the scraped posts.
+        if platform == "instagram" and result.get("engagement_rate") is not None:
+            row.instagram_engagement_rate = result["engagement_rate"]
         # The most views on any of the scraped reels / video posts (kept as typed when none of them has views).
         if platform == "instagram" and result.get("highest_views") is not None:
             row.instagram_highest_views = result["highest_views"]
