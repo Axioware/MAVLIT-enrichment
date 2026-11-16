@@ -228,7 +228,8 @@ class AgainstPostgres(unittest.TestCase):
                 (1, 'me', 'a', '2026-06-10T10:00:00.000Z', 100, NULL), (1, 'me', 'b', '2026-06-01T10:00:00.000Z', NULL, 500), (1, 'me', 'c', '2026-04-01T10:00:00.000Z', NULL, NULL)"""))
         with self.Session() as db:
             stats = your_stats(db, db.get(CreatorProfile, 1))
-        self.assertEqual(stats, {"handle": "me", "followers": 5000, "engagement_rate": 4.2, "avg_reel_views": 300, "posts_per_week": 1.0, "brand_partnerships": 3})   # 2 of 3 posts in the 14 days
+        self.assertEqual(stats, {"handle": "me", "followers": 5000, "engagement_rate": 4.2, "avg_reel_views": 300, "posts_per_week": 1.0, "brand_partnerships": 3,
+                                 "product_focused_pct": None, "content_categories": None})   # 2 of 3 posts in the 14 days; the content mix is not generated yet
         # without a typed count, the posts the user marked as paid partnerships are counted; with none marked there is no number
         with self.engine.begin() as conn:
             conn.execute(text("UPDATE creator_profiles SET brand_partnerships = NULL WHERE id = 1"))
@@ -384,6 +385,30 @@ class AgainstPostgres(unittest.TestCase):
             self.assertEqual(client.get("/feed/post-thumbnail?code=AbC_123").status_code, 404)       # Instagram has no picture
         with mock.patch.object(feed_api, "_fetch_thumbnail", side_effect=feed_api.ThumbnailTooLarge()):
             self.assertEqual(client.get("/feed/post-thumbnail?code=AbC_123").status_code, 502)
+
+    def test_the_description_job_saves_the_engagement_rate_and_the_content_mix(self):
+        import api.app as api_app
+        from pipeline.db import CreatorProfile
+        with self.engine.begin() as conn:
+            conn.execute(text("""INSERT INTO creator_profiles (id, email, instagram_description_status, instagram_description_job_id, instagram_handle)
+                                 VALUES (1, 'u@example.test', 'queued', 'job-1', 'me')"""))
+        result = {"description": "A creator", "followers_count": 2000, "engagement_rate": 4.5, "product_focused_pct": 35,
+                  "content_categories": [{"name": "Tutorial", "pct": 32}, {"name": "Product review", "pct": 18}]}
+        with mock.patch.object(api_app, "BatchSessionLocal", self.Session), mock.patch.object(api_app, "generate_instagram_description", return_value=result):
+            api_app._run_creator_description_job(1, "instagram", "me", "Music", "job-1")
+        with self.Session() as db:
+            row = db.get(CreatorProfile, 1)
+            self.assertEqual((row.instagram_description_status, row.instagram_engagement_rate, row.instagram_product_focused_pct), ("completed", 4.5, 35))
+            self.assertEqual(row.instagram_content_categories, [{"name": "Tutorial", "pct": 32}, {"name": "Product review", "pct": 18}])
+        # a generation that returns no mix keeps what was saved
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE creator_profiles SET instagram_description_status = 'queued', instagram_description_job_id = 'job-2' WHERE id = 1"))
+        with mock.patch.object(api_app, "BatchSessionLocal", self.Session), mock.patch.object(api_app, "generate_instagram_description",
+                                                                                              return_value={"description": "A creator", "product_focused_pct": None, "content_categories": None}):
+            api_app._run_creator_description_job(1, "instagram", "me", "Music", "job-2")
+        with self.Session() as db:
+            row = db.get(CreatorProfile, 1)
+            self.assertEqual((row.instagram_product_focused_pct, len(row.instagram_content_categories)), (35, 2))
 
     def test_the_endpoint(self):
         from fastapi.testclient import TestClient

@@ -732,6 +732,8 @@ def _apply_migrations(engine: Engine, lock_timeout_ms: int | None = None, grant_
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_highest_views INTEGER",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_engagement_rate DOUBLE PRECISION",
         "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS brand_partnerships INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_product_focused_pct INTEGER",
+        "ALTER TABLE creator_profiles ADD COLUMN IF NOT EXISTS instagram_content_categories JSONB",
         "ALTER TABLE creator_niches ADD COLUMN IF NOT EXISTS engagement_rate DOUBLE PRECISION",
         "ALTER TABLE IF EXISTS apify_usage ADD COLUMN IF NOT EXISTS actor_id TEXT",
         "ALTER TABLE IF EXISTS apify_usage ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(12,6)",

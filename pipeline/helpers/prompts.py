@@ -1094,6 +1094,21 @@ Sub-niche options:
 {sub_niche_options}
 """
 
+# The content categories the description LLM sorts a creator's posts into (the creator's "content category distribution").
+CREATOR_CONTENT_CATEGORIES = ("Tutorial", "Product review", "Lifestyle", "Educational", "Entertainment", "Behind the scenes", "Storytelling", "Promotional")
+_CATEGORY_LIST = ", ".join(CREATOR_CONTENT_CATEGORIES)
+
+# Same idea, for a stored prompt copy with no "content_categories" yet: the generators append it so the same single call also returns
+# the share of product-focused posts and the content category distribution.
+CREATOR_CONTENT_MIX_NOTE = f"""\
+
+ADDITIONAL REQUIRED OUTPUT - CONTENT MIX
+Also estimate, from the captions, how this creator's posts split up, and add two keys to the same JSON object:
+- "product_focused_pct": the percentage (0 to 100, a whole number) of the creator's posts that feature, demonstrate, review or promote a specific product or brand.
+- "content_categories": an object that gives the percentage of the creator's posts in each of these categories, which are the only allowed names: {_CATEGORY_LIST}. Each post belongs to the one category that fits it best; the percentages are whole numbers and add up to 100. Leave out a category with 0%.
+Example: "product_focused_pct": 35, "content_categories": {{"Tutorial": 32, "Product review": 18, "Lifestyle": 25, "Entertainment": 25}}
+"""
+
 CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT = """\
 You are analyzing a content creator (Instagram or YouTube).
 
@@ -1119,6 +1134,9 @@ Your task:
    - audience_gender: the gender most of the audience is - "male", "female" or "both" (mixed, or you cannot tell). Base it on who the content is made for and who it would attract (topics, tone, products, how the creator addresses the audience), not on the creator's own gender alone. Use "both" when the evidence is mixed or thin.
    - audience_description: 1 to 2 sentences (maximum 40 words, third person) describing who the audience is - who they are, what they are interested in and why they follow the creator. Base it on the bio, the captions and the follower count (the size hints at the kind of audience, for example a niche community or a broad one) - but do not quote the follower number. It may mention the audience's gender, and it MUST state the age range most of the audience falls in, written like "aged 18-34" (whole numbers between 13 and 100; realistic and reasonably tight, usually 10 to 20 years wide).
 3. Pick the creator's SUB-NICHES: 3 to 4 more specific topics inside their niche, based on the bio and captions. Choose ONLY from the sub-niche options above and copy each one exactly as written. If the options are "none", return an empty list.
+4. Estimate the creator's CONTENT MIX from the captions:
+   - product_focused_pct: the percentage (0 to 100, a whole number) of the creator's posts that feature, demonstrate, review or promote a specific product or brand.
+   - content_categories: an object with the percentage of the creator's posts in each category. The only allowed names are: Tutorial, Product review, Lifestyle, Educational, Entertainment, Behind the scenes, Storytelling, Promotional. Each post belongs to the one category that fits it best; the percentages are whole numbers and add up to 100. Leave out a category with 0%.
 
 Return ONLY valid JSON.
 
@@ -1148,16 +1166,18 @@ Return:
 "tags": ["tag1", "tag2", "tag3"],
 "audience_gender": "male|female|both",
 "audience_description": "short description of who the audience is, including their age range (for example aged 18-34)",
-"sub_niches": ["option 1", "option 2", "option 3"]
+"sub_niches": ["option 1", "option 2", "option 3"],
+"product_focused_pct": 35,
+"content_categories": {{"Tutorial": 32, "Product review": 18, "Lifestyle": 25, "Entertainment": 25}}
 }}
 
 Examples:
 
 Fitness creator:
-{{"description": "Fitness creator focused on strength training, gym workouts, muscle building, and performance-focused health content.", "tags": ["strength training", "gym workouts", "muscle building", "sports nutrition", "fitness motivation"], "audience_gender": "male", "audience_description": "Mostly young men aged 18-34 who train in the gym and follow for lifting technique, programming ideas and supplement advice.", "sub_niches": ["strength training", "muscle building", "sports nutrition"]}}
+{{"description": "Fitness creator focused on strength training, gym workouts, muscle building, and performance-focused health content.", "tags": ["strength training", "gym workouts", "muscle building", "sports nutrition", "fitness motivation"], "audience_gender": "male", "audience_description": "Mostly young men aged 18-34 who train in the gym and follow for lifting technique, programming ideas and supplement advice.", "sub_niches": ["strength training", "muscle building", "sports nutrition"], "product_focused_pct": 30, "content_categories": {{"Tutorial": 40, "Educational": 20, "Product review": 15, "Lifestyle": 25}}}}
 
 Beauty creator:
-{{"description": "Beauty creator sharing skincare routines, makeup tutorials, cosmetic reviews, and self-care content.", "tags": ["skincare", "makeup", "beauty reviews", "cosmetics", "self care"], "audience_gender": "female", "audience_description": "Mostly young women aged 18-34 interested in affordable skincare and makeup looks, following for tutorials and product recommendations.", "sub_niches": ["skincare", "makeup tutorials", "cosmetics"]}}
+{{"description": "Beauty creator sharing skincare routines, makeup tutorials, cosmetic reviews, and self-care content.", "tags": ["skincare", "makeup", "beauty reviews", "cosmetics", "self care"], "audience_gender": "female", "audience_description": "Mostly young women aged 18-34 interested in affordable skincare and makeup looks, following for tutorials and product recommendations.", "sub_niches": ["skincare", "makeup tutorials", "cosmetics"], "product_focused_pct": 60, "content_categories": {{"Product review": 35, "Tutorial": 30, "Promotional": 15, "Lifestyle": 20}}}}
 """
 
 

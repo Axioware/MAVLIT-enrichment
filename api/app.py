@@ -1860,6 +1860,11 @@ def _run_creator_description_job(
         # (average likes + average comments) / followers * 100 over the scraped posts.
         if platform == "instagram" and result.get("engagement_rate") is not None:
             row.instagram_engagement_rate = result["engagement_rate"]
+        # The content mix the LLM estimated in the same call: the share of product-focused posts and the five biggest content categories (percent).
+        if platform == "instagram" and result.get("product_focused_pct") is not None:
+            row.instagram_product_focused_pct = result["product_focused_pct"]
+        if platform == "instagram" and result.get("content_categories"):
+            row.instagram_content_categories = result["content_categories"]
         # The most views on any of the scraped reels / video posts (kept as typed when none of them has views).
         if platform == "instagram" and result.get("highest_views") is not None:
             row.instagram_highest_views = result["highest_views"]
