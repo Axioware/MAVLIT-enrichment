@@ -148,6 +148,10 @@ def _ensure_partnership_evidence_table() -> None:
         conn.execute(text("ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS tagged_users JSONB"))
         conn.execute(text("ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS coauthor_producers JSONB"))
         conn.execute(text("ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS sponsorship_confidence INTEGER"))
+        conn.execute(text("ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS video_view_count INTEGER"))
+        conn.execute(text("ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS video_play_count INTEGER"))
+        conn.execute(text("ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS video_view_count INTEGER"))
+        conn.execute(text("ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS video_play_count INTEGER"))
         conn.execute(text("ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS post_collaborators TEXT"))
         conn.commit()
 
@@ -334,6 +338,8 @@ def _record_llm_partnership_post(
         "mentions": item.get("mentions"),
         "tagged_users": _usernames_only(item.get("taggedUsers")),
         "coauthor_producers": _usernames_only(_real_coauthors(item, creator_username)),
+        "video_view_count": item.get("videoViewCount"),
+        "video_play_count": item.get("videoPlayCount"),
     })
     stmt = stmt.on_conflict_do_update(
         index_elements=["creator_username", "brand_raw_id", "post_url"],
@@ -350,6 +356,8 @@ def _record_llm_partnership_post(
             "mentions": stmt.excluded.mentions,
             "tagged_users": stmt.excluded.tagged_users,
             "coauthor_producers": stmt.excluded.coauthor_producers,
+            "video_view_count": stmt.excluded.video_view_count,
+            "video_play_count": stmt.excluded.video_play_count,
             "detected_at": text("now()"),
         },
     )

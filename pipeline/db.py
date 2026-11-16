@@ -413,6 +413,8 @@ class InstagramUser(Base):
     caption              = Column(Text)
     likes_count         = Column(Integer)
     comments_count      = Column(Integer)
+    video_view_count    = Column(Integer)   # Apify videoViewCount of the post (videos / reels only)
+    video_play_count    = Column(Integer)   # Apify videoPlayCount of the post (videos / reels only)
     post_timestamp      = Column(Text)
     top_comments        = Column(Text)   # comment texts for this post, comma-separated
 
@@ -1200,6 +1202,8 @@ class TestCreatorBrandPartnershipPost(Base):
     mentions              = Column(JSONB)
     tagged_users          = Column(JSONB)
     coauthor_producers    = Column(JSONB)
+    video_view_count      = Column(Integer)   # Apify videoViewCount of the post (videos / reels only)
+    video_play_count      = Column(Integer)   # Apify videoPlayCount of the post (videos / reels only)
 
     # LLM-estimated 0-100 confidence that this post is a paid sponsorship
     # with this specific brand. Filled in live by content_creator_re.py's

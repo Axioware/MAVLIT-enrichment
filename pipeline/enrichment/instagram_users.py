@@ -434,6 +434,8 @@ def _build_post_row(
         "caption":             item.get("caption"),
         "likes_count":         item.get("likesCount"),
         "comments_count":      item.get("commentsCount"),
+        "video_view_count":    item.get("videoViewCount"),
+        "video_play_count":    item.get("videoPlayCount"),
         "post_timestamp":      item.get("timestamp"),
         "top_comments":        _top_comments_str(item),
         "is_content_creator_re": is_content_creator_re,

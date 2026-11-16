@@ -474,6 +474,8 @@ def _apply_migrations(engine: Engine, lock_timeout_ms: int | None = None, grant_
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS caption TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS likes_count INTEGER",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS comments_count INTEGER",
+        "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS video_view_count INTEGER",
+        "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS video_play_count INTEGER",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS post_timestamp TEXT",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS is_content_creator_re BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE instagram_users ADD COLUMN IF NOT EXISTS post_collaborators TEXT",
@@ -779,6 +781,8 @@ def _apply_migrations(engine: Engine, lock_timeout_ms: int | None = None, grant_
         "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS mentions JSONB",
         "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS tagged_users JSONB",
         "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS coauthor_producers JSONB",
+        "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS video_view_count INTEGER",
+        "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS video_play_count INTEGER",
         # test_creator_brand_partnership_posts: LLM-estimated 0-100 sponsorship
         # confidence, backfilled by pipeline/enrichment_re/score_post_sponsorship.py.
         "ALTER TABLE test_creator_brand_partnership_posts ADD COLUMN IF NOT EXISTS sponsorship_confidence INTEGER",
