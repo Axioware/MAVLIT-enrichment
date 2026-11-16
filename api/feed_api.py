@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from api.auth import get_current_user
 from api.creator_posts import ThumbnailTooLarge, _fetch_thumbnail
 from pipeline.db import CreatorProfile, get_db
+from pipeline.brand_intelligence import brand_stats
 from pipeline.helpers.gpt_llm import LLMUnavailableError
 from pipeline.similar_creators import MIN_PARTNERSHIP_CONFIDENCE, SIMILARITY_THRESHOLD, audience_range, find_similar_creators, is_partnership_post_code, your_stats, user_query_embedding, user_query_text
 
@@ -59,3 +60,23 @@ def post_thumbnail(code: str = Query(...), db: Session = Depends(get_db), user: 
         raise HTTPException(status_code=404, detail="No picture for this post")
     content, kind = found
     return Response(content=content, media_type=kind, headers={"Cache-Control": "private, max-age=3600"})
+
+
+@router.get("/brand-intelligence")
+def brand_intelligence(limit: int = Query(30, ge=1, le=100), db: Session = Depends(get_db), user: CreatorProfile = Depends(get_current_user)):
+    """
+    The Feed's Brand Intelligence tab: the brands the signed-in creator is matched with (the same list as the Brand Matches page, Matches v3, best
+    first) with what their partnership posts (scored 90 or more) say: how many, the size of the creators, the formats and the creators' engagement.
+    """
+    from api.app import _ai_matches_response   # the Brand Matches page's own loader, so the two lists can never differ (api.app imports this module)
+    ranked = _ai_matches_response(db, user.id, "v3")
+    matches = ranked.matches[:limit]
+    stats = brand_stats(db, [m.brand_raw_id for m in matches])
+    return {
+        "status": ranked.status,
+        "total": ranked.total,
+        "brands": [{
+            "brand_raw_id": m.brand_raw_id, "brand_name": m.brand_name, "niche": m.niche, "website": m.website,
+            "rank": m.rank, "confidence": m.confidence, **stats[m.brand_raw_id],
+        } for m in matches],
+    }
