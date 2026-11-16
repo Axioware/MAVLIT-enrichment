@@ -65,6 +65,14 @@ class ProfileGenerationCalculatesTheEngagementRate(unittest.TestCase):
         self.assertEqual(result["engagement_rate"], 11.0)    # (average likes 100 + average comments 10) / 1000 * 100; the hidden post is left out
 
 
+class EngagementRateOfTheProfile(unittest.TestCase):
+    def test_the_api_returns_it_but_a_save_cannot_set_it(self):
+        import api.app as api_app
+        from api.schemas import CreatorProfileResponse
+        self.assertIn("instagram_engagement_rate", CreatorProfileResponse.model_fields)
+        self.assertNotIn("instagram_engagement_rate", api_app.CreatorProfileRequest.model_fields)   # only MAVLIT's generation writes it
+
+
 class TextOfAnEmbedding(unittest.TestCase):
     def test_same_format_as_the_embedding_script(self):
         from pipeline.similar_creators import embedding_text
