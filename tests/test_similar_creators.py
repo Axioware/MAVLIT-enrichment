@@ -53,7 +53,7 @@ class AgainstPostgres(unittest.TestCase):
 
     def setUp(self):
         with self.engine.begin() as conn:
-            conn.execute(text("TRUNCATE creator_niches, test_creator_brand_partnership_posts, instagram_posts, instagram_users, content_creator_re, brands_raw RESTART IDENTITY CASCADE"))
+            conn.execute(text("TRUNCATE creator_niches, test_creator_brand_partnership_posts, instagram_posts, instagram_users, content_creator_re, brands_raw, creator_profiles RESTART IDENTITY CASCADE"))
             conn.execute(text("INSERT INTO brands_raw (id, name) VALUES (1, 'Acme'), (2, 'Globex')"))
             # alice: partnership 95 on instagram_posts; bob: only 80 there; carol: 92 only in the test table; dave: commenter with a 99 post
             # erin: 95 partnership but only 50 % similar; frank: partnership 91 but no embedding yet; me: the user's own handle (95, 100 % similar)
@@ -136,6 +136,17 @@ class AgainstPostgres(unittest.TestCase):
         self.assertEqual(sorted(generated), ["Alice", "carol", "erin", "frank", "me"])   # not bob (score 80) and not dave (commenter)
         self.assertEqual(created, 5)
         self.assertEqual(embedded, [{"alice", "carol", "erin", "frank", "me"}])
+
+    def test_diagnose_shows_where_the_list_gets_empty(self):
+        from pipeline.similar_creators import diagnose
+        with self.engine.begin() as conn:
+            conn.execute(text("INSERT INTO creator_profiles (id, email, embedding) VALUES (1, 'u@example.test', CAST(:e AS vector))"), {"e": str(vec(1.0))})
+        with self.Session() as db:
+            report = diagnose(db, "U@example.test")
+        self.assertEqual((report["partnership_creators"], report["creator_niches_rows"], report["creator_niches_with_embedding"]), (5, 7, 6))
+        self.assertEqual(report["partnership_creators_with_an_embedding"], 4)    # frank has a row but no embedding
+        self.assertTrue(report["user_has_embedding"])
+        self.assertEqual(report["closest_creators_any"][0], {"username": "me", "similarity": 100.0, "has_partnership": True})
 
     def test_the_endpoint(self):
         from fastapi.testclient import TestClient

@@ -156,3 +156,43 @@ def find_similar_creators(
             "partnerships": shown[:MAX_PARTNERSHIPS_SHOWN],
         })
     return result
+
+
+# --- Why is the tab empty? ------------------------------------------------------------------------------------------------------
+_TOP_ANY = text("""
+    SELECT cn.username, 1 - (cn.embedding <=> :vec) AS similarity, lower(btrim(cn.username)) = ANY(:partners) AS has_partnership
+    FROM creator_niches cn WHERE cn.embedding IS NOT NULL
+    ORDER BY cn.embedding <=> :vec LIMIT 10
+""").bindparams(bindparam("vec", type_=Vector(1024)))
+
+
+def diagnose(db: Session, email: str) -> dict:
+    """Read-only counts that show where the Similar Creators list gets empty for the user with this email."""
+    from pipeline.db import CreatorProfile
+    partners = partnership_usernames(db)
+    niche_rows = db.query(CreatorNiche).all()
+    names = {(r.username or "").strip().casefold() for r in niche_rows}
+    out = {
+        "partnership_creators": len(partners),
+        "creator_niches_rows": len(niche_rows),
+        "creator_niches_with_embedding": sum(1 for r in niche_rows if r.embedding is not None),
+        "partnership_creators_with_a_creator_niches_row": len(partners & names),
+        "partnership_creators_with_an_embedding": len(partners & {(r.username or "").strip().casefold() for r in niche_rows if r.embedding is not None}),
+    }
+    user = db.query(CreatorProfile).filter(CreatorProfile.email == email.strip().lower()).first()
+    out["user_found"] = user is not None
+    out["user_has_embedding"] = bool(user is not None and user.embedding is not None)
+    if out["user_has_embedding"]:
+        top = db.execute(_TOP_ANY, {"vec": list(user.embedding), "partners": sorted(partners)}).all()
+        out["closest_creators_any"] = [{"username": r.username, "similarity": round(float(r.similarity) * 100, 1), "has_partnership": bool(r.has_partnership)} for r in top]
+    return out
+
+
+if __name__ == "__main__":   # python -m pipeline.similar_creators you@example.com
+    import json
+    import sys
+    from pipeline.db import SessionLocal
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: python -m pipeline.similar_creators <email of the MAVLIT user>")
+    with SessionLocal() as session:
+        print(json.dumps(diagnose(session, sys.argv[1]), indent=2))
