@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
 from api.creator_posts import ThumbnailTooLarge, _fetch_thumbnail
-from pipeline.db import CreatorProfile, get_db
-from pipeline.brand_intelligence import brand_stats
+from pipeline.db import BrandRaw, CreatorProfile, get_db
+from pipeline.brand_intelligence import brand_creators, brand_stats
 from pipeline.helpers.gpt_llm import LLMUnavailableError
 from pipeline.similar_creators import MIN_PARTNERSHIP_CONFIDENCE, SIMILARITY_THRESHOLD, audience_range, find_similar_creators, is_partnership_post_code, your_stats, user_query_embedding, user_query_text
 
@@ -80,3 +80,12 @@ def brand_intelligence(limit: int = Query(30, ge=1, le=100), db: Session = Depen
             "rank": m.rank, "confidence": m.confidence, **stats[m.brand_raw_id],
         } for m in matches],
     }
+
+
+@router.get("/brand-intelligence/{brand_id}/creators")
+def brand_intelligence_creators(brand_id: int, db: Session = Depends(get_db), user: CreatorProfile = Depends(get_current_user)):
+    """The unique creators a brand works with (the creators behind its partnership posts scored 90 or more), for the "View insights" window."""
+    brand = db.get(BrandRaw, brand_id)
+    if brand is None:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    return {"brand_raw_id": brand.id, "brand_name": brand.name or f"brand {brand.id}", "creators": brand_creators(db, brand.id)}

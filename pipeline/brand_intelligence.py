@@ -29,16 +29,16 @@ _POSTS = text("""
     WHERE t.brand_raw_id = ANY(:ids) AND t.sponsorship_confidence >= :min
 """)
 
-# followers (the biggest snapshot we hold) and the average likes and comments of each creator's posts
+# followers (the biggest snapshot we hold), the name, and the average likes and comments of each creator's posts
 _CREATORS = text("""
-    SELECT lower(btrim(username)) AS who, max(followers_count) AS followers,
+    SELECT lower(btrim(username)) AS who, max(followers_count) AS followers, max(full_name) AS full_name,
            avg(likes_count) FILTER (WHERE likes_count >= 0) AS avg_likes, avg(comments_count) FILTER (WHERE comments_count >= 0) AS avg_comments
     FROM instagram_users
     WHERE user_type != 'commenter' AND lower(btrim(username)) = ANY(:names)
     GROUP BY 1
 """)
 
-_STORED_RATES = text("SELECT lower(btrim(username)) AS who, engagement_rate FROM creator_niches WHERE engagement_rate IS NOT NULL AND lower(btrim(username)) = ANY(:names)")
+_STORED = text("SELECT lower(btrim(username)) AS who, engagement_rate, niche FROM creator_niches WHERE lower(btrim(username)) = ANY(:names)")
 
 
 def _post_key(url: str | None, fallback: int) -> str:
@@ -47,12 +47,9 @@ def _post_key(url: str | None, fallback: int) -> str:
     return f"code:{code}" if code else (re.sub(r"[/?#].*$|/$", "", (url or "").strip().lower()) or f"row:{fallback}")
 
 
-def brand_stats(db: Session, brand_ids: list[int], minimum: int = MIN_PARTNERSHIP_CONFIDENCE) -> dict[int, dict]:
-    """{brand_id: {partnerships, creators, min_followers, max_followers, formats [{name, pct}], avg_engagement}} for every id (zeros and None when there is nothing)."""
-    out = {b: {"partnerships": 0, "creators": 0, "min_followers": None, "max_followers": None, "formats": [], "avg_engagement": None} for b in brand_ids}
-    if not brand_ids:
-        return out
-    posts: dict[int, dict[str, dict]] = {b: {} for b in brand_ids}   # brand -> post key -> {kind, who: set}
+def _load(db: Session, brand_ids: list[int], minimum: int):
+    """The partnership posts of the brands (each post once, with the creators who made it) and what we know about those creators."""
+    posts: dict[int, dict[str, dict]] = {b: {} for b in brand_ids}   # brand -> post key -> {url, type, views, who: set}
     for index, row in enumerate(db.execute(_POSTS, {"ids": list(brand_ids), "min": minimum}).all()):
         entry = posts[row.brand_id].setdefault(_post_key(row.post_url, index), {"url": row.post_url, "type": row.post_type, "views": row.views, "who": set()})
         entry["type"] = entry["type"] or row.post_type
@@ -61,21 +58,32 @@ def brand_stats(db: Session, brand_ids: list[int], minimum: int = MIN_PARTNERSHI
             entry["who"].add(row.who)
     names = sorted({w for per in posts.values() for e in per.values() for w in e["who"]})
     creators = {r.who: r for r in db.execute(_CREATORS, {"names": names}).all()} if names else {}
-    stored = {r.who: r.engagement_rate for r in db.execute(_STORED_RATES, {"names": names}).all()} if names else {}
+    stored = {r.who: r for r in db.execute(_STORED, {"names": names}).all()} if names else {}
+    return posts, creators, stored
 
-    def rate(who: str) -> float | None:
-        if stored.get(who) is not None:
-            return float(stored[who])
-        c = creators.get(who)
-        return engagement_rate(c.avg_likes, c.avg_comments, c.followers) if c is not None else None
 
+def _rate(who: str, creators: dict, stored: dict) -> float | None:
+    """A creator's engagement rate: the one saved in creator_niches, else worked out from their likes, comments and followers."""
+    saved = stored.get(who)
+    if saved is not None and saved.engagement_rate is not None:
+        return float(saved.engagement_rate)
+    c = creators.get(who)
+    return engagement_rate(c.avg_likes, c.avg_comments, c.followers) if c is not None else None
+
+
+def brand_stats(db: Session, brand_ids: list[int], minimum: int = MIN_PARTNERSHIP_CONFIDENCE) -> dict[int, dict]:
+    """{brand_id: {partnerships, creators, min_followers, max_followers, formats [{name, pct}], avg_engagement}} for every id (zeros and None when there is nothing)."""
+    out = {b: {"partnerships": 0, "creators": 0, "min_followers": None, "max_followers": None, "formats": [], "avg_engagement": None} for b in brand_ids}
+    if not brand_ids:
+        return out
+    posts, creators, stored = _load(db, brand_ids, minimum)
     for brand_id, per in posts.items():
         entries = list(per.values())
         if not entries:
             continue
         who = sorted({w for e in entries for w in e["who"]})
         followers = [creators[w].followers for w in who if w in creators and creators[w].followers]
-        rates = [r for r in (rate(w) for w in who) if r is not None]
+        rates = [r for r in (_rate(w, creators, stored) for w in who) if r is not None]
         kinds: dict[str, int] = {}
         for e in entries:
             kind = post_kind(e["url"], e["type"], e["views"])
@@ -89,3 +97,23 @@ def brand_stats(db: Session, brand_ids: list[int], minimum: int = MIN_PARTNERSHI
             "avg_engagement": round(sum(rates) / len(rates), 1) if rates else None,
         }
     return out
+
+
+def brand_creators(db: Session, brand_id: int, limit: int = 50, minimum: int = MIN_PARTNERSHIP_CONFIDENCE) -> list[dict]:
+    """The unique creators behind a brand's partnership posts, the ones with the most posts first, then the biggest."""
+    posts, creators, stored = _load(db, [brand_id], minimum)
+    count: dict[str, int] = {}
+    for entry in posts[brand_id].values():
+        for who in entry["who"]:
+            count[who] = count.get(who, 0) + 1
+    rows = []
+    for who, n in count.items():
+        c = creators.get(who)
+        saved = stored.get(who)
+        rows.append({
+            "username": who, "full_name": c.full_name if c is not None else None, "profile_url": f"https://www.instagram.com/{who}",
+            "niche": saved.niche if saved is not None else None, "followers": c.followers if c is not None and c.followers else None,
+            "engagement_rate": _rate(who, creators, stored), "partnership_posts": n,
+        })
+    rows.sort(key=lambda r: (-r["partnership_posts"], -(r["followers"] or 0), r["username"]))
+    return rows[:limit]

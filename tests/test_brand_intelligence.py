@@ -84,6 +84,22 @@ class AgainstPostgres(unittest.TestCase):
         self.assertEqual(stats[2]["formats"], [{"name": "Post", "pct": 100}])
         self.assertEqual(self.stats([]), {})
 
+    def test_the_unique_creators_of_a_brand_most_posts_first(self):
+        from pipeline.brand_intelligence import brand_creators
+        with self.engine.begin() as conn:
+            conn.execute(text("INSERT INTO instagram_users (id, username, user_type, followers_count, full_name) VALUES (901, 'Alice', 'mention', 1200, 'Alice A')"))
+            conn.execute(text("INSERT INTO creator_niches (instagram_user_id, username, niche) VALUES (901, 'Alice', 'Beauty')"))
+        with self.Session() as db:
+            rows = brand_creators(db, 1)
+        self.assertEqual([r["username"] for r in rows], ["carol", "bob", "alice"])   # carol made 2 of the posts; then by followers
+        carol, bob, alice = rows
+        self.assertEqual((carol["partnership_posts"], carol["followers"], carol["engagement_rate"]), (2, 20000, 1.1))
+        self.assertEqual((bob["partnership_posts"], bob["followers"], bob["engagement_rate"]), (1, 50000, 1.1))
+        self.assertEqual((alice["followers"], alice["niche"], alice["full_name"], alice["profile_url"]), (1200, "Beauty", "Alice A", "https://www.instagram.com/alice"))
+        with self.Session() as db:
+            self.assertEqual(brand_creators(db, 3), [])                                  # a brand with no partnership posts
+            self.assertEqual(len(brand_creators(db, 1, limit=2)), 2)
+
     def test_the_endpoint_lists_the_matched_brands_best_first_with_the_numbers(self):
         from fastapi.testclient import TestClient
         import api.app as api_app
@@ -108,6 +124,9 @@ class AgainstPostgres(unittest.TestCase):
         self.assertEqual(client.get("/feed/brand-intelligence?limit=1").json()["brands"][0]["brand_name"], "Acme")
         self.assertEqual(len(client.get("/feed/brand-intelligence?limit=1").json()["brands"]), 1)
         self.assertEqual(client.get("/feed/brand-intelligence?limit=0").status_code, 422)
+        creators = client.get("/feed/brand-intelligence/1/creators").json()
+        self.assertEqual((creators["brand_name"], [c["username"] for c in creators["creators"]]), ("Acme", ["carol", "bob", "alice"]))
+        self.assertEqual(client.get("/feed/brand-intelligence/999/creators").status_code, 404)
 
 
 if __name__ == "__main__":
