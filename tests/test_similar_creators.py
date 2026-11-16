@@ -214,6 +214,9 @@ class AgainstPostgres(unittest.TestCase):
 
     def test_creators_get_average_reel_views_and_posts_per_week(self):
         found = {c["username"]: c for c in self.find(own_handle="me")}
+        # the summary of all their partnership posts (Acme x2 for alice: the brand-side post and a test-table one; nothing is known about brands' niches in this data)
+        self.assertEqual((found["Alice"]["unique_brands"], found["Alice"]["top_brand_categories"], found["Alice"]["top_formats"]), (1, [], ["Post", "Video"]))
+        self.assertEqual((found["carol"]["unique_brands"], found["carol"]["top_formats"]), (1, ["Reel"]))
         self.assertEqual((found["Alice"]["avg_reel_views"], found["Alice"]["posts_per_week"]), (2000, 1.0))   # views 1000 and 3000; 2 posts in 14 days
         # carol has no view counts on her own posts, so the average falls back to her partnership posts (the one with 900 views)
         self.assertEqual((found["carol"]["avg_reel_views"], found["carol"]["posts_per_week"]), (900, None))
@@ -222,13 +225,13 @@ class AgainstPostgres(unittest.TestCase):
         from pipeline.similar_creators import your_stats
         from pipeline.db import CreatorProfile
         with self.engine.begin() as conn:
-            conn.execute(text("""INSERT INTO creator_profiles (id, email, instagram_handle, instagram_followers, instagram_engagement_rate, brand_partnerships)
-                                 VALUES (1, 'u@example.test', 'me', 5000, 4.2, 3)"""))
-            conn.execute(text("""INSERT INTO creator_instagram_posts (creator_profile_id, instagram_handle, post_id, timestamp, video_view_count, video_play_count) VALUES
-                (1, 'me', 'a', '2026-06-10T10:00:00.000Z', 100, NULL), (1, 'me', 'b', '2026-06-01T10:00:00.000Z', NULL, 500), (1, 'me', 'c', '2026-04-01T10:00:00.000Z', NULL, NULL)"""))
+            conn.execute(text("""INSERT INTO creator_profiles (id, email, full_name, instagram_handle, instagram_followers, instagram_engagement_rate, brand_partnerships)
+                                 VALUES (1, 'u@example.test', 'Nova H', 'me', 5000, 4.2, 3)"""))
+            conn.execute(text("""INSERT INTO creator_instagram_posts (creator_profile_id, instagram_handle, post_id, timestamp, video_view_count, video_play_count, likes_count, comments_count) VALUES
+                (1, 'me', 'a', '2026-06-10T10:00:00.000Z', 100, NULL, 200, 20), (1, 'me', 'b', '2026-06-01T10:00:00.000Z', NULL, 500, 100, 10), (1, 'me', 'c', '2026-04-01T10:00:00.000Z', NULL, NULL, -1, -1)"""))
         with self.Session() as db:
             stats = your_stats(db, db.get(CreatorProfile, 1))
-        self.assertEqual(stats, {"handle": "me", "followers": 5000, "engagement_rate": 4.2, "avg_reel_views": 300, "posts_per_week": 1.0, "brand_partnerships": 3,
+        self.assertEqual(stats, {"name": "Nova H", "handle": "me", "avg_likes": 150, "avg_comments": 15, "followers": 5000, "engagement_rate": 4.2, "avg_reel_views": 300, "posts_per_week": 1.0, "brand_partnerships": 3,
                                  "product_focused_pct": None, "content_categories": None})   # 2 of 3 posts in the 14 days; the content mix is not generated yet
         # without a typed count, the posts the user marked as paid partnerships are counted; with none marked there is no number
         with self.engine.begin() as conn:

@@ -283,15 +283,34 @@ _CREATOR_POSTS = text("""
 """)
 
 _YOUR_POSTS = text("""
-    SELECT timestamp, coalesce(video_view_count, video_play_count) AS views, partnership_post FROM creator_instagram_posts WHERE creator_profile_id = :id
+    SELECT timestamp, coalesce(video_view_count, video_play_count) AS views, partnership_post,
+           CASE WHEN likes_count >= 0 THEN likes_count END AS likes, CASE WHEN comments_count >= 0 THEN comments_count END AS comments
+    FROM creator_instagram_posts WHERE creator_profile_id = :id
 """)
+
+
+def _top(values, n: int = 2) -> list[str]:
+    """The n most common non-empty values, most common first (ties alphabetical)."""
+    counts: dict[str, int] = {}
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            counts[value.strip()] = counts.get(value.strip(), 0) + 1
+    return [k for k, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:n]]
+
+
+def _average(values) -> int | None:
+    numbers = [v for v in values if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0]
+    return round(sum(numbers) / len(numbers)) if numbers else None
 
 
 def your_stats(db: Session, user) -> dict:
     """The signed-in user's numbers for "Why Them, Not Me?": from the user's own saved posts (creator_instagram_posts) and profile."""
     rows = db.execute(_YOUR_POSTS, {"id": user.id}).all()
     return {
+        "name": user.full_name,
         "handle": user.instagram_handle,
+        "avg_likes": _average([r.likes for r in rows]),
+        "avg_comments": _average([r.comments for r in rows]),
         "followers": user.instagram_followers or user.follower_count,
         "engagement_rate": user.instagram_engagement_rate,
         "avg_reel_views": average_views([r.views for r in rows]),
@@ -347,7 +366,8 @@ def find_similar_creators(
         avg_likes, avg_comments = engagement.get(who, (None, None))
         followers = user.followers_count if user else None
         # one post's engagement: its likes + comments over the creator's followers
-        shown = [{**p, "engagement": engagement_rate(p["likes"], p["comments"], followers)} for p in partnerships.get(who, [])]
+        everything = partnerships.get(who, [])
+        shown = [{**p, "engagement": engagement_rate(p["likes"], p["comments"], followers)} for p in everything]
         result.append({
             "username": r.username.strip(),
             "full_name": user.full_name if user else None,
@@ -367,6 +387,10 @@ def find_similar_creators(
             "posts_per_week": posts_per_week([p.post_timestamp for p in posts.get(who, [])]),
             "similarity": round(float(r.similarity) * 100),
             "partnership_count": len(shown),
+            # over all of the creator's partnership posts, not only the ones listed
+            "unique_brands": len({p["brand"] for p in everything if p["brand"]}),
+            "top_brand_categories": _top(p["category"] for p in everything),
+            "top_formats": _top(p["type"] for p in everything),
             "partnerships": shown[:MAX_PARTNERSHIPS_SHOWN],
         })
     return result
