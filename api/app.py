@@ -32,6 +32,7 @@ from api.advisory import router as advisory_router
 from api.early_access import router as early_access_router
 from api.invites import router as invites_router
 from api.usage_api import router as usage_api_router
+from api.feed_api import router as feed_api_router
 from api.password_reset import router as password_reset_router
 from api.auth import (
     get_completed_user,
@@ -193,6 +194,7 @@ async def _pool_exhausted(request: Request, exc: PoolTimeoutError):
 
 
 app.include_router(auth_router)
+app.include_router(feed_api_router)
 app.include_router(brands_router)
 app.include_router(saved_brands_router)
 app.include_router(pitches_router)

@@ -168,6 +168,13 @@ Authentication is email/password plus a seven-day, HttpOnly JWT cookie. The fron
 - **Response:** `200` `{ "niches": ["strength training", "streetwear"] }`.
 - **Frontend:** none in this backend; the main app's profile page (app.mavlit.com/creator-profile) uses it.
 
+#### `GET /feed/similar-creators`
+
+- **Purpose:** The Feed's "Similar Creators" tab. Creators with a confirmed partnership (a score of 90 or more in `instagram_posts` or `test_creator_brand_partnership_posts`, not commenters) whose embedding is at least 70% cosine-similar to the signed-in creator's own profile embedding. The creator's own Instagram handle is never returned. At most 60, most similar first.
+- **Auth:** Signed-in creator.
+- **Response:** `200` `{ "ready": true, "threshold": 70, "min_partnership_score": 90, "creators": [{ "username", "full_name", "profile_url", "niche", "description", "tags", "country", "followers", "similarity", "partnership_count", "partnerships": [{ "brand", "post_url", "date", "confidence" }] }] }`. `ready: false` with an empty list when the user's profile has no embedding yet.
+- **Data:** the creators' descriptions and embeddings are made by `python pipeline/enrichment/creator_niches.py` (only for creators with such a partnership).
+
 #### `GET /brand-niches`
 
 - **Purpose:** Return distinct primary niche values supplied through `content_creator_re.niche`. These values feed the creator profile picker and matching hard filter.

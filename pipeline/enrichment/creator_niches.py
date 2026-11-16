@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from pipeline.db import CreatorNiche, InstagramUser, Prompt, BatchSessionLocal
 from pipeline.helpers.gpt_llm import LLMUnavailableError, call_gpt_json, fill_template
+from pipeline.similar_creators import embed_pending_creators, partnership_usernames
 from pipeline.helpers.prompts import (
     CREATOR_NICHE_DESCRIPTION_DEFAULT_PROMPT,
     CREATOR_NICHE_DESCRIPTION_PROMPT_NAME,
@@ -127,7 +128,11 @@ def run_creator_niches(
     retries: int = _DEFAULT_RETRIES,
     instagram_user_id: int | None = None,
 ) -> int:
-    """Generate missing profiles without modifying existing output rows."""
+    """
+    Generate missing profiles without modifying existing output rows, and embed them. Only creators with a partnership
+    scored 90 or more (instagram_posts or test_creator_brand_partnership_posts) are processed - see pipeline/similar_creators.py.
+    """
+    partners = partnership_usernames(db)
     eligible = db.query(InstagramUser).filter(
         InstagramUser.user_type != "commenter",
         InstagramUser.niche.isnot(None),
@@ -145,7 +150,7 @@ def run_creator_niches(
         eligible = eligible.filter(
             func.lower(func.trim(InstagramUser.username)) == username_key,
         )
-    eligible = eligible.order_by(InstagramUser.id.asc()).all()
+    eligible = [r for r in eligible.order_by(InstagramUser.id.asc()).all() if r.username.strip().casefold() in partners]
     contexts = _build_context(eligible)
     processed_usernames = {
         username.strip().casefold()
@@ -199,6 +204,7 @@ def run_creator_niches(
                 db.rollback()
                 logger.exception("Creator niche: failed to insert batch starting at %d", batch_start)
     logger.info("Creator niche: created=%d", created)
+    embed_pending_creators(db, partners)   # also the rows made by an earlier run that were never embedded
     return created
 
 
