@@ -241,6 +241,15 @@ def is_partnership_post_code(db: Session, code: str, minimum: int = MIN_PARTNERS
     return db.execute(_IS_PARTNERSHIP_POST, {"min": minimum, "slash_code": f"/{code}"}).first() is not None
 
 
+def peer_averages(creators: list[dict]) -> dict:
+    """What the peers average, for Market Insights. Each number is the average over the peers that have it (None when none does)."""
+    def mean(key: str, digits: int | None = None):
+        values = [c[key] for c in creators if c.get(key) is not None]
+        return None if not values else (round(sum(values) / len(values)) if digits is None else round(sum(values) / len(values), digits))
+    return {"avg_followers": mean("followers"), "avg_engagement": mean("engagement_rate", 1), "avg_reel_views": mean("avg_reel_views"),
+            "avg_posts_per_week": mean("posts_per_week", 1), "avg_partnerships": mean("partnership_count", 1)}
+
+
 POSTING_WINDOW_DAYS = 14
 
 

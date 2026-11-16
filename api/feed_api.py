@@ -6,21 +6,16 @@ from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
 from api.creator_posts import ThumbnailTooLarge, _fetch_thumbnail
-from pipeline.db import BrandRaw, CreatorProfile, get_db
+from pipeline.db import BrandRaw, CreatorProfile, Pitch, get_db
 from pipeline.brand_intelligence import brand_creators, brand_stats
 from pipeline.helpers.gpt_llm import LLMUnavailableError
-from pipeline.similar_creators import MIN_PARTNERSHIP_CONFIDENCE, SIMILARITY_THRESHOLD, audience_range, find_similar_creators, is_partnership_post_code, your_stats, user_query_embedding, user_query_text
+from pipeline.similar_creators import DEFAULT_LIMIT, MIN_PARTNERSHIP_CONFIDENCE, SIMILARITY_THRESHOLD, audience_range, find_similar_creators, peer_averages, is_partnership_post_code, your_stats, user_query_embedding, user_query_text
 
 router = APIRouter(prefix="/feed", tags=["feed"])
 
 
-@router.get("/similar-creators")
-def similar_creators(same_audience: bool = Query(False), db: Session = Depends(get_db), user: CreatorProfile = Depends(get_current_user)):
-    """
-    Creators with a confirmed partnership (score >= 90) whose profile is at least 70 % similar to the signed-in creator's own profile (compared in the creators' own Niche / Description / Tags format).
-    ?same_audience=true is a hard filter on the follower count: only creators with between a third of the user's followers and twice as many.
-    {"ready": false} when the user's profile has no niche and no description yet, so the page can say so instead of showing nothing.
-    """
+def _similar(db: Session, user: CreatorProfile, same_audience: bool, limit: int) -> dict:
+    """The Similar Creators answer: the numbers about the user, and the creators (see similar_creators())."""
     followers = user.instagram_followers or user.follower_count
     span = audience_range(followers)
     base = {"threshold": round(SIMILARITY_THRESHOLD * 100), "min_partnership_score": MIN_PARTNERSHIP_CONFIDENCE,
@@ -37,7 +32,44 @@ def similar_creators(same_audience: bool = Query(False), db: Session = Depends(g
     if vector is None:
         raise HTTPException(status_code=503, detail="Similar creators are not available right now. Please try again in a few minutes.")
     return {**base, "ready": True,
-            "creators": find_similar_creators(db, vector, own_handle=user.instagram_handle, followers_range=span if same_audience else None)}
+            "creators": find_similar_creators(db, vector, own_handle=user.instagram_handle, followers_range=span if same_audience else None, limit=limit)}
+
+
+@router.get("/similar-creators")
+def similar_creators(same_audience: bool = Query(False), db: Session = Depends(get_db), user: CreatorProfile = Depends(get_current_user)):
+    """
+    Creators with a confirmed partnership (score >= 90) whose profile is at least 70 % similar to the signed-in creator's own profile (compared in the creators' own Niche / Description / Tags format).
+    ?same_audience=true is a hard filter on the follower count: only creators with between a third of the user's followers and twice as many.
+    {"ready": false} when the user's profile has no niche and no description yet, so the page can say so instead of showing nothing.
+    """
+    return _similar(db, user, same_audience, DEFAULT_LIMIT)
+
+
+MARKET_PEERS = 5          # Market Insights compares you with your five most similar creators of the same audience size
+MARKET_MISSED_BRANDS = 4  # and lists the four best matched brands you have not made a pitch for
+
+
+@router.get("/market-insights")
+def market_insights(db: Session = Depends(get_db), user: CreatorProfile = Depends(get_current_user)):
+    """
+    The Feed's Market Insights tab. Peers = the five most similar creators among those with the same audience size as the user (a third to twice the
+    user's followers); their averages are what the user is compared with. Missed brands = the user's four best matched brands (Matches v3, the Brand Matches
+    page's list) that the user has not generated a pitch for. {"ready": false} when the profile has no niche and no description yet.
+    """
+    similar = _similar(db, user, True, MARKET_PEERS)
+    creators = similar["creators"]
+    pitched = {row[0] for row in db.query(Pitch.brand_raw_id).filter(Pitch.creator_profile_id == user.id, Pitch.brand_raw_id.isnot(None), Pitch.is_manual.is_(False)).all()}
+    from api.app import _ai_matches_response   # the Brand Matches page's own loader (api.app imports this module)
+    ranked = _ai_matches_response(db, user.id, "v3")
+    missed = [m for m in ranked.matches if m.brand_raw_id not in pitched][:MARKET_MISSED_BRANDS]
+    stats = brand_stats(db, [m.brand_raw_id for m in missed])
+    return {
+        "ready": similar["ready"], "you": similar["you"], "audience_range": similar["audience_range"], "threshold": similar["threshold"],
+        "peers": {"count": len(creators), **peer_averages(creators),
+                  "creators": [{"username": c["username"], "similarity": c["similarity"], "followers": c["followers"]} for c in creators]},
+        "missed_brands": [{"brand_raw_id": m.brand_raw_id, "brand_name": m.brand_name, "niche": m.niche, "website": m.website,
+                           "rank": m.rank, "confidence": m.confidence, "partnerships": stats[m.brand_raw_id]["partnerships"]} for m in missed],
+    }
 
 
 _CODE = re.compile(r"^[A-Za-z0-9_-]{5,40}$")
